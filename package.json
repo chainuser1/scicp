@@ -9,7 +9,7 @@
   "description": "A high-performance, web-based scripture projection engine.",
   "main": "index.js",
   "scripts": {
-    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend",
+    "dev": "npm run dev --workspace=backend  --port=3020 && npm run dev --workspace=frontend",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "start": "npm start --workspace=backend"
   },
