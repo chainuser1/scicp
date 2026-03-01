@@ -385,12 +385,15 @@ io.on('connection', (socket) => {
 
 const start = async () => {
   try {
-    await fastify.listen({ port: 3000 })
+    const port = process.env.PORT || 3000
+    await fastify.listen({ port, host: '0.0.0.0' })
+    console.log(`Server running on ${port}`)
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
   }
 }
+
 
 // only start the server if the file is run directly; this makes the module importable for tests
 if (require.main === module) {
