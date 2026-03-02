@@ -361,6 +361,11 @@ io.on('connection', (socket) => {
     io.emit('update-theme', theme);
   });
 
+  socket.on('highlight-text', (text) => {
+    console.log('highlighting text:', text);
+    io.emit('highlight-text', text);
+  });
+
   socket.on('go-live', ({verse, theme}) => {
     console.log('go-live triggered', verse, theme);
     
@@ -385,7 +390,7 @@ io.on('connection', (socket) => {
 
 const start = async () => {
   try {
-    const port = process.env.PORT || 3000
+    const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
     await fastify.listen({ port, host: '0.0.0.0' })
     console.log(`Server running on ${port}`)
   } catch (err) {
