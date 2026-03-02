@@ -250,8 +250,8 @@ function expandBookName(bookRef) {
   return BOOK_ABBREVIATIONS[lowerRef] || bookRef;
 }
 
-// Function to segment verse text into readable chunks (max 30 words per segment)
-function segmentVerseText(text, wordsPerSegment = 30) {
+// Function to segment verse text into readable chunks (max 32 words per segment)
+function segmentVerseText(text, wordsPerSegment = 32) {
   if (!text) return [];
   
   const words = text.split(/\s+/).filter(w => w.length > 0);
