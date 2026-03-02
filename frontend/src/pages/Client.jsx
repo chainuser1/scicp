@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 
 function Client() {
@@ -17,84 +17,94 @@ function Client() {
   });
   const [animating, setAnimating] = useState(false);
   const [highlightedText, setHighlightedText] = useState('');
+  // Key forces re-mount of label element → re-triggers arrival animation on verse change
+  const [labelKey, setLabelKey] = useState(0);
 
   useEffect(() => {
     const handleVerse = (data) => {
       setAnimating(true);
       setTimeout(() => {
         setVerse(data);
+        setLabelKey((k) => k + 1);
         setAnimating(false);
-      }, 500);
+      }, 600);
     };
+
     const handleTheme = (theme) => {
       setAnimating(true);
       setTimeout(() => {
         setVerse((v) => ({ ...v, theme }));
         setAnimating(false);
-      }, 500);
+      }, 600);
+    };
+
+    const handleHighlight = (text) => {
+      setHighlightedText(text ? text.trim() : '');
     };
 
     socket.on('update-verse', handleVerse);
     socket.on('update-theme', handleTheme);
-    socket.on('highlight-text', (text) => {
-      const trimmed = text ? text.trim() : '';
-      console.log('Received highlighted text (raw):', text, 'trimmed:', trimmed);
-      setHighlightedText(trimmed);
-    });
+    socket.on('highlight-text', handleHighlight);
 
     return () => {
       socket.off('update-verse', handleVerse);
       socket.off('update-theme', handleTheme);
-      socket.off('highlight-text');
+      socket.off('highlight-text', handleHighlight);
     };
   }, []);
 
-  // Determine what text to display (segment or full text)
+  // Determine display text (segment or full)
   const displayText = verse.segments && verse.segments.length > 0
     ? verse.segments[verse.currentSegment] || verse.scripture_text
     : verse.scripture_text;
 
   const hasMoreSegments = verse.segments && verse.currentSegment < verse.segments.length - 1;
 
-  // Render text with highlighting
+  // Render text with highlight spans (each highlighted word re-mounts → re-triggers animation)
   const renderHighlightedText = () => {
     if (!highlightedText) return displayText;
-    const parts = displayText.split(new RegExp(`(${highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-    return parts.map((part, idx) => 
-      part.toLowerCase() === highlightedText.toLowerCase() 
-        ? <span key={idx} className="highlight-yellow">{part}</span>
+    const escaped = highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = displayText.split(new RegExp(`(${escaped})`, 'gi'));
+    return parts.map((part, idx) =>
+      part.toLowerCase() === highlightedText.toLowerCase()
+        ? <span key={`hl-${idx}-${highlightedText}`} className="highlight-yellow">{part}</span>
         : part
     );
   };
 
+  // Responsive font sizing
   const base = parseFloat(verse.theme?.font_size) || 4;
   const length = displayText.length;
   let calculated = base - length / 100;
   if (calculated < 1.5) calculated = 1.5;
   const computedFontSize = `${calculated}rem`;
 
-  // debug: log when displayText or highlight changes
-  useEffect(() => {
-    console.log('Client displayText:', displayText);
-    console.log('Client highlightedText:', highlightedText);
-  }, [displayText, highlightedText]);
-
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,
-    fontFamily: verse.theme?.font_family,
+    fontFamily: "'Cormorant Garamond', Georgia, serif",
     fontSize: computedFontSize,
   };
 
   return (
     <div
-      className={`client-view ${verse.theme?.layout} ${animating ? 'fade' : ''}`}
+      className={`client-view ${verse.theme?.layout || 'centered'} ${animating ? 'fade' : ''}`}
       style={themeStyles}
     >
-      <span className="verse-title-top-left">{verse.verse_title}</span>
+      {/* Verse reference — Cinzel label, re-animates on each verse change */}
+      {verse.verse_title && (
+        <span key={labelKey} className="verse-title-top-left">
+          {verse.verse_title}
+        </span>
+      )}
+
       <div className="verse-content">
-        <p>{renderHighlightedText()}</p>
-        {/* Show "cont" indicator if more segments exist */}
-        {hasMoreSegments && <div className="cont-indicator">cont...</div>}
+        {/* Frosted backdrop wraps the scripture text */}
+        <div className="verse-backdrop">
+          <p>{renderHighlightedText()}</p>
+          {hasMoreSegments && (
+            <div className="cont-indicator">continues ›</div>
+          )}
+        </div>
       </div>
     </div>
   );

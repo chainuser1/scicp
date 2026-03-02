@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 
-// API URL for backend endpoints (mirrors socket URL logic)
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
 const themes = {
@@ -19,32 +18,35 @@ const themes = {
   }
 };
 
+/* ─── Emblem SVG (small, for header) ─── */
+const EmblemSVG = ({ size = 32 }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="16" cy="16" r="15" stroke="#c9a84c" strokeWidth="0.8" strokeDasharray="3 2" />
+    <rect x="14.5" y="5" width="3" height="22" rx="0.5" fill="#c9a84c" />
+    <rect x="6" y="11" width="20" height="3" rx="0.5" fill="#c9a84c" />
+    <circle cx="16" cy="16" r="2" fill="#e8c97a" />
+  </svg>
+);
+
 function Presenter() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [currentTheme, setCurrentTheme] = useState(themes.light);
   const [history, setHistory] = useState([]);
-  const [staged, setStaged] = useState(null);            // verse waiting to go live
-  const [liveVerse, setLiveVerse] = useState(null);      // currently live verse
-  const [savedThemes, setSavedThemes] = useState([]);    // themes loaded from server
-  const [newThemeName, setNewThemeName] = useState('');  // input for saving themes
-  const [bgUrlInput, setBgUrlInput] = useState('');      // custom background URL
-  const [currentSegment, setCurrentSegment] = useState(0); // track segment for current verse
-
+  const [staged, setStaged] = useState(null);
+  const [liveVerse, setLiveVerse] = useState(null);
+  const [savedThemes, setSavedThemes] = useState([]);
+  const [newThemeName, setNewThemeName] = useState('');
+  const [bgUrlInput, setBgUrlInput] = useState('');
+  const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
 
   useEffect(() => {
-    socket.on('search-results', (data) => {
-      setResults(data);
-    });
-
-    // Listen for verse updates (which include segments from backend)
+    socket.on('search-results', (data) => setResults(data));
     socket.on('update-verse', (data) => {
       setLiveVerse(data);
       setCurrentSegment(data.currentSegment || 0);
     });
-
-    // load persisted themes from backend
     fetch(`${API_URL}/themes`)
       .then((res) => res.json())
       .then((list) => setSavedThemes(list))
@@ -56,12 +58,9 @@ function Presenter() {
     };
   }, []);
 
-  // keep staged verse theme in sync when the presenter changes themes
   const handleThemeChange = (theme) => {
     setCurrentTheme(theme);
-    if (staged) {
-      setStaged((prev) => ({ ...prev, theme }));
-    }
+    if (staged) setStaged((prev) => ({ ...prev, theme }));
     socket.emit('update-theme', theme);
   };
 
@@ -71,10 +70,7 @@ function Presenter() {
   };
 
   const handleSearchKeyDown = (e) => {
-    if (e.key === 'Enter' && results.length > 0) {
-      // Go directly live with first result (skip staging)
-      goLiveDirectly(results[0]);
-    }
+    if (e.key === 'Enter' && results.length > 0) goLiveDirectly(results[0]);
   };
 
   const handleSelectVerse = (verse) => {
@@ -83,7 +79,6 @@ function Presenter() {
   };
 
   const goLiveDirectly = (verse) => {
-    // Skip staging and go directly live
     const verseWithTheme = { ...verse, theme: currentTheme };
     socket.emit('go-live', { verse: verseWithTheme, theme: verseWithTheme.theme });
     setLiveVerse(verseWithTheme);
@@ -95,7 +90,7 @@ function Presenter() {
     if (!staged) return;
     socket.emit('go-live', { verse: staged, theme: staged.theme });
     setLiveVerse(staged);
-    setCurrentSegment(0); // reset to first segment
+    setCurrentSegment(0);
     setHistory([staged, ...history.slice(0, 4)]);
     setStaged(null);
   };
@@ -124,13 +119,11 @@ function Presenter() {
       const data = await res.json();
       const verseWithTheme = { ...data, theme: currentTheme };
       if (staged) {
-        // if staging, update staged verse
         setStaged(verseWithTheme);
       } else {
-        // if no staging, go live immediately with the adjacent verse
         socket.emit('go-live', { verse: verseWithTheme, theme: verseWithTheme.theme });
         setLiveVerse(verseWithTheme);
-        setCurrentSegment(0); // reset to first segment
+        setCurrentSegment(0);
         setHistory([verseWithTheme, ...history.slice(0, 4)]);
       }
     } catch (err) {
@@ -141,17 +134,12 @@ function Presenter() {
   const handlePreviewTextSelection = () => {
     const selection = window.getSelection();
     if (!selection) return;
-    let selectedText = selection.toString();
+    const selectedText = selection.toString().trim();
     if (!selectedText) return;
-    selectedText = selectedText.trim();
-    if (!selectedText) return; // nothing but whitespace selected
-
-    console.log('Emitting highlighted text:', selectedText); // Log emitted text
     setHighlightedText(selectedText);
-    socket.emit('highlight-text', selectedText); // Emit highlighted text to the client
+    socket.emit('highlight-text', selectedText);
   };
 
-  // similar to client rendering: wrap any highlighted substring in a span
   const renderPreviewText = () => {
     if (!liveVerse) return '';
     const text = liveVerse.segments && liveVerse.segments.length > 0
@@ -166,22 +154,36 @@ function Presenter() {
     );
   };
 
-
   return (
     <div className="presenter-container">
+      {/* ── Header ── */}
       <header className="presenter-header">
-        <h1>Scripture Presenter</h1>
-        <p>Control what appears on the screen</p>
+        <div className="presenter-header-left">
+          <EmblemSVG size={30} />
+          <div>
+            <h1>Scripture Presenter</h1>
+            <p>Projection control console</p>
+          </div>
+        </div>
+        {liveVerse && (
+          <div className="live-badge">
+            <span className="live-badge-dot" />
+            Live
+          </div>
+        )}
       </header>
 
       <div className="presenter-layout">
-        {/* Left sidebar: search and results */}
+        {/* ── Left: Search ── */}
         <div className="presenter-panel search-panel">
-          <h2>Search Scripture</h2>
+          <h2 className="panel-heading">
+            <span className="panel-heading-icon">🔍</span>
+            Search Scripture
+          </h2>
           <input
             type="text"
             className="search-input"
-            placeholder="e.g., John 3:16 or 'love' (press Enter for first result)"
+            placeholder="e.g., John 3:16 or 'faith' …"
             value={query}
             onChange={handleSearch}
             onKeyDown={handleSearchKeyDown}
@@ -201,114 +203,95 @@ function Presenter() {
                 ))}
               </ul>
             ) : (
-              <div className="empty-state">Search for a verse to get started...</div>
+              <div className="empty-state">
+                Search for a verse<br />to begin…
+              </div>
             )}
           </div>
         </div>
 
-        {/* Middle/main area: staging and theme controls */}
-        <div className="presenter-panel main-panel">
-          {/* Always-visible navigation controls */}
+        {/* ── Center: Controls ── */}
+        <div className="main-panel">
+          {/* Now Playing */}
           {liveVerse && (
             <div className="navigation-section">
-              <h3 className="nav-label">
-                Now Playing: {liveVerse.verse_title}
+              <p className="nav-label">
+                <span>Now Live</span>
+                <span className="nav-label-verse">{liveVerse.verse_title}</span>
                 {liveVerse.segments && liveVerse.segments.length > 1 && (
-                  <span className="segmented-badge">SEGMENTED</span>
+                  <span className="segmented-badge">Segmented</span>
                 )}
-              </h3>
-              
+              </p>
               <div className="nav-controls">
-                <button
-                  className="persistent-nav-button"
-                  onClick={() => fetchAdjacent('prev')}
-                  title="Go to previous verse"
-                >
-                  ← Prev Verse
+                <button className="persistent-nav-button" onClick={() => fetchAdjacent('prev')}>
+                  ← Prev
                 </button>
                 <button
                   className="segment-nav-button"
                   onClick={() => handleSegmentNavigation('prev')}
                   disabled={!liveVerse.segments || liveVerse.segments.length === 1 || currentSegment === 0}
-                  title={liveVerse.segments && liveVerse.segments.length > 1 ? "Previous segment" : "No segments"}
                 >
                   ◀
                 </button>
                 <span className="segment-counter">
-                  {liveVerse.segments ? `${currentSegment + 1}/${liveVerse.segments.length}` : "1/1"}
+                  {liveVerse.segments ? `${currentSegment + 1}/${liveVerse.segments.length}` : '1/1'}
                 </span>
                 <button
                   className="segment-nav-button"
                   onClick={() => handleSegmentNavigation('next')}
                   disabled={!liveVerse.segments || liveVerse.segments.length === 1 || currentSegment === liveVerse.segments.length - 1}
-                  title={liveVerse.segments && liveVerse.segments.length > 1 ? "Next segment" : "No segments"}
                 >
                   ▶
                 </button>
-                <button
-                  className="persistent-nav-button"
-                  onClick={() => fetchAdjacent('next')}
-                  title="Go to next verse"
-                >
-                  Next Verse →
+                <button className="persistent-nav-button" onClick={() => fetchAdjacent('next')}>
+                  Next →
                 </button>
               </div>
             </div>
           )}
 
-          {/* Staging area */}
+          {/* Staging */}
           {staged ? (
             <div className="staged-section">
-              <h2>Now Staging</h2>
+              <h2 className="panel-heading">
+                <span className="panel-heading-icon">⏳</span>
+                Staged
+              </h2>
               <div className="staged-verse-display">
                 <h3 className="staged-title">{staged.verse_title}</h3>
                 <p className="staged-text">{staged.scripture_text}</p>
               </div>
               <div className="staging-controls">
-                <button
-                  className="nav-button"
-                  onClick={() => fetchAdjacent('prev')}
-                  title="Previous verse in chapter"
-                >
-                  ← Previous
-                </button>
-                <button
-                  className="nav-button"
-                  onClick={() => fetchAdjacent('next')}
-                  title="Next verse in chapter"
-                >
-                  Next →
-                </button>
+                <button className="nav-button" onClick={() => fetchAdjacent('prev')}>← Previous</button>
+                <button className="nav-button" onClick={() => fetchAdjacent('next')}>Next →</button>
               </div>
               <button className="go-live-button" onClick={goLive}>
-                🔴 Go Live
+                ● Go Live
               </button>
             </div>
           ) : !liveVerse ? (
             <div className="staged-section empty">
-              <p className="empty-state">Select a verse to stage it here</p>
+              <p className="empty-state">Select a verse from the search panel to stage it here</p>
             </div>
           ) : null}
 
-          {/* Preview/Monitor section - shows what client sees */}
+          {/* Client Preview */}
           {liveVerse && (
             <div className="preview-section">
-              <h2>Client Preview</h2>
+              <h2>Client Preview — select text to highlight</h2>
               <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
                 <div className="preview-title">{liveVerse.verse_title}</div>
-                <div className="preview-text">
-                  {renderPreviewText()}
-                </div>
+                <div className="preview-text">{renderPreviewText()}</div>
                 {liveVerse.segments && currentSegment < liveVerse.segments.length - 1 && (
-                  <div className="preview-cont">cont...</div>
+                  <div className="preview-cont">cont…</div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Theme controls */}
+          {/* Theme Controls */}
           <div className="theme-section">
-            <h2>Theme & Display</h2>
+            <h2>Theme &amp; Display</h2>
             <div className="theme-buttons">
               <button
                 className={`theme-btn ${currentTheme === themes.light ? 'active' : ''}`}
@@ -334,7 +317,6 @@ function Presenter() {
               ))}
             </div>
 
-            {/* Background image input */}
             <div className="theme-control-group">
               <label htmlFor="bg-url">Custom Background URL</label>
               <div className="input-group">
@@ -359,7 +341,6 @@ function Presenter() {
               </div>
             </div>
 
-            {/* Save theme */}
             <div className="theme-control-group">
               <label htmlFor="theme-name">Save Current Theme</label>
               <div className="input-group">
@@ -394,18 +375,19 @@ function Presenter() {
           </div>
         </div>
 
-        {/* Right sidebar: history */}
+        {/* ── Right: History ── */}
         <div className="presenter-panel history-panel">
-          <h2>Recent</h2>
+          <h2 className="panel-heading">
+            <span className="panel-heading-icon">📜</span>
+            Recent
+          </h2>
           {history.length > 0 ? (
             <ul className="history-list">
               {history.map((verse, index) => (
                 <li
                   key={index}
                   className="history-item"
-                  onClick={() => {
-                    setStaged(verse);
-                  }}
+                  onClick={() => setStaged(verse)}
                   title="Click to re-stage"
                 >
                   <span className="history-ref">{verse.verse_title}</span>
@@ -413,7 +395,7 @@ function Presenter() {
               ))}
             </ul>
           ) : (
-            <div className="empty-state">Verses you display will appear here</div>
+            <div className="empty-state">Verses you display<br />will appear here</div>
           )}
         </div>
       </div>
@@ -422,4 +404,3 @@ function Presenter() {
 }
 
 export default Presenter;
-
