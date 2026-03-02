@@ -84,6 +84,45 @@ try {
   fastify.log.error('failed to ensure themes table', err);
 }
 
+// Create an FTS5 virtual table for fast, relevance-aware scripture search
+try {
+  // Create FTS5 virtual table (simplified structure)
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS scriptures_fts USING fts5(
+      verse_id UNINDEXED,
+      scripture_text,
+      verse_title,
+      book_title,
+      chapter_number UNINDEXED,
+      verse_number UNINDEXED
+    )
+  `);
+  fastify.log.info('FTS5 virtual table created');
+
+  // Populate FTS table if empty
+  const ftsCount = db.prepare('SELECT count(*) as c FROM scriptures_fts').get();
+  fastify.log.info(`FTS5 table has ${ftsCount.c} verses`);
+  
+  if (!ftsCount || ftsCount.c === 0) {
+    fastify.log.info('Populating FTS5 table from verses...');
+    const insertStmt = db.prepare(`
+      INSERT INTO scriptures_fts(verse_id, scripture_text, verse_title, book_title, chapter_number, verse_number)
+      SELECT verses.id, verses.scripture_text, 
+             (books.book_title || ' ' || chapters.chapter_number || ':' || verses.verse_number),
+             books.book_title,
+             chapters.chapter_number,
+             verses.verse_number
+      FROM verses
+      JOIN chapters ON chapters.id = verses.chapter_id
+      JOIN books ON books.id = chapters.book_id
+    `);
+    const result = insertStmt.run();
+    fastify.log.info(`FTS5 table populated with ${result.changes} verses`);
+  }
+} catch (err) {
+  fastify.log.error('FTS5 setup failed:', err && err.message ? err.message : err);
+}
+
 
 // Map of book abbreviations to full names (LDS scriptures)
 const BOOK_ABBREVIATIONS = {
@@ -243,24 +282,76 @@ function parseScriptureReference(str) {
     return { book, chapter, verse };
 }
 
+// Build a safe FTS5 MATCH query from user input.
+// - quoted phrase ("...") is searched as an exact phrase
+// - otherwise split into tokens and require all tokens (AND)
+const buildFTSMatchQuery = (input) => {
+  if (!input) return '';
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  const quoted = trimmed.match(/^"(.+)"$/);
+  if (quoted) {
+    // escape double quotes inside phrase
+    return `"${quoted[1].replace(/"/g, '""')}"`;
+  }
+  const terms = trimmed.split(/\s+/).map(t => t.replace(/["']/g, ''))
+    .filter(Boolean);
+  if (terms.length === 0) return '';
+  // Require all terms with AND for better precision
+  return terms.map(t => t).join(' AND ');
+};
+
 const phraseSearch = (phrase) => {
-    const stmt = db.prepare(`
-    SELECT
-        book_title,
-        chapter_number,
-        verse_number,
-        scripture_text,
-        verse_title
-    FROM
-        scriptures
-    WHERE
-        scripture_text LIKE ?
-        OR verse_title LIKE ?
-    ORDER BY book_title, chapter_number, verse_number
-    LIMIT 50
-    `);
-    const like = `%${phrase}%`;
-    return stmt.all(like, like);
+  if (!phrase || !phrase.trim()) return [];
+
+  // Prefer FTS5 when available
+  try {
+    const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'").get();
+    if (exists) {
+      const matchQuery = buildFTSMatchQuery(phrase);
+      if (matchQuery) {
+        // Query using FTS5 to get verse_ids, then join with scriptures view
+        const stmt = db.prepare(`
+  SELECT
+    s.volume_id, s.book_id, s.chapter_id, s.verse_id,
+    s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
+    s.volume_subtitle, s.book_subtitle, s.volume_short_title, s.book_short_title,
+    s.volume_lds_url, s.book_lds_url, s.chapter_number, s.verse_number,
+    s.scripture_text, s.verse_title, s.verse_short_title
+  FROM scriptures s
+  WHERE s.verse_id IN (
+    SELECT verse_id FROM scriptures_fts WHERE scriptures_fts MATCH ?
+  )
+  ORDER BY s.volume_id, s.book_id, s.chapter_id, s.verse_id
+  LIMIT 200
+  `);
+        const results = stmt.all(matchQuery);
+        if (results.length > 0) return results;
+      }
+    }
+  } catch (err) {
+    fastify.log.warn('FTS query failed, falling back to LIKE', err && err.message);
+  }
+
+  // Fallback: use AND of LIKE clauses for each token
+  const terms = phrase.trim().split(/\s+/).filter(Boolean);
+  const clauses = terms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
+  const sql = `
+  SELECT
+    book_title,
+    chapter_number,
+    verse_number,
+    scripture_text,
+    verse_title
+  FROM scriptures
+  WHERE ${clauses.join(' AND ')}
+  ORDER BY book_title, chapter_number, verse_number
+  LIMIT 200
+  `;
+  const params = [];
+  terms.forEach(t => params.push(`%${t}%`, `%${t}%`));
+  const stmt = db.prepare(sql);
+  return stmt.all(...params);
 };
 
 const searchScripture = (input) => {
