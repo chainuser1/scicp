@@ -37,8 +37,9 @@ function Client() {
     socket.on('update-verse', handleVerse);
     socket.on('update-theme', handleTheme);
     socket.on('highlight-text', (text) => {
-      console.log('Received highlighted text:', text); // Log received text
-      setHighlightedText(text);
+      const trimmed = text ? text.trim() : '';
+      console.log('Received highlighted text (raw):', text, 'trimmed:', trimmed);
+      setHighlightedText(trimmed);
     });
 
     return () => {
@@ -71,6 +72,12 @@ function Client() {
   let calculated = base - length / 100;
   if (calculated < 1.5) calculated = 1.5;
   const computedFontSize = `${calculated}rem`;
+
+  // debug: log when displayText or highlight changes
+  useEffect(() => {
+    console.log('Client displayText:', displayText);
+    console.log('Client highlightedText:', highlightedText);
+  }, [displayText, highlightedText]);
 
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,
