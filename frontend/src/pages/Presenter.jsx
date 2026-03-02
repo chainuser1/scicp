@@ -140,11 +140,11 @@ function Presenter() {
 
   const handlePreviewTextSelection = () => {
     const selection = window.getSelection();
-    const selectedText = selection.toString().trim();
-    if (selectedText) {
-      setHighlightedText(selectedText);
-      socket.emit('highlight-text', selectedText);
-    }
+    if (!selection) return;
+    const selectedText = selection.toString();
+    console.log('Emitting highlighted text:', selectedText); // Log emitted text
+    setHighlightedText(selectedText);
+    socket.emit('highlight-text', selectedText); // Emit highlighted text to the client
   };
 
   // similar to client rendering: wrap any highlighted substring in a span

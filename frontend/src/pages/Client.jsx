@@ -37,6 +37,7 @@ function Client() {
     socket.on('update-verse', handleVerse);
     socket.on('update-theme', handleTheme);
     socket.on('highlight-text', (text) => {
+      console.log('Received highlighted text:', text); // Log received text
       setHighlightedText(text);
     });
 
