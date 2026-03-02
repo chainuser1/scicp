@@ -21,10 +21,20 @@ const themes = {
 /* ─── Emblem SVG (small, for header) ─── */
 const EmblemSVG = ({ size = 32 }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <circle cx="16" cy="16" r="15" stroke="#c9a84c" strokeWidth="0.8" strokeDasharray="3 2" />
-    <rect x="14.5" y="5" width="3" height="22" rx="0.5" fill="#c9a84c" />
-    <rect x="6" y="11" width="20" height="3" rx="0.5" fill="#c9a84c" />
-    <circle cx="16" cy="16" r="2" fill="#e8c97a" />
+    {/* Cornerstone base */}
+    <rect x="4" y="20" width="24" height="8" rx="1.5" fill="#c9a84c" opacity="0.9"/>
+    
+    {/* Arch (symbolizing tomb/resurrection) */}
+    <path d="M6 20 Q16 4 26 20" stroke="#c9a84c" strokeWidth="1.8" strokeLinecap="round"/>
+    
+    {/* Stylized Christus – head, shoulders, extended arms */}
+    <circle cx="16" cy="13" r="3.5" fill="#e8c97a"/> {/* head */}
+    <rect x="12" y="16" width="8" height="6" rx="2" fill="#e8c97a"/> {/* shoulders/torso */}
+    <line x1="9" y1="18" x2="4" y2="14" stroke="#e8c97a" strokeWidth="2.2" strokeLinecap="round"/> {/* left arm */}
+    <line x1="23" y1="18" x2="28" y2="14" stroke="#e8c97a" strokeWidth="2.2" strokeLinecap="round"/> {/* right arm */}
+    
+    {/* Subtle center glow / divine light dot */}
+    <circle cx="16" cy="13" r="1.2" fill="#0a0a0f"/>
   </svg>
 );
 
