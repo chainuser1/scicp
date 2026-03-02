@@ -83,8 +83,14 @@
 
 /* yellow highlight for selected text forwarded from presenter */
 .highlight-yellow {
-  background-color: yellow;
-  color: black;
+  color: yellow;
+  text-shadow: 1px 1px 0 black, -1px -1px 0 black;
+  /* match surrounding text attributes - use !important to override .client-view span */
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  margin: 0 !important;
 }
 
 /* ===== PRESENTER STYLES ===== */

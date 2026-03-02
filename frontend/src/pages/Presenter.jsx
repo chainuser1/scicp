@@ -141,7 +141,11 @@ function Presenter() {
   const handlePreviewTextSelection = () => {
     const selection = window.getSelection();
     if (!selection) return;
-    const selectedText = selection.toString();
+    let selectedText = selection.toString();
+    if (!selectedText) return;
+    selectedText = selectedText.trim();
+    if (!selectedText) return; // nothing but whitespace selected
+
     console.log('Emitting highlighted text:', selectedText); // Log emitted text
     setHighlightedText(selectedText);
     socket.emit('highlight-text', selectedText); // Emit highlighted text to the client
