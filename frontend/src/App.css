@@ -57,9 +57,17 @@
   position: absolute;
   top: 1.5rem;
   left: 1.5rem;
-  font-size: 1rem;
-  font-weight: 400;
+  font-size: 2.3rem;
+  font-weight: 600;
+  font-style: italic;
+  color:yellow;
   opacity: 0.9;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 black, -1px -1px 0 black;
+  z-index: 1;
+}
+
+.verse-title-top-right {
   text-align: left;
   max-width: 30%;
 }
