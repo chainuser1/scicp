@@ -240,7 +240,7 @@ const Presenter = () => {
                     className="result-item"
                     onClick={() => handleSelectVerse(verse)}
                   >
-                    <div className="result-title">{verse.verse_title}</div>
+                    <div className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</div>
                     <div className="result-text">{verse.scripture_text}</div>
                   </li>
                 ))}
@@ -260,22 +260,14 @@ const Presenter = () => {
             <div className="navigation-section">
               <p className="nav-label">
                 <span>Now Live</span>
-                <span className="nav-label-verse">{liveVerse.verse_title}</span>
+                <span className="nav-label-verse">{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</span>
                 {liveVerse.segments && liveVerse.segments.length > 1 && (
                   <span className="segmented-badge">Segmented</span>
                 )}
-                <select
-                  className="language-select"
-                  value={currentLanguage}
-                  onChange={handleLanguageChange}
-                >
+                <select value={currentLanguage} onChange={handleLanguageChange}>
                   <option value="en">English</option>
-                  {isBibleVerse && (
-                    <>
-                      <option value="tl">Tagalog</option>
-                      <option value="ceb">Cebuano</option>
-                    </>
-                  )}
+                  <option value="tl">Tagalog</option>
+                  <option value="ceb">Cebuano</option>
                 </select>
               </p>
               <div className="nav-controls">
@@ -314,7 +306,7 @@ const Presenter = () => {
                 Staged
               </h2>
               <div className="staged-verse-display">
-                <h3 className="staged-title">{staged.verse_title}</h3>
+                <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
                 <p className="staged-text">{staged.scripture_text}</p>
               </div>
               <div className="staging-controls">
@@ -336,7 +328,7 @@ const Presenter = () => {
             <div className="preview-section">
               <h2>Client Preview — select text to highlight</h2>
               <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
-                <div className="preview-title">{liveVerse.verse_title}</div>
+                <div className="preview-title">{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</div>
                 <div className="preview-text">{renderPreviewText()}</div>
                 {liveVerse.segments && currentSegment < liveVerse.segments.length - 1 && (
                   <div className="preview-cont">cont…</div>
@@ -446,7 +438,7 @@ const Presenter = () => {
                   onClick={() => setStaged(verse)}
                   title="Click to re-stage"
                 >
-                  <span className="history-ref">{verse.verse_title}</span>
+                  <span className="history-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
                 </li>
               ))}
             </ul>
