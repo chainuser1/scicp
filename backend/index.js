@@ -244,7 +244,7 @@ const BOOK_ABBREVIATIONS = {
   'dc': 'Doctrine and Covenants',
   'doc': 'Doctrine and Covenants',
   'doc&cov': 'Doctrine and Covenants',
-  'oa': 'Olive Garden Account' // Placeholder, adjust as needed
+  'oa': 'Olive Garden Account' 
 };
 
 // Function to expand abbreviated book name
@@ -372,6 +372,7 @@ const searchScripture = (input) => {
         verse_number,
         scripture_text,
         verse_title,
+        verse_short_title,
         verse_id
     FROM
         scriptures
@@ -406,6 +407,9 @@ function getAdjacentVerse({ verse_id, direction }, db) {
         verse_number,
         scripture_text,
         verse_title, 
+        verse_short_title,
+        chapter_number,
+        verse_number,
         verse_id
       FROM scriptures
       WHERE verse_id = ? ${op} 1
@@ -472,52 +476,47 @@ io.on('connection', (socket) => {
     console.log('go-live triggered', verse, theme, language);
     
     let scriptureText = verse.scripture_text;
-    let verseTitle = verse.verse_title;
+    let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; 
     let bookTitle = verse.book_title;
     
     // Normalize language input
     const normalizedLanguage = language ? language.toLowerCase().trim() : null;
 
-    // Bible identification via verse_id range (1-31102) per user specification
     const verseId = Number(verse.verse_id);
-    const isBibleVerse = verseId >= 1 && verseId <= 31102;
     
-    // Determine target database with single execution path
-    let targetDb = null;
-    let isTranslation = false;
-
-    if (normalizedLanguage === 'en' && isBibleVerse) {
-      targetDb = db;
-    } else if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && isBibleVerse) {
-      targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
-      isTranslation = true;
-    }
+    // Determine target database with streamlined mapping
+    const targetDbMap = {
+      'en': db,
+      'ceb': db_cebuano,
+      'tl': db_tagalog
+    };
+    
+    const targetDb = targetDbMap[normalizedLanguage];
+    const isTranslation = normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage);
 
     if (targetDb) {
-      const query = `
-        SELECT scripture_text, verse_title, book_title
-        FROM scriptures 
-        WHERE verse_id = ?
-      `;
+      const query = `SELECT scripture_text,  book_title, chapter_number, verse_number FROM scriptures WHERE verse_id = ?`;
+      
       try {
         const stmt = targetDb.prepare(query);
         const result = stmt.get(verseId);
+        
         if (result) {
           // Apply field validation only for translations per specification
           if (isTranslation) {
             if (result.scripture_text) scriptureText = result.scripture_text;
-            if (result.verse_title) verseTitle = result.verse_title;
+            if (result.verse_title) verseTitle = result.book_title + ' ' + result.chapter_number + ':' + result.verse_number; // reconstruct verse title
             if (result.book_title) bookTitle = result.book_title;
           } else {
             scriptureText = result.scripture_text;
-            verseTitle = result.verse_title;
+            verseTitle = result.book_title + ' ' + result.chapter_number + ':' + result.verse_number; // reconstruct verse title
             bookTitle = result.book_title;
           }
         }
       } catch (err) {
         fastify.log.error(
-          isTranslation
-            ? `Failed to fetch ${normalizedLanguage} translation`
+          isTranslation 
+            ? `Failed to fetch ${normalizedLanguage} translation` 
             : 'Failed to fetch English text',
           err
         );
