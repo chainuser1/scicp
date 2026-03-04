@@ -50,6 +50,8 @@ function Presenter() {
   const [bgUrlInput, setBgUrlInput] = useState('');
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
+  const [currentLanguage, setCurrentLanguage] = useState('en');
+  
 
   useEffect(() => {
     socket.on('search-results', (data) => setResults(data));
@@ -150,6 +152,12 @@ function Presenter() {
     socket.emit('highlight-text', selectedText);
   };
 
+  const handleLanguageChange = (e) => {
+    const lang = e.target.value;
+    setCurrentLanguage(lang);
+    socket.emit('update-language', lang);
+  };
+
   const renderPreviewText = () => {
     if (!liveVerse) return '';
     const text = liveVerse.segments && liveVerse.segments.length > 0
@@ -231,6 +239,15 @@ function Presenter() {
                 {liveVerse.segments && liveVerse.segments.length > 1 && (
                   <span className="segmented-badge">Segmented</span>
                 )}
+                <select
+                  className="language-select"
+                  value={currentLanguage}
+                  onChange={handleLanguageChange}
+                >
+                  <option value="en">English</option>
+                  <option value="ceb">Cebuano</option>
+                  <option value="tl">Tagalog</option>
+                </select>
               </p>
               <div className="nav-controls">
                 <button className="persistent-nav-button" onClick={() => fetchAdjacent('prev')}>

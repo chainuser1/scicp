@@ -1,7 +1,10 @@
 const fastify = require('fastify')({ logger: true });
 const { Server } = require("socket.io");
+// english scriptures database (LDS standard works)
 const db = require('better-sqlite3')('../resources/db/lds-scriptures-sqlite.db', { fileMustExist: true });
-
+// additional language databases (optional)
+const db_tagalog = require('better-sqlite3')('../resources/db/tagalog-scriptures-sqlite.db', { fileMustExist: true });
+const db_cebuano = require('better-sqlite3')('../resources/db/cebuano-scriptures-sqlite.db', { fileMustExist: true });
 fastify.register(require('@fastify/cors'), {
   origin: "*",
 });
@@ -343,6 +346,7 @@ const phraseSearch = (phrase) => {
     chapter_number,
     verse_number,
     scripture_text,
+    verse_id,
     verse_title
   FROM scriptures
   WHERE ${clauses.join(' AND ')}
@@ -362,6 +366,7 @@ const searchScripture = (input) => {
         let sql = `
     SELECT
         book_title,
+        verse_id,
         chapter_number,
         verse_number,
         scripture_text,
@@ -399,7 +404,8 @@ function getAdjacentVerse({ book, chapter, verse, direction }) {
         chapter_number,
         verse_number,
         scripture_text,
-        verse_title
+        verse_title, 
+        verse_id
       FROM scriptures
       WHERE book_title = ?
         AND chapter_number = ?
