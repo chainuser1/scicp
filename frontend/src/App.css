@@ -1279,6 +1279,31 @@
   box-shadow: 0 0 0 3px var(--gold-dim);
 }
 
+/* Style for dropdown options to match theme */
+.language-select option {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-family: 'Cinzel', serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.5rem;
+}
+
+/* Hover effect for options */
+.language-select option:hover {
+  background: var(--surface-3);
+  color: var(--gold-light);
+}
+
+/* Selected option styling */
+.language-select option:checked {
+  background: var(--gold-dim);
+  color: var(--gold-light);
+  border: 1px solid var(--gold-border);
+}
+
 /* ─── History Panel ─── */
 .history-panel {
   background: var(--deep);
