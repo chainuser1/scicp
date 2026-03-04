@@ -51,7 +51,7 @@ function Presenter() {
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
-  
+
 
   useEffect(() => {
     socket.on('search-results', (data) => setResults(data));
@@ -92,7 +92,11 @@ function Presenter() {
 
   const goLiveDirectly = (verse) => {
     const verseWithTheme = { ...verse, theme: currentTheme };
-    socket.emit('go-live', { verse: verseWithTheme, theme: verseWithTheme.theme });
+    socket.emit('go-live', { 
+      verse: verseWithTheme, 
+      theme: verseWithTheme.theme,
+      language: currentLanguage 
+    });
     setLiveVerse(verseWithTheme);
     setCurrentSegment(0);
     setHistory([verseWithTheme, ...history.slice(0, 4)]);
@@ -100,7 +104,11 @@ function Presenter() {
 
   const goLive = () => {
     if (!staged) return;
-    socket.emit('go-live', { verse: staged, theme: staged.theme });
+    socket.emit('go-live', { 
+      verse: staged, 
+      theme: staged.theme,
+      language: currentLanguage 
+    });
     setLiveVerse(staged);
     setCurrentSegment(0);
     setHistory([staged, ...history.slice(0, 4)]);
@@ -121,12 +129,16 @@ function Presenter() {
 
   const fetchAdjacent = async (direction) => {
     const source = staged || liveVerse;
-    if (!source) return;
-    const { book_title, chapter_number, verse_number } = source;
+    if (!source || !source.verse_id) return;
+
+    const params = new URLSearchParams({
+      verse_id: source.verse_id,
+      direction,
+      ...(currentLanguage && ['ceb', 'tl'].includes(currentLanguage) && { language: currentLanguage })
+    });
+
     try {
-      const res = await fetch(
-        `${API_URL}/verse/adjacent?book_title=${encodeURIComponent(book_title)}&chapter_number=${chapter_number}&verse_number=${verse_number}&direction=${direction}`
-      );
+      const res = await fetch(`${API_URL}/verse/adjacent?${params.toString()}`);
       if (!res.ok) return;
       const data = await res.json();
       const verseWithTheme = { ...data, theme: currentTheme };
@@ -156,6 +168,15 @@ function Presenter() {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     socket.emit('update-language', lang);
+    
+    // Automatically refresh live verse with new language
+    if (liveVerse) {
+      socket.emit('go-live', { 
+        verse: liveVerse, 
+        theme: currentTheme,
+        language: lang 
+      });
+    }
   };
 
   const renderPreviewText = () => {
