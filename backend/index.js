@@ -474,30 +474,31 @@ io.on('connection', (socket) => {
     let verseTitle = verse.verse_title;
     let bookTitle = verse.book_title;
     
-    // Normalize language parameter for reliable comparison
-    const normalizedLanguage = language?.trim().toLowerCase();
-    
-    // Apply multi-language translation for Bible volumes per specification
-    if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && verse.volume_id) {
-      // Bible volume: volume_id 1 (per specification)
-      if (Number(verse.volume_id) === 1) {
-        const targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
-        const query = `
-          SELECT scripture_text, verse_title, book_title
-          FROM scriptures 
-          WHERE verse_id = ?
-        `;
-        try {
-          const stmt = targetDb.prepare(query);
-          const result = stmt.get(Number(verse.verse_id));
-          if (result) {
-            if (result.scripture_text) scriptureText = result.scripture_text;
-            if (result.verse_title) verseTitle = result.verse_title;
-            if (result.book_title) bookTitle = result.book_title;
-          }
-        } catch (err) {
-          fastify.log.error(`Failed to fetch ${normalizedLanguage} translation`, err);
+    // Normalize language input
+    const normalizedLanguage = language ? language.toLowerCase().trim() : null;
+
+    // Bible identification via verse_id range (1-31102) per user specification
+    const verseId = Number(verse.verse_id);
+    const isBibleVerse = verseId >= 1 && verseId <= 31102;
+
+    // Apply multi-language translation only for Bible verses
+    if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && isBibleVerse) {
+      const targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
+      const query = `
+        SELECT scripture_text, verse_title, book_title
+        FROM scriptures 
+        WHERE verse_id = ?
+      `;
+      try {
+        const stmt = targetDb.prepare(query);
+        const result = stmt.get(verseId);
+        if (result) {
+          if (result.scripture_text) scriptureText = result.scripture_text;
+          if (result.verse_title) verseTitle = result.verse_title;
+          if (result.book_title) bookTitle = result.book_title;
         }
+      } catch (err) {
+        fastify.log.error(`Failed to fetch ${normalizedLanguage} translation`, err);
       }
     }
     
