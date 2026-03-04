@@ -5,6 +5,7 @@ const db = require('better-sqlite3')('../resources/db/lds-scriptures-sqlite.db',
 // additional language databases (optional)
 const db_tagalog = require('better-sqlite3')('../resources/db/tagalog-scriptures-sqlite.db', { fileMustExist: true });
 const db_cebuano = require('better-sqlite3')('../resources/db/cebuano-scriptures-sqlite.db', { fileMustExist: true });
+
 fastify.register(require('@fastify/cors'), {
   origin: "*",
 });
@@ -304,67 +305,13 @@ const buildFTSMatchQuery = (input) => {
   return terms.map(t => t).join(' AND ');
 };
 
-// fallback: use AND of LIKE clauses for each token
-const phraseSearch = (phrase) => {
-  if (!phrase || !phrase.trim()) return [];
-
-  // Prefer FTS5 when available
-  try {
-    const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'").get();
-    if (exists) {
-      const matchQuery = buildFTSMatchQuery(phrase);
-      if (matchQuery) {
-        // Query using FTS5 to get verse_ids, then join with scriptures view
-        const stmt = db.prepare(`
-  SELECT
-    s.volume_id, s.book_id, s.chapter_id, s.verse_id,
-    s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
-    s.volume_subtitle, s.book_subtitle, s.volume_short_title, s.book_short_title,
-    s.volume_lds_url, s.book_lds_url, s.chapter_number, s.verse_number,
-    s.scripture_text, s.verse_title, s.verse_short_title
-  FROM scriptures s
-  WHERE s.verse_id IN (
-    SELECT verse_id FROM scriptures_fts WHERE scriptures_fts MATCH ?
-  )
-  ORDER BY s.volume_id, s.book_id, s.chapter_id, s.verse_id
-  LIMIT 200
-  `);
-        const results = stmt.all(matchQuery);
-        if (results.length > 0) return results;
-      }
-    }
-  } catch (err) {
-    fastify.log.warn('FTS query failed, falling back to LIKE', err && err.message);
-  }
-
-  // Fallback: use AND of LIKE clauses for each token
-  const terms = phrase.trim().split(/\s+/).filter(Boolean);
-  const clauses = terms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
-  const sql = `
-  SELECT
-    book_title,
-    chapter_number,
-    verse_number,
-    scripture_text,
-    verse_id,
-    verse_title
-  FROM scriptures
-  WHERE ${clauses.join(' AND ')}
-  ORDER BY book_title, chapter_number, verse_number
-  LIMIT 200
-  `;
-  const params = [];
-  terms.forEach(t => params.push(`%${t}%`, `%${t}%`));
-  const stmt = db.prepare(sql);
-  return stmt.all(...params);
-};
-
 const searchScripture = (input) => {
     // first, attempt to parse a structured reference
     const ref = parseScriptureReference(input);
     if (ref) {
         let sql = `
     SELECT
+        volume_id,
         book_title,
         verse_id,
         chapter_number,
@@ -394,9 +341,62 @@ const searchScripture = (input) => {
     return phraseSearch(input);
 };
 
+// Fallback: phrase search using FTS5 across all text fields
+const phraseSearch = (phrase) => {
+  const terms = phrase.trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [];
+  
+  // Build FTS5 MATCH query across all relevant text fields with proper tokenization
+  const query = terms.map(t => {
+    const escaped = escapeFtsQuery(t);
+    return `(
+      book_title MATCH '${escaped}' OR 
+      scripture_text MATCH '${escaped}' OR 
+      verse_title MATCH '${escaped}'
+    )`;
+  }).join(' AND ');
+  
+  const sql = `
+    SELECT
+      volume_id,
+      book_title,
+      chapter_number,
+      verse_number,
+      scripture_text,
+      verse_id,
+      verse_title
+    FROM scriptures_fts
+    WHERE ${query}
+    ORDER BY rank
+    LIMIT 200
+  `;
+  
+  try {
+    const stmt = db.prepare(sql);
+    return stmt.all();
+  } catch (err) {
+    fastify.log.error('FTS5 search failed', err);
+    return [];
+  }
+};
+
+// Helper to safely escape FTS5 query terms
+const escapeFtsQuery = (term) => {
+  return term
+    .replace(/[^\w\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map(t => `"${t}*"`)
+    .join(' ');
+};
+
 // retrieve the next or previous verse within the same book & chapter
 // direction should be 'next' or 'prev'
-function getAdjacentVerse({ book, chapter, verse, direction }) {
+// retrieve the next or previous verse using sequential verse_id
+// direction should be 'next' or 'prev'
+function getAdjacentVerse({ verse_id, direction }, db) {
     const op = direction === 'next' ? '+' : '-';
     const stmt = db.prepare(`
       SELECT
@@ -407,13 +407,11 @@ function getAdjacentVerse({ book, chapter, verse, direction }) {
         verse_title, 
         verse_id
       FROM scriptures
-      WHERE book_title = ?
-        AND chapter_number = ?
-        AND verse_number = ? ${op} 1
+      WHERE verse_id = ? ${op} 1
       LIMIT 1
     `);
     try {
-        return stmt.get(book, chapter, verse);
+        return stmt.get(verse_id);
     } catch (err) {
         fastify.log.error('adjacent query failed', err);
         return null;
@@ -422,17 +420,22 @@ function getAdjacentVerse({ book, chapter, verse, direction }) {
 
 // add HTTP route for adjacent verse
 fastify.get('/verse/adjacent', async (request, reply) => {
-    const { book_title, chapter_number, verse_number, direction } = request.query;
-    if (!book_title || !chapter_number || !verse_number || !direction) {
+    const { verse_id, direction, language } = request.query;
+    if (!verse_id || !direction) {
         reply.code(400);
         return { error: 'missing parameters' };
     }
+
+    let targetDb = db;
+    if (language && ['ceb', 'tl'].includes(language)) {
+        targetDb = language === 'ceb' ? db_cebuano : db_tagalog;
+    }
+
     const result = getAdjacentVerse({
-        book: book_title,
-        chapter: Number(chapter_number),
-        verse: Number(verse_number),
+        verse_id: Number(verse_id),
         direction,
-    });
+    }, targetDb);
+
     if (!result) {
         reply.code(404);
         return { error: 'not found' };
@@ -464,19 +467,53 @@ io.on('connection', (socket) => {
     io.emit('highlight-text', text);
   });
 
-  socket.on('go-live', ({verse, theme}) => {
-    console.log('go-live triggered', verse, theme);
+  socket.on('go-live', ({verse, theme, language}) => {
+    console.log('go-live triggered', verse, theme, language);
+    
+    let scriptureText = verse.scripture_text;
+    let verseTitle = verse.verse_title;
+    let bookTitle = verse.book_title;
+    
+    // Normalize language parameter for reliable comparison
+    const normalizedLanguage = language?.trim().toLowerCase();
+    
+    // Apply multi-language translation for Bible volumes per specification
+    if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && verse.volume_id) {
+      // Bible volume: volume_id 1 (per specification)
+      if (Number(verse.volume_id) === 1) {
+        const targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
+        const query = `
+          SELECT scripture_text, verse_title, book_title
+          FROM scriptures 
+          WHERE verse_id = ?
+        `;
+        try {
+          const stmt = targetDb.prepare(query);
+          const result = stmt.get(Number(verse.verse_id));
+          if (result) {
+            if (result.scripture_text) scriptureText = result.scripture_text;
+            if (result.verse_title) verseTitle = result.verse_title;
+            if (result.book_title) bookTitle = result.book_title;
+          }
+        } catch (err) {
+          fastify.log.error(`Failed to fetch ${normalizedLanguage} translation`, err);
+        }
+      }
+    }
     
     // Segment the verse for readability
-    const segments = segmentVerseText(verse.scripture_text);
+    const segments = segmentVerseText(scriptureText);
     const verseWithSegments = {
       ...verse,
+      scripture_text: scriptureText,
+      verse_title: verseTitle,
+      book_title: bookTitle,
       segments,
       totalSegments: segments.length,
       currentSegment: 0
     };
     
-    // Send to the presenter (sender) and all other clients
+    // Send to all clients
     io.emit('update-verse', verseWithSegments);
     io.emit('update-theme', theme);
   });
