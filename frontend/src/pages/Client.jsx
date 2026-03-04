@@ -4,7 +4,6 @@ import { socket } from '../socket';
 function Client() {
   const [verse, setVerse] = useState({
     scripture_text: 'Waiting for a scripture...',
-    verse_title: '',
     segments: [],
     currentSegment: 0,
     totalSegments: 0,
@@ -91,9 +90,9 @@ function Client() {
       style={themeStyles}
     >
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
-      {verse.verse_title && (
+      {verse.book_title && verse.chapter_number && verse.verse_number && (
         <span key={labelKey} className="verse-title-top-left">
-          {verse.verse_title}
+          {verse.book_title} {verse.chapter_number}:{verse.verse_number}
         </span>
       )}
 
