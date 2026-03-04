@@ -327,7 +327,7 @@ const phraseSearch = (phrase) => {
   WHERE s.verse_id IN (
     SELECT verse_id FROM scriptures_fts WHERE scriptures_fts MATCH ?
   )
-  ORDER BY s.volume_id, s.book_id, s.chapter_id, s.verse_id
+  ORDER BY s.verse_id
   LIMIT 200
   `);
         const results = stmt.all(matchQuery);
@@ -343,6 +343,7 @@ const phraseSearch = (phrase) => {
   const clauses = terms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
   const sql = `
   SELECT
+    book_id,
     book_title,
     chapter_number,
     verse_number,
@@ -351,7 +352,7 @@ const phraseSearch = (phrase) => {
     verse_id
   FROM scriptures
   WHERE ${clauses.join(' AND ')}
-  ORDER BY book_title, chapter_number, verse_number
+  ORDER BY verse_id
   LIMIT 200
   `;
   const params = [];

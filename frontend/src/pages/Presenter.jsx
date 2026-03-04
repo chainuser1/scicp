@@ -38,7 +38,7 @@ const EmblemSVG = ({ size = 32 }) => (
   </svg>
 );
 
-function Presenter() {
+const Presenter = () => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [currentTheme, setCurrentTheme] = useState(themes.light);
@@ -51,7 +51,7 @@ function Presenter() {
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
-
+  const [isBibleVerse, setIsBibleVerse] = useState(true);
 
   useEffect(() => {
     socket.on('search-results', (data) => setResults(data));
@@ -88,6 +88,8 @@ function Presenter() {
   const handleSelectVerse = (verse) => {
     const verseWithTheme = { ...verse, theme: currentTheme };
     setStaged(verseWithTheme);
+    const verseId = Number(verse.verse_id);
+    setIsBibleVerse(verseId >= 1 && verseId <= 31102);
   };
 
   const goLiveDirectly = (verse) => {
@@ -100,6 +102,8 @@ function Presenter() {
     setLiveVerse(verseWithTheme);
     setCurrentSegment(0);
     setHistory([verseWithTheme, ...history.slice(0, 4)]);
+    const verseId = Number(verse.verse_id);
+    setIsBibleVerse(verseId >= 1 && verseId <= 31102);
   };
 
   const goLive = () => {
@@ -266,8 +270,12 @@ function Presenter() {
                   onChange={handleLanguageChange}
                 >
                   <option value="en">English</option>
-                  <option value="ceb">Cebuano</option>
-                  <option value="tl">Tagalog</option>
+                  {isBibleVerse && (
+                    <>
+                      <option value="tl">Tagalog</option>
+                      <option value="ceb">Cebuano</option>
+                    </>
+                  )}
                 </select>
               </p>
               <div className="nav-controls">
