@@ -480,10 +480,19 @@ io.on('connection', (socket) => {
     // Bible identification via verse_id range (1-31102) per user specification
     const verseId = Number(verse.verse_id);
     const isBibleVerse = verseId >= 1 && verseId <= 31102;
+    
+    // Determine target database with single execution path
+    let targetDb = null;
+    let isTranslation = false;
 
-    // Apply multi-language translation only for Bible verses
-    if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && isBibleVerse) {
-      const targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
+    if (normalizedLanguage === 'en' && isBibleVerse) {
+      targetDb = db;
+    } else if (normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage) && isBibleVerse) {
+      targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
+      isTranslation = true;
+    }
+
+    if (targetDb) {
       const query = `
         SELECT scripture_text, verse_title, book_title
         FROM scriptures 
@@ -493,12 +502,24 @@ io.on('connection', (socket) => {
         const stmt = targetDb.prepare(query);
         const result = stmt.get(verseId);
         if (result) {
-          if (result.scripture_text) scriptureText = result.scripture_text;
-          if (result.verse_title) verseTitle = result.verse_title;
-          if (result.book_title) bookTitle = result.book_title;
+          // Apply field validation only for translations per specification
+          if (isTranslation) {
+            if (result.scripture_text) scriptureText = result.scripture_text;
+            if (result.verse_title) verseTitle = result.verse_title;
+            if (result.book_title) bookTitle = result.book_title;
+          } else {
+            scriptureText = result.scripture_text;
+            verseTitle = result.verse_title;
+            bookTitle = result.book_title;
+          }
         }
       } catch (err) {
-        fastify.log.error(`Failed to fetch ${normalizedLanguage} translation`, err);
+        fastify.log.error(
+          isTranslation
+            ? `Failed to fetch ${normalizedLanguage} translation`
+            : 'Failed to fetch English text',
+          err
+        );
       }
     }
     
