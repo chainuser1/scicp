@@ -268,8 +268,8 @@ function segmentVerseText(text, wordsPerSegment = 100) {
   return segments.length > 0 ? segments : [text];
 }
 
-// Try to interpret simple scripture references like
-// "John 3:16", "John 3", "1 Nephi 3", "1 Ne 3:2", "D&C 1:1" etc.  Returns an object or null.
+
+
 function parseScriptureReference(str) {
     if (!str || typeof str !== 'string') return null;
     const trimmed = str.trim();
@@ -305,19 +305,73 @@ const buildFTSMatchQuery = (input) => {
   return terms.map(t => t).join(' AND ');
 };
 
+// fallback: use AND of LIKE clauses for each token
+const phraseSearch = (phrase) => {
+  if (!phrase || !phrase.trim()) return [];
+
+  // Prefer FTS5 when available
+  try {
+    const exists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'").get();
+    if (exists) {
+      const matchQuery = buildFTSMatchQuery(phrase);
+      if (matchQuery) {
+        // Query using FTS5 to get verse_ids, then join with scriptures view
+        const stmt = db.prepare(`
+  SELECT
+    s.volume_id, s.book_id, s.chapter_id, s.verse_id,
+    s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
+    s.volume_subtitle, s.book_subtitle, s.volume_short_title, s.book_short_title,
+    s.volume_lds_url, s.book_lds_url, s.chapter_number, s.verse_number,
+    s.scripture_text, s.verse_title, s.verse_short_title
+  FROM scriptures s
+  WHERE s.verse_id IN (
+    SELECT verse_id FROM scriptures_fts WHERE scriptures_fts MATCH ?
+  )
+  ORDER BY s.volume_id, s.book_id, s.chapter_id, s.verse_id
+  LIMIT 200
+  `);
+        const results = stmt.all(matchQuery);
+        if (results.length > 0) return results;
+      }
+    }
+  } catch (err) {
+    fastify.log.warn('FTS query failed, falling back to LIKE', err && err.message);
+  }
+
+  // Fallback: use AND of LIKE clauses for each token
+  const terms = phrase.trim().split(/\s+/).filter(Boolean);
+  const clauses = terms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
+  const sql = `
+  SELECT
+    book_title,
+    chapter_number,
+    verse_number,
+    scripture_text,
+    verse_title,
+    verse_id
+  FROM scriptures
+  WHERE ${clauses.join(' AND ')}
+  ORDER BY book_title, chapter_number, verse_number
+  LIMIT 200
+  `;
+  const params = [];
+  terms.forEach(t => params.push(`%${t}%`, `%${t}%`));
+  const stmt = db.prepare(sql);
+  return stmt.all(...params);
+};
+
 const searchScripture = (input) => {
     // first, attempt to parse a structured reference
     const ref = parseScriptureReference(input);
     if (ref) {
         let sql = `
     SELECT
-        volume_id,
         book_title,
-        verse_id,
         chapter_number,
         verse_number,
         scripture_text,
-        verse_title
+        verse_title,
+        verse_id
     FROM
         scriptures
     WHERE
@@ -341,60 +395,6 @@ const searchScripture = (input) => {
     return phraseSearch(input);
 };
 
-// Fallback: phrase search using FTS5 across all text fields
-const phraseSearch = (phrase) => {
-  const terms = phrase.trim().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return [];
-  
-  // Build FTS5 MATCH query across all relevant text fields with proper tokenization
-  const query = terms.map(t => {
-    const escaped = escapeFtsQuery(t);
-    return `(
-      book_title MATCH '${escaped}' OR 
-      scripture_text MATCH '${escaped}' OR 
-      verse_title MATCH '${escaped}'
-    )`;
-  }).join(' AND ');
-  
-  const sql = `
-    SELECT
-      volume_id,
-      book_title,
-      chapter_number,
-      verse_number,
-      scripture_text,
-      verse_id,
-      verse_title
-    FROM scriptures_fts
-    WHERE ${query}
-    ORDER BY rank
-    LIMIT 200
-  `;
-  
-  try {
-    const stmt = db.prepare(sql);
-    return stmt.all();
-  } catch (err) {
-    fastify.log.error('FTS5 search failed', err);
-    return [];
-  }
-};
-
-// Helper to safely escape FTS5 query terms
-const escapeFtsQuery = (term) => {
-  return term
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter(Boolean)
-    .map(t => `"${t}*"`)
-    .join(' ');
-};
-
-// retrieve the next or previous verse within the same book & chapter
-// direction should be 'next' or 'prev'
-// retrieve the next or previous verse using sequential verse_id
 // direction should be 'next' or 'prev'
 function getAdjacentVerse({ verse_id, direction }, db) {
     const op = direction === 'next' ? '+' : '-';
