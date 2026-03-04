@@ -301,6 +301,7 @@ const buildFTSMatchQuery = (input) => {
   return terms.map(t => t).join(' AND ');
 };
 
+// fallback: use AND of LIKE clauses for each token
 const phraseSearch = (phrase) => {
   if (!phrase || !phrase.trim()) return [];
 

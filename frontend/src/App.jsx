@@ -36,33 +36,35 @@ function Home() {
           <EmblemSVG size={72} />
         </div>
 
-        <p className="home-eyebrow">Scripture Projector</p>
+        <p className="home-eyebrow">Sacred Scripture Projector</p>
 
         <h1 className="home-title">
-          The Living<br /><em>Word</em>
+          His <em>Word</em><br />Endures
         </h1>
 
         <div className="home-divider" />
 
         <p className="home-subtitle">
-          Bring scripture to life on every screen.<br />
-          Project with precision, present with reverence.
+          "Thy word is a lamp unto my feet, and a light unto my path"<br />
+          — Psalms 119:105
         </p>
 
         <nav className="home-nav">
           <Link to="/presenter" className="home-card">
-            <span className="home-card-icon">🎛️</span>
-            <span className="home-card-label">Presenter</span>
-            <span className="home-card-desc">Control the live display,<br />stage verses, manage themes</span>
+            <span className="home-card-icon">🏛️</span>
+            <span className="home-card-label">Chapel Control</span>
+            <span className="home-card-desc">Manage presentations,<br />stage testimonies</span>
           </Link>
           <Link to="/client" className="home-card">
-            <span className="home-card-icon">📽️</span>
-            <span className="home-card-label">Display</span>
-            <span className="home-card-desc">Full-screen audience view<br />with dynamic backgrounds</span>
+            <span className="home-card-icon">⛪</span>
+            <span className="home-card-label">Sacred Display</span>
+            <span className="home-card-desc">Share scriptures<br />with reverence</span>
           </Link>
         </nav>
       </main>
 
+     
+     
       {/* Footer */}
       <footer className="home-footer">
         <div className="home-footer-brand">
@@ -75,14 +77,17 @@ function Home() {
         </div>
 
         <div className="home-footer-links">
-          <Link to="/presenter">Presenter</Link>
-          <Link to="/client">Display</Link>
+          <Link to="/presenter">Chapel Control</Link>
+          <Link to="/client">Sacred Display</Link>
         </div>
 
-        <span className="home-footer-copy">
-          Built for the house of worship
-        </span>
+        <div className="home-footer-credit">
+          <span>© {new Date().getFullYear()} Sacred Scripture Projector</span>
+          <span className="home-footer-separator">&nbsp;|&nbsp;</span>
+          <span>Sacred Tech by <em>Dagami Ward Dev Team</em></span>
+        </div>
       </footer>
+
     </div>
   );
 }
