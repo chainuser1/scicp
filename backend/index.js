@@ -6,8 +6,22 @@ const db = require('better-sqlite3')('../resources/db/lds-scriptures-sqlite.db',
 const db_tagalog = require('better-sqlite3')('../resources/db/tagalog-scriptures-sqlite.db', { fileMustExist: true });
 const db_cebuano = require('better-sqlite3')('../resources/db/cebuano-scriptures-sqlite.db', { fileMustExist: true });
 
+const path = require('path');
+const fastifyStatic = require('@fastify/static');
+
 fastify.register(require('@fastify/cors'), {
   origin: "*",
+});
+
+// Register static file serving for frontend distribution
+fastify.register(fastifyStatic, {
+  root: path.join(__dirname, '../frontend/dist'),
+  prefix: '/',
+});
+
+// Handle client-side routing fallback for React Router
+fastify.setNotFoundHandler((request, reply) => {
+  reply.sendFile('index.html');
 });
 
 fastify.get('/', async (request, reply) => {
@@ -336,7 +350,7 @@ const DOCTRINE_ALIASES = {
     terms:   ['salvation', 'redemption', 'immortality', 'eternal life', 'atonement', 'resurrection', 'exaltation'],
   },
   'plan of redemption': {
-    phrases: ['plan of redemption', 'plan of salvation', 'plan of happiness', 'prepared from the foundation of the world'],
+    phrases: ['plan of redemption', 'plan of salvation', 'plan of happiness', 'plan prepared from the foundation of the world'],
     terms:   ['redemption', 'salvation', 'eternal life', 'atonement', 'prepared', 'foundation'],
   },
   'plan of happiness': {
@@ -348,11 +362,18 @@ const DOCTRINE_ALIASES = {
     terms:   ['foreordained', 'chosen', 'foundation', 'spirits', 'council', 'heaven', 'premortal'],
   },
   'preexistence': {
-    phrases: ['before the world was', 'foundation of the world', 'council in heaven'],
+    phrases: ['before the world was', 'foundation of the world', 'council in heaven',"choses before the foundation of the world", 'foreordained',""],
     terms:   ['foreordained', 'spirits', 'chosen', 'foundation', 'premortal'],
   },
   'war in heaven': {
-    phrases: ['war in heaven', 'cast out', 'third part of the stars', 'rebellion in heaven'],
+    phrases: ['war in heaven', 'cast out', 'third part of the stars', 
+      'rebellion in heaven',"third part of the host of heaven", 
+      'devil and his angels',"fought against the dragon",
+      "because of their agency",
+      "neither was their place found anymore in heaven",
+      "they were cast out",
+      "and he became Satan, yea, even the devil, the father of all lies, to deceive",
+    ],
     terms:   ['war', 'heaven', 'cast', 'rebel', 'devil', 'dragon', 'third', 'stars'],
   },
   'spirit world': {
@@ -796,7 +817,7 @@ function applyDoctrineAliases(input) {
 }
 
 const buildFTSPhraseQuery = (phrase) => {
-  return `"${phrase.replace(/"/g, '""')}"`;
+  return `"${phrase.replace(/\"/g, '\"\"')}"`;
 };
 
 const buildFTSTermQuery = (terms, mode = 'and') => {
@@ -817,7 +838,7 @@ const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
   if (!trimmed) return '';
 
   const quoted = trimmed.match(/^"(.+)"$/);
-  if (quoted) return `"${quoted[1].replace(/"/g, '""')}"`;
+  if (quoted) return `"${quoted[1].replace(/\"/g, '\"\"')}"`;
 
   const terms = trimmed
     .split(/\s+/)
@@ -985,6 +1006,7 @@ const searchScripture = (input) => {
             sql += ' AND verse_number = ?';
             params.push(ref.verse);
         }
+        
         sql += '\n    ORDER BY verse_number ASC\n    LIMIT 50';
         const stmt = db.prepare(sql);
         const result = stmt.all(...params);
@@ -1046,101 +1068,105 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     return result;
 });
 
-io.on('connection', (socket) => {
-  console.log('a user connected');
+function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog }) {
+  io.on('connection', (socket) => {
+    console.log('a user connected');
 
-  socket.on('search', (query) => {
-      console.log('searching for:', query);
-      const results = searchScripture(query);
-      socket.emit('search-results', results);
-  });
+    socket.on('search', (query) => {
+        console.log('searching for:', query);
+        const results = searchScripture(query);
+        socket.emit('search-results', results);
+    });
 
-  socket.on('update-verse', (verse) => {
-    console.log('updating verse:', verse);
-    io.emit('update-verse', verse);
-  });
+    socket.on('update-verse', (verse) => {
+      console.log('updating verse:', verse);
+      io.emit('update-verse', verse);
+    });
 
-  socket.on('update-theme', (theme) => {
-    console.log('updating theme:', theme);
-    io.emit('update-theme', theme);
-  });
+    socket.on('update-theme', (theme) => {
+      console.log('updating theme:', theme);
+      io.emit('update-theme', theme);
+    });
 
-  socket.on('highlight-text', (text) => {
-    console.log('highlighting text:', text);
-    io.emit('highlight-text', text);
-  });
+    socket.on('highlight-text', (text) => {
+      console.log('highlighting text:', text);
+      io.emit('highlight-text', text);
+    });
 
-  socket.on('go-live', ({verse, theme, language}) => {
-    console.log('go-live triggered', verse, theme, language);
-    
-    let scriptureText = verse.scripture_text;
-    let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; 
-    let bookTitle = verse.book_title;
-    
-    // Normalize language input
-    const normalizedLanguage = language ? language.toLowerCase().trim() : null;
-    
-    // Determine target database with streamlined mapping
-    const targetDbMap = {
-      'en': db,
-      'ceb': db_cebuano,
-      'tl': db_tagalog
-    };
-    
-    const targetDb = targetDbMap[normalizedLanguage];
-    const isTranslation = normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage);
-
-    if (targetDb) {
-      const verseId = Number(verse.verse_id);
-      const query = `SELECT scripture_text, verse_title, book_title FROM scriptures WHERE verse_id = ?`;
+    socket.on('go-live', ({verse, theme, language}) => {
+      console.log('go-live triggered', verse, theme, language);
       
-      try {
-        const stmt = targetDb.prepare(query);
-        const result = stmt.get(verseId);
-        
-        if (result) {
-          // Apply field validation only for translations per specification
-          if (isTranslation) {
-            if (result.scripture_text) scriptureText = result.scripture_text;
-            if (result.verse_title) verseTitle = result.verse_title;
-            if (result.book_title) bookTitle = result.book_title;
-          } else {
-            scriptureText = result.scripture_text;
-            verseTitle = result.verse_title;
-            bookTitle = result.book_title;
-          }
-        }
-      } catch (err) {
-        fastify.log.error(
-          isTranslation 
-            ? `Failed to fetch ${normalizedLanguage} translation` 
-            : 'Failed to fetch English text',
-          err
-        );
+      let scriptureText = verse.scripture_text;
+      let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; 
+      let bookTitle = verse.book_title;
+      
+      // Normalize language input
+      const normalizedLanguage = language ? language.toLowerCase().trim() : null;
+      
+      // Determine target database with streamlined mapping
+      let targetDb = db;
+      const isTranslation = normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage);
+      if (isTranslation) {
+        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
       }
-    }
-    
-    // Segment the verse for readability
-    const segments = segmentVerseText(scriptureText);
-    const verseWithSegments = {
-      ...verse,
-      scripture_text: scriptureText,
-      verse_title: verseTitle,
-      book_title: bookTitle,
-      segments,
-      totalSegments: segments.length,
-      currentSegment: 0
-    };
-    
-    // Send to all clients
-    io.emit('update-verse', verseWithSegments);
-    io.emit('update-theme', theme);
-  });
 
-  socket.on('disconnect', () => {
-    console.log('user disconnected');
+      if (targetDb) {
+        const verseId = Number(verse.verse_id);
+        const query = `SELECT scripture_text, verse_title, book_title FROM scriptures WHERE verse_id = ?`;
+        
+        try {
+          const stmt = targetDb.prepare(query);
+          const result = stmt.get(verseId);
+          
+          if (result) {
+            // Apply field validation only for translations per specification
+            if (isTranslation) {
+              if (result.scripture_text) scriptureText = result.scripture_text;
+              if (result.verse_title) verseTitle = result.verse_title;
+              if (result.book_title) bookTitle = result.book_title;
+            } else {
+              scriptureText = result.scripture_text;
+              verseTitle = result.verse_title;
+              bookTitle = result.book_title;
+            }
+          }
+        } catch (err) {
+          fastify.log.error(
+            isTranslation 
+              ? `Failed to fetch ${normalizedLanguage} translation` 
+              : 'Failed to fetch English text',
+            err
+          );
+        }
+      }
+      
+      // Segment the verse for readability
+      const segments = segmentVerseText(scriptureText);
+      const verseWithSegments = {
+        ...verse,
+        scripture_text: scriptureText,
+        verse_title: verseTitle,
+        book_title: bookTitle,
+        segments,
+        totalSegments: segments.length,
+        currentSegment: 0
+      };
+      
+      // Send to all clients
+      io.emit('update-verse', verseWithSegments);
+      io.emit('update-theme', theme);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('user disconnected');
+    });
   });
-});
+}
+
+// Only register handlers in production runtime
+if (require.main === module) {
+  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog });
+}
 
 const start = async () => {
   try {
@@ -1159,4 +1185,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { parseScriptureReference, searchScripture, segmentVerseText, fastify };
+module.exports = { parseScriptureReference, searchScripture, segmentVerseText, fastify, registerSocketHandlers };
