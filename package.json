@@ -11,8 +11,10 @@
   "scripts": {
     "dev": "npm run dev --workspace=backend  && npm run dev --workspace=frontend",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
-    "start": "npm start --workspace=backend"
-    
+    "start": "npm start --workspace=backend",
+    "test:backend": "npm test --workspace=backend",
+    "lint:frontend": "npm run lint --workspace=frontend",
+    "check:prod": "npm run build && npm run test:backend && npm run lint:frontend"
   },
   "keywords": [],
   "author": "",
