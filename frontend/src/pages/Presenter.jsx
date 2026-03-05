@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect} from 'react';
 import { socket } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
