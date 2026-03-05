@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
@@ -18,12 +18,8 @@ const themes = {
   }
 };
 
-/* ─── Layout breakpoints (px) ─────────────────────────────── */
-const BP_FULL = 1100;   // 3-column desktop
-const BP_MID  = 600;    // header-bar + slide drawer
-
-/* ─── Emblem SVG ─── */
-const EmblemSVG = ({ size = 28 }) => (
+/* ─── Emblem ─── */
+const EmblemSVG = ({ size = 26 }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
     <rect x="4" y="20" width="24" height="8" rx="1.5" fill="#c9a84c" opacity="0.9"/>
     <path d="M6 20 Q16 4 26 20" stroke="#c9a84c" strokeWidth="1.8" strokeLinecap="round"/>
@@ -35,140 +31,174 @@ const EmblemSVG = ({ size = 28 }) => (
   </svg>
 );
 
-/* ─── Icon components ─── */
+/* ─── Icons ─── */
 const IconSearch = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
   </svg>
 );
 const IconClock = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
   </svg>
 );
 const IconClose = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
   </svg>
 );
-const IconTheme = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <circle cx="12" cy="12" r="5"/>
-    <line x1="12" y1="1" x2="12" y2="3"/>
-    <line x1="12" y1="21" x2="12" y2="23"/>
-    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-    <line x1="1" y1="12" x2="3" y2="12"/>
-    <line x1="21" y1="12" x2="23" y2="12"/>
+const IconPalette = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+    <path d="M12 2C6.5 2 2 6.5 2 12a10 10 0 0 0 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
   </svg>
 );
 const IconChevronLeft = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6"/>
+  </svg>
 );
 const IconChevronRight = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
 );
 
+/* ─── Reusable components ─── */
+
+const HdrBtn = ({ onClick, active, children, label, title }) => (
+  <button
+    className={`hdr-btn${active ? ' hdr-btn--active' : ''}`}
+    onClick={onClick}
+    aria-label={label}
+    title={title || label}
+  >
+    {children}
+  </button>
+);
+
+const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, PAGE_SIZE }) => {
+  if (results.length === 0) return null;
+  const pageSlice = results.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  return (
+    <>
+      <ul className="results-ul">
+        {pageSlice.map(verse => (
+          <li
+            key={verse.verse_title}
+            className="result-item"
+            onClick={() => onSelect(verse)}
+            onDoubleClick={() => onGoLive(verse)}
+          >
+            <div className="result-item-top">
+              <span className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
+              <button
+                className="result-live-icon"
+                onClick={e => { e.stopPropagation(); onGoLive(verse); }}
+                aria-label="Go live"
+              >●</button>
+            </div>
+            <div className="result-text">{verse.scripture_text}</div>
+          </li>
+        ))}
+      </ul>
+      {totalPages > 1 && (
+        <div className="results-pagination">
+          <button className="pagination-arrow" onClick={() => onPageChange(p => Math.max(0, p - 1))} disabled={currentPage === 0}>‹</button>
+          <div className="pagination-track">
+            {Array.from({ length: totalPages }).map((_, i) => (
+              <button key={i} className={`pagination-pip${i === currentPage ? ' active' : ''}`} onClick={() => onPageChange(i)} aria-label={`Page ${i + 1}`} />
+            ))}
+          </div>
+          <span className="pagination-label">{currentPage + 1}<span className="pagination-sep">/</span>{totalPages}</span>
+          <button className="pagination-arrow" onClick={() => onPageChange(p => Math.min(totalPages - 1, p + 1))} disabled={currentPage === totalPages - 1}>›</button>
+        </div>
+      )}
+    </>
+  );
+};
+
+/* ─── Main component ─── */
 const Presenter = () => {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [currentTheme, setCurrentTheme] = useState(themes.light);
-  const [history, setHistory] = useState([]);
-  const [staged, setStaged] = useState(null);
-  const [liveVerse, setLiveVerse] = useState(null);
-  const [savedThemes, setSavedThemes] = useState([]);
-  const [newThemeName, setNewThemeName] = useState('');
-  const [bgUrlInput, setBgUrlInput] = useState('');
+  const [query, setQuery]                   = useState('');
+  const [results, setResults]               = useState([]);
+  const [currentTheme, setCurrentTheme]     = useState(themes.light);
+  const [history, setHistory]               = useState([]);
+  const [staged, setStaged]                 = useState(null);
+  const [liveVerse, setLiveVerse]           = useState(null);
+  const [savedThemes, setSavedThemes]       = useState([]);
+  const [newThemeName, setNewThemeName]     = useState('');
+  const [bgUrlInput, setBgUrlInput]         = useState('');
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
-  const [currentPage, setCurrentPage] = useState(0);
-
-  /* ── Layout mode ── */
-  const [layoutMode, setLayoutMode] = useState('full'); // 'full' | 'mid' | 'compact'
-  const containerRef = useRef(null);
-
-  /* ── Drawer state (mid/compact only) ── */
-  const [drawerOpen, setDrawerOpen] = useState(false);   // search drawer
-  const [drawerTab, setDrawerTab] = useState('search');  // 'search' | 'history'
-  const [themePopover, setThemePopover] = useState(false);
+  const [currentPage, setCurrentPage]       = useState(0);
+  const [drawerOpen, setDrawerOpen]         = useState(false);
+  const [drawerTab, setDrawerTab]           = useState('search');
+  const [themePopover, setThemePopover]     = useState(false);
 
   const PAGE_SIZE = 5;
-  const navSource = liveVerse;
 
-  /* ── ResizeObserver: drive layout mode from actual container width ── */
+  /* ── Socket & data ── */
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w >= BP_FULL) setLayoutMode('full');
-      else if (w >= BP_MID) setLayoutMode('mid');
-      else setLayoutMode('compact');
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  /* ── Close drawer when switching back to full layout ── */
-  useEffect(() => {
-    if (layoutMode === 'full') setDrawerOpen(false);
-  }, [layoutMode]);
-
-  /* ── Socket listeners ── */
-  useEffect(() => {
-    socket.on('search-results', (data) => { setResults(data); setCurrentPage(0); });
-    socket.on('update-verse', (data) => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
+    socket.on('search-results', data => { setResults(data); setCurrentPage(0); });
+    socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
     fetch(`${API_URL}/themes`)
       .then(r => r.json())
-      .then(list => setSavedThemes(list))
-      .catch(err => console.error('failed to load themes', err));
+      .then(setSavedThemes)
+      .catch(err => console.error('themes load failed', err));
     return () => { socket.off('search-results'); socket.off('update-verse'); };
   }, []);
 
-  /* ── Close drawer on outside click (mid/compact) ── */
+  /* ── Close drawer & theme popover on outside tap ── */
   useEffect(() => {
-    if (!drawerOpen) return;
-    const handler = (e) => {
-      if (!e.target.closest('.search-drawer') && !e.target.closest('.hdr-btn')) {
+    if (!drawerOpen && !themePopover) return;
+    const handler = e => {
+      if (!e.target.closest('.search-drawer') && !e.target.closest('.hdr-btn') && !e.target.closest('.hdr-theme-wrap'))
         setDrawerOpen(false);
-      }
+      if (!e.target.closest('.hdr-theme-wrap'))
+        setThemePopover(false);
     };
     document.addEventListener('mousedown', handler);
-    document.addEventListener('touchstart', handler);
-    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler); };
-  }, [drawerOpen]);
+    document.addEventListener('touchstart', handler, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
+  }, [drawerOpen, themePopover]);
 
-  const handleThemeChange = (theme) => {
+  /* ── Handlers ── */
+  const handleThemeChange = theme => {
     setCurrentTheme(theme);
     if (staged) setStaged(prev => ({ ...prev, theme }));
     socket.emit('update-theme', theme);
   };
 
-  const handleSearch = (e) => {
+  const handleSearch = e => {
     setQuery(e.target.value);
     setCurrentPage(0);
     socket.emit('search', e.target.value);
   };
 
-  const handleSearchKeyDown = (e) => {
+  const handleSearchKeyDown = e => {
     if (e.key === 'Enter' && results.length > 0) goLiveDirectly(results[0]);
   };
 
-  const handleSelectVerse = (verse) => {
-    const verseWithTheme = { ...verse, theme: currentTheme };
-    setStaged(verseWithTheme);
-    // In mid/compact: close drawer after staging so user sees the main panel update
-    if (layoutMode !== 'full') setDrawerOpen(false);
+  const selectVerse = verse => {
+    setStaged({ ...verse, theme: currentTheme });
+    setDrawerOpen(false);
   };
 
-  const goLiveDirectly = (verse) => {
-    const verseWithTheme = { ...verse, theme: currentTheme };
-    socket.emit('go-live', { verse: verseWithTheme, theme: verseWithTheme.theme, language: currentLanguage });
-    setLiveVerse(verseWithTheme);
+  const goLiveDirectly = verse => {
+    const v = { ...verse, theme: currentTheme };
+    socket.emit('go-live', { verse: v, theme: v.theme, language: currentLanguage });
+    setLiveVerse(v);
     setCurrentSegment(0);
-    setHistory([verseWithTheme, ...history.slice(0, 9)]);
-    if (layoutMode !== 'full') setDrawerOpen(false);
+    setHistory(h => [v, ...h.slice(0, 9)]);
+    setDrawerOpen(false);
   };
 
   const goLive = () => {
@@ -176,53 +206,51 @@ const Presenter = () => {
     socket.emit('go-live', { verse: staged, theme: staged.theme, language: currentLanguage });
     setLiveVerse(staged);
     setCurrentSegment(0);
-    setHistory([staged, ...history.slice(0, 9)]);
+    setHistory(h => [staged, ...h.slice(0, 9)]);
     setStaged(null);
   };
 
-  const handleSegmentNavigation = (direction) => {
-    if (!liveVerse || !liveVerse.segments) return;
+  const navigateSegment = direction => {
+    if (!liveVerse?.segments) return;
     const limit = liveVerse.segments.length - 1;
-    const newSeg = direction === 'next' ? Math.min(currentSegment + 1, limit) : Math.max(currentSegment - 1, 0);
-    if (newSeg !== currentSegment) {
-      setCurrentSegment(newSeg);
-      socket.emit('update-verse', { ...liveVerse, currentSegment: newSeg });
+    const next = direction === 'next' ? Math.min(currentSegment + 1, limit) : Math.max(currentSegment - 1, 0);
+    if (next !== currentSegment) {
+      setCurrentSegment(next);
+      socket.emit('update-verse', { ...liveVerse, currentSegment: next });
     }
   };
 
   const fetchAdjacent = async (direction, preferStaged = false) => {
     const source = preferStaged ? (staged || liveVerse) : liveVerse;
-    if (!source || !source.verse_id) return;
+    if (!source?.verse_id) return;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
-      ...(currentLanguage && ['ceb', 'tl'].includes(currentLanguage) && { language: currentLanguage })
+      ...((['ceb', 'tl'].includes(currentLanguage)) && { language: currentLanguage })
     });
     try {
-      const res = await fetch(`${API_URL}/verse/adjacent?${params.toString()}`);
+      const res = await fetch(`${API_URL}/verse/adjacent?${params}`);
       if (!res.ok) return;
       const data = await res.json();
-      const verseWithTheme = { ...data, theme: currentTheme };
+      const v = { ...data, theme: currentTheme };
       if (preferStaged && staged) {
-        setStaged(verseWithTheme);
+        setStaged(v);
       } else {
-        socket.emit('go-live', { verse: verseWithTheme, theme: verseWithTheme.theme });
-        setLiveVerse(verseWithTheme);
+        socket.emit('go-live', { verse: v, theme: v.theme });
+        setLiveVerse(v);
         setCurrentSegment(0);
-        setHistory([verseWithTheme, ...history.slice(0, 9)]);
+        setHistory(h => [v, ...h.slice(0, 9)]);
       }
     } catch (err) { console.error('adjacent fetch failed', err); }
   };
 
   const handlePreviewTextSelection = () => {
-    const selection = window.getSelection();
-    if (!selection) return;
-    const selectedText = selection.toString().trim();
-    if (!selectedText) return;
-    setHighlightedText(selectedText);
-    socket.emit('highlight-text', selectedText);
+    const sel = window.getSelection()?.toString().trim();
+    if (!sel) return;
+    setHighlightedText(sel);
+    socket.emit('highlight-text', sel);
   };
 
-  const handleLanguageChange = (e) => {
+  const handleLanguageChange = e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     socket.emit('update-language', lang);
@@ -231,344 +259,85 @@ const Presenter = () => {
 
   const renderPreviewText = () => {
     if (!liveVerse) return '';
-    const text = liveVerse.segments?.length > 0 ? liveVerse.segments[currentSegment] : liveVerse.scripture_text;
+    const text = liveVerse.segments?.length > 0
+      ? liveVerse.segments[currentSegment]
+      : liveVerse.scripture_text;
     if (!highlightedText) return text;
     const parts = text.split(new RegExp(`(${highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
-    return parts.map((part, idx) =>
+    return parts.map((part, i) =>
       part.toLowerCase() === highlightedText.toLowerCase()
-        ? <span key={idx} className="highlight-yellow">{part}</span>
+        ? <span key={i} className="highlight-yellow">{part}</span>
         : part
     );
   };
 
-  /* ─────────────────────────────────────────────────────────────────────
-     SHARED BLOCKS (rendered inside different containers per layout mode)
-     ───────────────────────────────────────────────────────────────────── */
+  const openDrawer = tab => {
+    setDrawerTab(tab);
+    setDrawerOpen(open => drawerTab === tab ? !open : true);
+  };
 
-  const SearchPanel = ({ compact = false }) => (
-    <div className={`search-panel-inner${compact ? ' search-panel-compact' : ''}`}>
-      <div className="search-panel-head">
-        <span className="panel-label"><IconSearch /> Search Scripture</span>
-        {query.length > 0 && (
-          <span className="search-results-count">
-            {results.length === 0 ? 'No results' : `${results.length} found`}
-          </span>
-        )}
-      </div>
-      <input
-        type="text"
-        className="search-input"
-        placeholder="John 3:16 or 'faith'…"
-        value={query}
-        onChange={handleSearch}
-        onKeyDown={handleSearchKeyDown}
-        autoFocus={drawerOpen}
-      />
-      <div className="results-list">
-        {results.length > 0 ? (() => {
-          const totalPages = Math.ceil(results.length / PAGE_SIZE);
-          const pageSlice = results.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-          return (
-            <>
-              <ul>
-                {pageSlice.map(verse => (
-                  <li
-                    key={verse.verse_title}
-                    className="result-item"
-                    onClick={() => handleSelectVerse(verse)}
-                    onDoubleClick={() => goLiveDirectly(verse)}
-                  >
-                    <div className="result-item-top">
-                      <div className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</div>
-                      <button
-                        className="result-live-icon"
-                        onClick={e => { e.stopPropagation(); goLiveDirectly(verse); }}
-                        aria-label="Go live now"
-                      >●</button>
-                    </div>
-                    <div className="result-text">{verse.scripture_text}</div>
-                  </li>
-                ))}
-              </ul>
-              {totalPages > 1 && (
-                <div className="results-pagination">
-                  <button className="pagination-arrow" onClick={() => setCurrentPage(p => Math.max(0, p - 1))} disabled={currentPage === 0}>‹</button>
-                  <div className="pagination-track">
-                    {Array.from({ length: totalPages }).map((_, i) => (
-                      <button key={i} className={`pagination-pip ${i === currentPage ? 'active' : ''}`} onClick={() => setCurrentPage(i)} aria-label={`Page ${i + 1}`} />
-                    ))}
-                  </div>
-                  <span className="pagination-label">{currentPage + 1}<span className="pagination-sep">/</span>{totalPages}</span>
-                  <button className="pagination-arrow" onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))} disabled={currentPage === totalPages - 1}>›</button>
-                </div>
-              )}
-            </>
-          );
-        })() : (
-          <div className="empty-state">{query.length > 0 ? 'No verses found' : 'Search for a verse to begin…'}</div>
-        )}
-      </div>
-    </div>
-  );
+  const hasSegments = liveVerse?.segments?.length > 1;
+  const totalPages  = Math.ceil(results.length / PAGE_SIZE);
 
-  const HistoryPanel = () => (
-    <div className="history-panel-inner">
-      <span className="panel-label"><IconClock /> Recent</span>
-      {history.length > 0 ? (
-        <ul className="history-list">
-          {history.map((verse, i) => (
-            <li key={i} className="history-item" onClick={() => { setStaged(verse); if (layoutMode !== 'full') setDrawerOpen(false); }}>
-              <span className="history-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <div className="empty-state">No recent verses</div>
-      )}
-    </div>
-  );
+  /* ── Render ── */
+  return (
+    <div className="presenter-container">
 
-  /* Nav buttons — used in both header bar and main panel card */
-  const NavControls = ({ size = 'normal' }) => (
-    <div className={`nav-controls nav-controls--${size}`}>
-      <button className="nav-btn nav-btn--verse" onClick={() => fetchAdjacent('prev')} disabled={!navSource} aria-label="Previous verse">
-        <IconChevronLeft />{size === 'normal' && <span>Prev</span>}
-      </button>
-      <button className="nav-btn nav-btn--seg" onClick={() => handleSegmentNavigation('prev')}
-        disabled={!liveVerse?.segments || liveVerse.segments.length <= 1 || currentSegment === 0} aria-label="Previous segment">
-        <span className="seg-arrow">◀</span>
-      </button>
-      <span className="segment-counter">
-        {liveVerse?.segments ? `${currentSegment + 1}/${liveVerse.segments.length}` : '—'}
-      </span>
-      <button className="nav-btn nav-btn--seg" onClick={() => handleSegmentNavigation('next')}
-        disabled={!liveVerse?.segments || liveVerse.segments.length <= 1 || currentSegment === liveVerse.segments.length - 1} aria-label="Next segment">
-        <span className="seg-arrow">▶</span>
-      </button>
-      <button className="nav-btn nav-btn--verse" onClick={() => fetchAdjacent('next')} disabled={!navSource} aria-label="Next verse">
-        {size === 'normal' && <span>Next</span>}<IconChevronRight />
-      </button>
-    </div>
-  );
+      {/* ════════════════════════════════════════
+          COMMAND BAR HEADER
+          ════════════════════════════════════════ */}
+      <header className="presenter-header">
 
-  const ThemeButtons = ({ onClose }) => (
-    <div className="theme-btn-group">
-      {[
-        { key: 'light', label: '☀ Light', theme: themes.light },
-        { key: 'dark', label: '☽ Dark', theme: themes.dark },
-        ...savedThemes.map(t => ({ key: t.id, label: t.name, theme: t.data }))
-      ].map(({ key, label, theme }) => (
-        <button
-          key={key}
-          className={`theme-btn ${currentTheme === theme ? 'active' : ''}`}
-          onClick={() => { handleThemeChange(theme); onClose?.(); }}
-        >{label}</button>
-      ))}
-    </div>
-  );
-
-  /* ─────────────────────────────────────────────────────────────────────
-     LAYOUT: FULL (≥ 1100px) — classic 3-column
-     ───────────────────────────────────────────────────────────────────── */
-  const LayoutFull = () => (
-    <>
-      <header className="presenter-header presenter-header--full">
-        <div className="presenter-header-left">
-          <EmblemSVG size={28} />
-          <div>
-            <h1>Scripture Presenter</h1>
-            <p>Projection control console</p>
-          </div>
-        </div>
-        {liveVerse && (
-          <div className="live-badge"><span className="live-badge-dot" />Live</div>
-        )}
-      </header>
-
-      <div className="presenter-layout presenter-layout--full">
-        {/* Left: Search */}
-        <div className="presenter-panel search-panel">
-          <h2 className="panel-heading"><span className="panel-heading-icon">🔍</span>Search Scripture</h2>
-          {query.length > 0 && (
-            <div className="search-results-count">
-              {results.length === 0 ? 'No verses found' : results.length === 1 ? '1 verse found' : `${results.length} verses found`}
-            </div>
-          )}
-          <input type="text" className="search-input" placeholder="e.g., John 3:16 or 'faith'…" value={query} onChange={handleSearch} onKeyDown={handleSearchKeyDown} />
-          <div className="results-list">
-            {results.length > 0 ? (() => {
-              const totalPages = Math.ceil(results.length / PAGE_SIZE);
-              const pageSlice = results.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-              return (
-                <>
-                  <ul>
-                    {pageSlice.map(verse => (
-                      <li key={verse.verse_title} className="result-item" onClick={() => handleSelectVerse(verse)} onDoubleClick={() => goLiveDirectly(verse)} title="Double-click to go live">
-                        <div className="result-item-top">
-                          <div className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</div>
-                          <button className="result-live-icon" onClick={e => { e.stopPropagation(); goLiveDirectly(verse); }} aria-label="Go live now">●</button>
-                        </div>
-                        <div className="result-text">{verse.scripture_text}</div>
-                      </li>
-                    ))}
-                  </ul>
-                  {totalPages > 1 && (
-                    <div className="results-pagination">
-                      <button className="pagination-arrow" onClick={() => setCurrentPage(p => Math.max(0, p - 1))} disabled={currentPage === 0}>‹</button>
-                      <div className="pagination-track">{Array.from({ length: totalPages }).map((_, i) => (<button key={i} className={`pagination-pip ${i === currentPage ? 'active' : ''}`} onClick={() => setCurrentPage(i)} aria-label={`Page ${i + 1}`} />))}</div>
-                      <span className="pagination-label">{currentPage + 1}<span className="pagination-sep">/</span>{totalPages}</span>
-                      <button className="pagination-arrow" onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))} disabled={currentPage === totalPages - 1}>›</button>
-                    </div>
-                  )}
-                </>
-              );
-            })() : <div className="empty-state">Search for a verse<br />to begin…</div>}
-          </div>
-        </div>
-
-        {/* Center: Main */}
-        <div className="main-panel">
-          <div className="navigation-section">
-            <p className="nav-label">
-              <span>{liveVerse ? 'Now Live' : 'Navigation'}</span>
-              <span className="nav-label-verse">{navSource ? `${navSource.book_title} ${navSource.chapter_number}:${navSource.verse_number}` : 'No verse selected'}</span>
-              {liveVerse?.segments?.length > 1 && <span className="segmented-badge">Segmented</span>}
-              <select className="language-select" value={currentLanguage} onChange={handleLanguageChange}>
-                <option value="en">English</option>
-                <option value="tl">Tagalog</option>
-                <option value="ceb">Cebuano</option>
-              </select>
-            </p>
-            <div className="nav-controls">
-              <button className="persistent-nav-button" onClick={() => fetchAdjacent('prev')} disabled={!navSource}>
-                <span className="nav-btn-main">← Prev</span><span className="nav-btn-icon">←</span><span className="nav-btn-label">Verse</span>
-              </button>
-              <button className="segment-nav-button" onClick={() => handleSegmentNavigation('prev')} disabled={!liveVerse?.segments || liveVerse.segments.length <= 1 || currentSegment === 0}>
-                <span className="nav-btn-main">◀</span><span className="nav-btn-icon">◀</span><span className="nav-btn-label">Seg</span>
-              </button>
-              <span className="segment-counter">{liveVerse?.segments ? `${currentSegment + 1}/${liveVerse.segments.length}` : '1/1'}</span>
-              <button className="segment-nav-button" onClick={() => handleSegmentNavigation('next')} disabled={!liveVerse?.segments || liveVerse.segments.length <= 1 || currentSegment === liveVerse.segments.length - 1}>
-                <span className="nav-btn-main">▶</span><span className="nav-btn-icon">▶</span><span className="nav-btn-label">Seg</span>
-              </button>
-              <button className="persistent-nav-button" onClick={() => fetchAdjacent('next')} disabled={!navSource}>
-                <span className="nav-btn-main">Next →</span><span className="nav-btn-icon">→</span><span className="nav-btn-label">Verse</span>
-              </button>
-            </div>
-          </div>
-
-          {staged ? (
-            <div className="staged-section">
-              <h2 className="panel-heading"><span className="panel-heading-icon">⏳</span>Staged</h2>
-              <div className="staged-verse-display">
-                <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
-                <p className="staged-text">{staged.scripture_text}</p>
-              </div>
-              <div className="staging-controls">
-                <button className="nav-button" onClick={() => fetchAdjacent('prev', true)}>← Previous</button>
-                <button className="nav-button" onClick={() => fetchAdjacent('next', true)}>Next →</button>
-              </div>
-              <button className="go-live-button" onClick={goLive}>● Go Live</button>
-            </div>
-          ) : !liveVerse ? (
-            <div className="staged-section empty">
-              <p className="empty-state">Select a verse from the search panel to stage it here</p>
-            </div>
-          ) : null}
-
-          {liveVerse && (
-            <div className="preview-section">
-              <h2>Client Preview — select text to highlight</h2>
-              <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
-                <div className="preview-title">{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</div>
-                <div className="preview-text">{renderPreviewText()}</div>
-                {liveVerse.segments && currentSegment < liveVerse.segments.length - 1 && <div className="preview-cont">cont…</div>}
-              </div>
-            </div>
-          )}
-
-          <div className="theme-section">
-            <h2>Theme &amp; Display</h2>
-            <div className="theme-buttons">
-              <button className={`theme-btn ${currentTheme === themes.light ? 'active' : ''}`} onClick={() => handleThemeChange(themes.light)}>Light</button>
-              <button className={`theme-btn ${currentTheme === themes.dark ? 'active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>Dark</button>
-              {savedThemes.map(t => <button key={t.id} className="theme-btn saved" onClick={() => handleThemeChange(t.data)}>{t.name}</button>)}
-            </div>
-            <div className="theme-control-group">
-              <label htmlFor="bg-url">Custom Background URL</label>
-              <div className="input-group">
-                <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                <button className="control-button" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` }); setBgUrlInput(''); }}>Apply</button>
-              </div>
-            </div>
-            <div className="theme-control-group">
-              <label htmlFor="theme-name">Save Current Theme</label>
-              <div className="input-group">
-                <input id="theme-name" type="text" placeholder="e.g., Christmas 2025" value={newThemeName} onChange={e => setNewThemeName(e.target.value)} />
-                <button className="control-button" onClick={() => {
-                  if (!newThemeName) return;
-                  fetch(`${API_URL}/themes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newThemeName, data: currentTheme }) })
-                    .then(r => r.json()).then(t => { setSavedThemes([...savedThemes, t]); setNewThemeName(''); })
-                    .catch(err => console.error('save theme failed', err));
-                }}>Save</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: History */}
-        <div className="presenter-panel history-panel">
-          <h2 className="panel-heading"><span className="panel-heading-icon">📜</span>Recent</h2>
-          {history.length > 0 ? (
-            <ul className="history-list">
-              {history.map((verse, i) => (
-                <li key={i} className="history-item" onClick={() => setStaged(verse)} title="Click to re-stage">
-                  <span className="history-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-                </li>
-              ))}
-            </ul>
-          ) : <div className="empty-state">Verses you display<br />will appear here</div>}
-        </div>
-      </div>
-    </>
-  );
-
-  /* ─────────────────────────────────────────────────────────────────────
-     LAYOUT: MID + COMPACT (< 1100px)
-     Header command bar + full-width main + slide-in drawer
-     ───────────────────────────────────────────────────────────────────── */
-  const LayoutCondensed = () => (
-    <>
-      {/* ── Command Bar Header ── */}
-      <header className="presenter-header presenter-header--bar">
-        {/* Left: brand */}
+        {/* Brand */}
         <div className="hdr-brand">
-          <EmblemSVG size={22} />
+          <EmblemSVG size={24} />
           <span className="hdr-title">Scripture</span>
         </div>
 
-        {/* Center: live verse + nav controls inline */}
+        {/* Live verse ref + inline nav */}
         <div className="hdr-center">
           {liveVerse ? (
             <>
-              <span className="hdr-verse-ref">
-                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
-                {liveVerse?.segments?.length > 1 && <span className="hdr-seg-badge">seg</span>}
-              </span>
               <div className="hdr-nav">
-                <button className="hdr-nav-btn" onClick={() => fetchAdjacent('prev')} aria-label="Prev verse" title="Previous verse"><IconChevronLeft /><IconChevronLeft /></button>
-                <button className="hdr-nav-btn" onClick={() => handleSegmentNavigation('prev')} disabled={!liveVerse?.segments || currentSegment === 0} aria-label="Prev segment" title="Previous segment"><IconChevronLeft /></button>
-                <span className="hdr-seg-count">{liveVerse?.segments ? `${currentSegment + 1}/${liveVerse.segments.length}` : '—'}</span>
-                <button className="hdr-nav-btn" onClick={() => handleSegmentNavigation('next')} disabled={!liveVerse?.segments || currentSegment === liveVerse.segments.length - 1} aria-label="Next segment" title="Next segment"><IconChevronRight /></button>
-                <button className="hdr-nav-btn" onClick={() => fetchAdjacent('next')} aria-label="Next verse" title="Next verse"><IconChevronRight /><IconChevronRight /></button>
+                {/* ←← prev verse */}
+                <button className="hdr-nav-btn hdr-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
+                  <IconChevronLeft /><IconChevronLeft />
+                </button>
+                {/* ◀ prev segment */}
+                <button className="hdr-nav-btn hdr-nav-btn--seg" onClick={() => navigateSegment('prev')}
+                  disabled={!hasSegments || currentSegment === 0} aria-label="Previous segment" title="Previous segment">
+                  <IconChevronLeft />
+                </button>
+
+                <div className="hdr-verse-info">
+                  <span className="hdr-verse-ref">
+                    {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+                  </span>
+                  {hasSegments && (
+                    <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
+                  )}
+                </div>
+
+                {/* ▶ next segment */}
+                <button className="hdr-nav-btn hdr-nav-btn--seg" onClick={() => navigateSegment('next')}
+                  disabled={!hasSegments || currentSegment === liveVerse.segments.length - 1}
+                  aria-label="Next segment" title="Next segment">
+                  <IconChevronRight />
+                </button>
+                {/* →→ next verse */}
+                <button className="hdr-nav-btn hdr-nav-btn--verse" onClick={() => fetchAdjacent('next')} aria-label="Next verse" title="Next verse">
+                  <IconChevronRight /><IconChevronRight />
+                </button>
               </div>
             </>
           ) : (
-            <span className="hdr-no-verse">No verse selected</span>
+            <span className="hdr-no-verse">Tap 🔍 to find a verse</span>
           )}
         </div>
 
-        {/* Right: language + theme + search + live badge */}
+        {/* Right controls */}
         <div className="hdr-right">
+          {/* Language */}
           <select className="hdr-lang-select" value={currentLanguage} onChange={handleLanguageChange} aria-label="Language">
             <option value="en">EN</option>
             <option value="tl">TL</option>
@@ -577,132 +346,254 @@ const Presenter = () => {
 
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
-            <button className="hdr-btn hdr-btn--theme" onClick={() => setThemePopover(o => !o)} aria-label="Theme" title="Change theme">
-              <IconTheme />
-            </button>
+            <HdrBtn onClick={() => setThemePopover(o => !o)} active={themePopover} label="Theme" title="Change theme">
+              <IconPalette />
+            </HdrBtn>
             {themePopover && (
               <div className="hdr-theme-popover">
-                <button className={`theme-btn ${currentTheme === themes.light ? 'active' : ''}`} onClick={() => { handleThemeChange(themes.light); setThemePopover(false); }}>☀ Light</button>
-                <button className={`theme-btn ${currentTheme === themes.dark ? 'active' : ''}`} onClick={() => { handleThemeChange(themes.dark); setThemePopover(false); }}>☽ Dark</button>
-                {savedThemes.map(t => (
-                  <button key={t.id} className="theme-btn saved" onClick={() => { handleThemeChange(t.data); setThemePopover(false); }}>{t.name}</button>
+                <div className="popover-label">Theme</div>
+                {[
+                  { label: '☀ Light', theme: themes.light },
+                  { label: '☽ Dark',  theme: themes.dark  },
+                  ...savedThemes.map(t => ({ label: t.name, theme: t.data }))
+                ].map(({ label, theme }) => (
+                  <button
+                    key={label}
+                    className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
+                    onClick={() => { handleThemeChange(theme); setThemePopover(false); }}
+                  >{label}</button>
                 ))}
+                <div className="popover-divider" />
+                <div className="popover-label">Custom background</div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    placeholder="https://…"
+                    value={bgUrlInput}
+                    onChange={e => setBgUrlInput(e.target.value)}
+                  />
+                  <button className="popover-apply" onClick={() => {
+                    if (!bgUrlInput) return;
+                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                    setBgUrlInput('');
+                    setThemePopover(false);
+                  }}>Apply</button>
+                </div>
+                <div className="popover-label" style={{ marginTop: '0.4rem' }}>Save theme</div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    placeholder="Name…"
+                    value={newThemeName}
+                    onChange={e => setNewThemeName(e.target.value)}
+                  />
+                  <button className="popover-apply" onClick={() => {
+                    if (!newThemeName) return;
+                    fetch(`${API_URL}/themes`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name: newThemeName, data: currentTheme }),
+                    })
+                      .then(r => r.json())
+                      .then(t => { setSavedThemes(s => [...s, t]); setNewThemeName(''); })
+                      .catch(err => console.error('save theme failed', err));
+                  }}>Save</button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Search / Recent drawer toggle */}
-          <button
-            className={`hdr-btn hdr-btn--search ${drawerOpen && drawerTab === 'search' ? 'hdr-btn--active' : ''}`}
-            onClick={() => { setDrawerTab('search'); setDrawerOpen(o => drawerTab === 'search' ? !o : true); }}
-            aria-label="Toggle search"
-          ><IconSearch /></button>
+          {/* Search toggle */}
+          <HdrBtn onClick={() => openDrawer('search')} active={drawerOpen && drawerTab === 'search'} label="Search scripture">
+            <IconSearch />
+          </HdrBtn>
 
-          <button
-            className={`hdr-btn hdr-btn--recent ${drawerOpen && drawerTab === 'history' ? 'hdr-btn--active' : ''}`}
-            onClick={() => { setDrawerTab('history'); setDrawerOpen(o => drawerTab === 'history' ? !o : true); }}
-            aria-label="Toggle recent"
-          ><IconClock /></button>
+          {/* Recent toggle */}
+          <HdrBtn onClick={() => openDrawer('history')} active={drawerOpen && drawerTab === 'history'} label="Recent verses">
+            <IconClock />
+          </HdrBtn>
 
-          {liveVerse && <div className="live-badge live-badge--mini"><span className="live-badge-dot" />Live</div>}
+          {/* Live badge */}
+          {liveVerse && (
+            <div className="live-badge">
+              <span className="live-badge-dot" />
+              <span>Live</span>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* ── Slide-in Drawer (search / history) ── */}
-      <div className={`search-drawer search-drawer--${layoutMode} ${drawerOpen ? 'search-drawer--open' : ''}`}>
-        <div className="drawer-tabs">
-          <button className={`drawer-tab ${drawerTab === 'search' ? 'active' : ''}`} onClick={() => setDrawerTab('search')}><IconSearch /> Search</button>
-          <button className={`drawer-tab ${drawerTab === 'history' ? 'active' : ''}`} onClick={() => setDrawerTab('history')}><IconClock /> Recent</button>
-          <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close"><IconClose /></button>
+      {/* ════════════════════════════════════════
+          SLIDE-IN DRAWER  (search + history)
+          ════════════════════════════════════════ */}
+      <div className={`search-drawer${drawerOpen ? ' search-drawer--open' : ''}`}>
+        <div className="drawer-header">
+          <div className="drawer-tabs">
+            <button className={`drawer-tab${drawerTab === 'search' ? ' active' : ''}`} onClick={() => setDrawerTab('search')}>
+              <IconSearch /> Search
+            </button>
+            <button className={`drawer-tab${drawerTab === 'history' ? ' active' : ''}`} onClick={() => setDrawerTab('history')}>
+              <IconClock /> Recent
+            </button>
+          </div>
+          <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close drawer">
+            <IconClose />
+          </button>
         </div>
+
         <div className="drawer-body">
-          {drawerTab === 'search' ? <SearchPanel compact={layoutMode === 'compact'} /> : <HistoryPanel />}
+          {drawerTab === 'search' ? (
+            <div className="drawer-search">
+              {query.length > 0 && (
+                <div className="search-results-count">
+                  {results.length === 0 ? 'No verses found' : `${results.length} verse${results.length === 1 ? '' : 's'} found`}
+                </div>
+              )}
+              <input
+                type="text"
+                className="search-input"
+                placeholder="John 3:16 or 'faith'…"
+                value={query}
+                onChange={handleSearch}
+                onKeyDown={handleSearchKeyDown}
+                autoFocus={drawerOpen && drawerTab === 'search'}
+              />
+              <div className="results-list">
+                {results.length > 0
+                  ? <SearchResults
+                      results={results}
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onSelect={selectVerse}
+                      onGoLive={goLiveDirectly}
+                      onPageChange={setCurrentPage}
+                      PAGE_SIZE={PAGE_SIZE}
+                    />
+                  : <div className="empty-state">
+                      {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin…</>}
+                    </div>
+                }
+              </div>
+            </div>
+          ) : (
+            <div className="drawer-history">
+              {history.length > 0 ? (
+                <ul className="history-list">
+                  {history.map((verse, i) => (
+                    <li key={i} className="history-item" onClick={() => { setStaged(verse); setDrawerOpen(false); }}>
+                      <span className="history-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
+                      <span className="history-hint">tap to stage</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="empty-state">Verses you display<br />will appear here</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* ── Drawer backdrop ── */}
+      {/* Backdrop */}
       {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
 
-      {/* ── Full-width main content ── */}
-      <div className="main-panel main-panel--condensed">
+      {/* ════════════════════════════════════════
+          MAIN CONTENT AREA
+          ════════════════════════════════════════ */}
+      <main className="main-panel">
 
-        {/* Staged or empty state */}
+        {/* ── Staged verse card ── */}
         {staged ? (
-          <div className="staged-section">
-            <h2 className="panel-heading"><span className="panel-heading-icon">⏳</span>Staged</h2>
+          <section className="card card--staged">
+            <div className="card-header">
+              <span className="card-label">⏳ Staged</span>
+              <div className="staging-nav">
+                <button className="nav-button" onClick={() => fetchAdjacent('prev', true)}>← Prev</button>
+                <button className="nav-button" onClick={() => fetchAdjacent('next', true)}>Next →</button>
+              </div>
+            </div>
             <div className="staged-verse-display">
               <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
-            <div className="staging-controls">
-              <button className="nav-button" onClick={() => fetchAdjacent('prev', true)}>← Prev</button>
-              <button className="nav-button" onClick={() => fetchAdjacent('next', true)}>Next →</button>
-            </div>
             <button className="go-live-button" onClick={goLive}>● Go Live</button>
-          </div>
+          </section>
         ) : (
-          <div className="staged-section empty">
+          <section className="card card--empty">
             <p className="empty-state">
               {liveVerse
-                ? <>Now live: <strong>{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</strong> — tap <IconSearch /> to search next</>
-                : 'Tap the 🔍 button above to search and select a verse'}
+                ? <><strong>{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</strong> is live — search for the next verse</>
+                : <>Tap <IconSearch /> above to search and select a verse</>}
             </p>
-          </div>
+          </section>
         )}
 
-        {/* Live preview */}
+        {/* ── Live preview card ── */}
         {liveVerse && (
-          <div className="preview-section">
-            <h2>Client Preview <span className="preview-hint">— select text to highlight</span></h2>
-            <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
-              <div className="preview-title">{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</div>
-              <div className="preview-text">{renderPreviewText()}</div>
-              {liveVerse.segments && currentSegment < liveVerse.segments.length - 1 && <div className="preview-cont">cont…</div>}
+          <section className="card card--preview">
+            <div className="card-header">
+              <span className="card-label">👁 Preview</span>
+              <span className="card-hint">select text to highlight</span>
             </div>
-          </div>
+            <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
+              <div className="preview-title">
+                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+              </div>
+              <div className="preview-text">{renderPreviewText()}</div>
+              {hasSegments && currentSegment < liveVerse.segments.length - 1 && (
+                <div className="preview-cont">cont…</div>
+              )}
+            </div>
+          </section>
         )}
 
-        {/* Theme section — compact version */}
-        <div className="theme-section theme-section--condensed">
-          <h2>Theme &amp; Display</h2>
+        {/* ── Theme card ── */}
+        <section className="card card--theme">
+          <div className="card-header">
+            <span className="card-label">🎨 Theme &amp; Display</span>
+          </div>
           <div className="theme-buttons">
-            <button className={`theme-btn ${currentTheme === themes.light ? 'active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
-            <button className={`theme-btn ${currentTheme === themes.dark ? 'active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
-            {savedThemes.map(t => <button key={t.id} className="theme-btn saved" onClick={() => handleThemeChange(t.data)}>{t.name}</button>)}
+            <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
+            <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
+            {savedThemes.map(t => (
+              <button key={t.id} className={`theme-btn saved${currentTheme === t.data ? ' active' : ''}`} onClick={() => handleThemeChange(t.data)}>{t.name}</button>
+            ))}
           </div>
-          <div className="theme-control-group">
-            <label htmlFor="bg-url-c">Background URL</label>
-            <div className="input-group">
-              <input id="bg-url-c" type="text" placeholder="https://…" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-              <button className="control-button" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` }); setBgUrlInput(''); }}>Apply</button>
+          <div className="theme-inputs">
+            <div className="theme-control-group">
+              <label htmlFor="bg-url">Background URL</label>
+              <div className="input-group">
+                <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                <button className="control-button" onClick={() => {
+                  if (!bgUrlInput) return;
+                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                  setBgUrlInput('');
+                }}>Apply</button>
+              </div>
+            </div>
+            <div className="theme-control-group">
+              <label htmlFor="theme-name">Save Current Theme</label>
+              <div className="input-group">
+                <input id="theme-name" type="text" placeholder="e.g., Christmas 2025" value={newThemeName} onChange={e => setNewThemeName(e.target.value)} />
+                <button className="control-button" onClick={() => {
+                  if (!newThemeName) return;
+                  fetch(`${API_URL}/themes`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newThemeName, data: currentTheme }),
+                  })
+                    .then(r => r.json())
+                    .then(t => { setSavedThemes(s => [...s, t]); setNewThemeName(''); })
+                    .catch(err => console.error('save theme failed', err));
+                }}>Save</button>
+              </div>
             </div>
           </div>
-          <div className="theme-control-group">
-            <label htmlFor="theme-name-c">Save Theme</label>
-            <div className="input-group">
-              <input id="theme-name-c" type="text" placeholder="e.g., Christmas 2025" value={newThemeName} onChange={e => setNewThemeName(e.target.value)} />
-              <button className="control-button" onClick={() => {
-                if (!newThemeName) return;
-                fetch(`${API_URL}/themes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newThemeName, data: currentTheme }) })
-                  .then(r => r.json()).then(t => { setSavedThemes([...savedThemes, t]); setNewThemeName(''); })
-                  .catch(err => console.error('save theme failed', err));
-              }}>Save</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+        </section>
 
-  /* ─────────────────────────────────────────────────────────────────────
-     ROOT RENDER
-     ───────────────────────────────────────────────────────────────────── */
-  return (
-    <div
-      ref={containerRef}
-      className={`presenter-container presenter-container--${layoutMode}`}
-    >
-      {layoutMode === 'full' ? <LayoutFull /> : <LayoutCondensed />}
+      </main>
     </div>
   );
 };
