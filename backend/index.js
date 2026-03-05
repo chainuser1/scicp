@@ -1064,7 +1064,7 @@ const searchScripture = (input) => {
             params.push(ref.verse);
         }
         
-        sql += '\n    ORDER BY verse_number ASC\n    LIMIT 50';
+        sql += '\n    ORDER BY verse_id ASC\n    LIMIT 50';
         const stmt = db.prepare(sql);
         const result = stmt.all(...params);
         if (result.length > 0) return result;
