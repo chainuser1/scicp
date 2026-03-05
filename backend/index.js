@@ -29,11 +29,14 @@ fastify.get('/', async (request, reply) => {
 });
 
 // theme management endpoints
+/*
 fastify.get('/themes', async (request, reply) => {
   const rows = db.prepare('SELECT id, name, data FROM themes').all();
   return rows.map(r => ({ id: r.id, name: r.name, data: JSON.parse(r.data) }));
 });
+*/
 
+/*
 fastify.post('/themes', async (request, reply) => {
   const { name, data } = request.body;
   if (!name || !data) {
@@ -50,7 +53,9 @@ fastify.post('/themes', async (request, reply) => {
     return { error: 'could not create theme' };
   }
 });
+*/
 
+/*
 fastify.put('/themes/:id', async (request, reply) => {
   const { id } = request.params;
   const { name, data } = request.body;
@@ -68,7 +73,9 @@ fastify.put('/themes/:id', async (request, reply) => {
     return { error: 'could not update theme' };
   }
 });
+*/
 
+/*
 fastify.delete('/themes/:id', async (request, reply) => {
   const { id } = request.params;
   try {
@@ -81,7 +88,7 @@ fastify.delete('/themes/:id', async (request, reply) => {
     return { error: 'could not delete theme' };
   }
 });
-
+*/
 
 const io = new Server(fastify.server, {
   cors: {
@@ -89,6 +96,7 @@ const io = new Server(fastify.server, {
   }
 });
 
+/*
 // ensure themes table exists
 try {
   db.exec(`
@@ -101,6 +109,7 @@ try {
 } catch (err) {
   fastify.log.error('failed to ensure themes table', err);
 }
+*/
 
 // ─── FTS5 Setup: Drop & Rebuild with advanced features ───────────────────────
 //
