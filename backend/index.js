@@ -724,7 +724,12 @@ const DOCTRINE_ALIASES = {
 
   // abrahamic covenant
   'abrahamic': {
-    phrases: ['abrahamic covenant', 'covenant of Abraham', 'covenant of Isaac', 'covenant of Jacob','eternal marriage', 'priesthood lineage', 'familes of the earth blessed through Abraham'],
+    phrases: ['abrahamic covenant', 'covenant of Abraham', 
+      'covenant of Isaac', 'covenant of Jacob','eternal marriage', 
+      'priesthood lineage', 
+      'familes of the earth blessed through Abraham',
+      'seed as the stars of heaven', 'seed as the sand upon the seashore',
+      'blessings of Abraham', 'Abrahamic blessings'],
     terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob'],
   },
 };
