@@ -1279,29 +1279,51 @@
   box-shadow: 0 0 0 3px var(--gold-dim);
 }
 
-/* Style for dropdown options to match theme */
-.language-select option {
-  background: var(--surface-2);
-  color: var(--text-primary);
-  font-family: 'Cinzel', serif;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 0.5rem;
+/* Custom dropdown container to match theme */
+.language-select-wrapper {
+  position: relative;
+  display: inline-block;
 }
 
-/* Hover effect for options */
-.language-select option:hover {
-  background: var(--surface-3);
-  color: var(--gold-light);
+.language-select-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--gold-light);
+  pointer-events: none;
+}
+
+/* Style for native select dropdown options to match theme */
+.language-select {
+  /* For Firefox - using -moz-appearance to style dropdown */
+  -moz-appearance: none;
+  text-indent: 0.01px;
+  text-overflow: '';
+}
+
+/* Custom styling for the dropdown options to match the dark gold theme */
+.language-select option {
+  background: var(--surface-2) !important;
+  color: var(--text-primary) !important;
+  font-family: 'Cinzel', serif !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+  padding: 0.5rem !important;
 }
 
 /* Selected option styling */
 .language-select option:checked {
-  background: var(--gold-dim);
-  color: var(--gold-light);
-  border: 1px solid var(--gold-border);
+  background: var(--gold-dim) !important;
+  color: var(--gold-light) !important;
+  border: 1px solid var(--gold-border) !important;
 }
 
 /* ─── History Panel ─── */
