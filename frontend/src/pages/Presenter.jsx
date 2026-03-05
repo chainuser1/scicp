@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
@@ -51,7 +51,6 @@ const Presenter = () => {
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
-  const [isBibleVerse, setIsBibleVerse] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const PAGE_SIZE = 5;
 
@@ -94,8 +93,6 @@ const Presenter = () => {
   const handleSelectVerse = (verse) => {
     const verseWithTheme = { ...verse, theme: currentTheme };
     setStaged(verseWithTheme);
-    const verseId = Number(verse.verse_id);
-    setIsBibleVerse(verseId >= 1 && verseId <= 31102);
   };
 
   const goLiveDirectly = (verse) => {
@@ -108,8 +105,6 @@ const Presenter = () => {
     setLiveVerse(verseWithTheme);
     setCurrentSegment(0);
     setHistory([verseWithTheme, ...history.slice(0, 4)]);
-    const verseId = Number(verse.verse_id);
-    setIsBibleVerse(verseId >= 1 && verseId <= 31102);
   };
 
   const goLive = () => {
