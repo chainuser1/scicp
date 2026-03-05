@@ -699,7 +699,7 @@ const DOCTRINE_ALIASES = {
       'he bore our griefs', 'by his stripes we are healed',
       'he was broken for our iniquities',
       'took upon him our sicknesses', 'carried our sorrows', 'bore our sins in his own body',
-      
+
     ],
     terms:   ['suffer', 'wound', 'transgression', 'grief', 'stripe', 'heal', 'bore', 'carried'],
   },
@@ -763,8 +763,8 @@ const DOCTRINE_ALIASES = {
 
   // abrahamic covenant
   'abrahamic': {
-    phrases: ['abrahamic covenant', 'covenant of Abraham', 
-      'covenant of Isaac', 'covenant of Jacob','eternal marriage', 
+    phrases: [ 
+      'eternal marriage', 
       'priesthood lineage', 
       'familes of the earth blessed through Abraham',
       'seed as the stars of heaven', 'seed as the sand upon the seashore',
@@ -776,6 +776,9 @@ const DOCTRINE_ALIASES = {
       'in thy seed shall all the nations of the earth be blessed',
       'priesthood shall continue in thy seed forever',
       'and the Lord God shall give to Abraham a land of plenty and of good',
+      'circumcise the flesh of thy foreskin, and it shall be a token of the covenant',
+      'and the Lord God shall give to Abraham a land of plenty and of good',
+      'make thee exceeding fruitful, and I will make nations of thee, and kings shall come out of thee',
     ],
     terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob'],
   },
