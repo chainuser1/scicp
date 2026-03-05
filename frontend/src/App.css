@@ -800,6 +800,109 @@
   font-size: 0.9rem;
 }
 
+.search-results-count {
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.7;
+  text-align: right;
+  padding: 0 0.1rem 0.45rem 0;
+  margin-bottom: -0.5rem;
+  animation: count-appear 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
+@keyframes count-appear {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 0.7; transform: translateY(0); }
+}
+
+.results-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0 0.25rem;
+  border-top: 1px solid rgba(201, 168, 76, 0.1);
+  margin-top: 0.5rem;
+  flex-shrink: 0;
+}
+
+.pagination-arrow {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  border-radius: 4px;
+  color: var(--gold);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--transition);
+  padding: 0;
+  font-family: 'Cormorant Garamond', serif;
+}
+
+.pagination-arrow:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: var(--gold-dim);
+  color: var(--gold-light);
+}
+
+.pagination-arrow:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.pagination-track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pagination-pip {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(201, 168, 76, 0.2);
+  border: 1px solid rgba(201, 168, 76, 0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.pagination-pip.active {
+  background: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 6px rgba(201, 168, 76, 0.5);
+  transform: scale(1.3);
+}
+
+.pagination-pip:hover:not(.active) {
+  background: rgba(201, 168, 76, 0.4);
+  border-color: var(--gold-border);
+}
+
+.pagination-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.15em;
+  color: var(--gold);
+  opacity: 0.6;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.pagination-sep {
+  opacity: 0.4;
+  margin: 0 1px;
+}
+
 /* ─── Main Panel ─── */
 .main-panel {
   display: flex;

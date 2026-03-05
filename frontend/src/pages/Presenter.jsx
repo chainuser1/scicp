@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { socket } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
@@ -52,9 +52,14 @@ const Presenter = () => {
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
   const [isBibleVerse, setIsBibleVerse] = useState(true);
+  const [currentPage, setCurrentPage] = useState(0);
+  const PAGE_SIZE = 5;
 
   useEffect(() => {
-    socket.on('search-results', (data) => setResults(data));
+    socket.on('search-results', (data) => {
+      setResults(data);
+      setCurrentPage(0);
+    });
     socket.on('update-verse', (data) => {
       setLiveVerse(data);
       setCurrentSegment(data.currentSegment || 0);
@@ -78,6 +83,7 @@ const Presenter = () => {
 
   const handleSearch = (e) => {
     setQuery(e.target.value);
+    setCurrentPage(0);
     socket.emit('search', e.target.value);
   };
 
@@ -223,6 +229,15 @@ const Presenter = () => {
             <span className="panel-heading-icon">🔍</span>
             Search Scripture
           </h2>
+          {query.length > 0 && (
+            <div key={results.length} className="search-results-count">
+              {results.length === 0
+                ? 'No verses found'
+                : results.length === 1
+                ? '1 verse found'
+                : `${results.length} verses found`}
+            </div>
+          )}
           <input
             type="text"
             className="search-input"
@@ -232,20 +247,59 @@ const Presenter = () => {
             onKeyDown={handleSearchKeyDown}
           />
           <div className="results-list">
-            {results.length > 0 ? (
-              <ul>
-                {results.map((verse) => (
-                  <li
-                    key={verse.verse_title}
-                    className="result-item"
-                    onClick={() => handleSelectVerse(verse)}
-                  >
-                    <div className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</div>
-                    <div className="result-text">{verse.scripture_text}</div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
+            {results.length > 0 ? (() => {
+              const totalPages = Math.ceil(results.length / PAGE_SIZE);
+              const pageSlice = results.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+              return (
+                <>
+                  <ul>
+                    {pageSlice.map((verse) => (
+                      <li
+                        key={verse.verse_title}
+                        className="result-item"
+                        onClick={() => handleSelectVerse(verse)}
+                      >
+                        <div className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</div>
+                        <div className="result-text">{verse.scripture_text}</div>
+                      </li>
+                    ))}
+                  </ul>
+                  {totalPages > 1 && (
+                    <div className="results-pagination">
+                      <button
+                        className="pagination-arrow"
+                        onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                        disabled={currentPage === 0}
+                        aria-label="Previous page"
+                      >
+                        ‹
+                      </button>
+                      <div className="pagination-track">
+                        {Array.from({ length: totalPages }).map((_, i) => (
+                          <button
+                            key={i}
+                            className={`pagination-pip ${i === currentPage ? 'active' : ''}`}
+                            onClick={() => setCurrentPage(i)}
+                            aria-label={`Page ${i + 1}`}
+                          />
+                        ))}
+                      </div>
+                      <span className="pagination-label">
+                        {currentPage + 1} <span className="pagination-sep">/</span> {totalPages}
+                      </span>
+                      <button
+                        className="pagination-arrow"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                        disabled={currentPage === totalPages - 1}
+                        aria-label="Next page"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
+                </>
+              );
+            })() : (
               <div className="empty-state">
                 Search for a verse<br />to begin…
               </div>
