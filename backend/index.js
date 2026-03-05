@@ -721,6 +721,12 @@ const DOCTRINE_ALIASES = {
     phrases: ['steadfast and immovable', 'firm and steadfast in the faith', 'hold fast'],
     terms:   ['steadfast', 'immovable', 'firm', 'faith', 'hold', 'fast', 'constant'],
   },
+
+  // abrahamic covenant
+  'abrahamic': {
+    phrases: ['abrahamic covenant', 'covenant of Abraham', 'covenant of Isaac', 'covenant of Jacob','eternal marriage', 'priesthood lineage', 'familes of the earth blessed through Abraham'],
+    terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob'],
+  },
 };
 function applyDoctrineAliases(input) {
   const lower = input.toLowerCase().trim();
