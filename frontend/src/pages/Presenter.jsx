@@ -235,7 +235,7 @@ const Presenter = () => {
       if (preferStaged && staged) {
         setStaged(v);
       } else {
-        socket.emit('go-live', { verse: v, theme: v.theme });
+        socket.emit('go-live', { verse: v, theme: v.theme, language: currentLanguage });
         setLiveVerse(v);
         setCurrentSegment(0);
         setHistory(h => [v, ...h.slice(0, 9)]);
@@ -505,7 +505,7 @@ const Presenter = () => {
       <main className="main-panel">
 
         {/* ── Staged verse card ── */}
-        {staged ? (
+        {staged && (
           <section className="card card--staged">
             <div className="card-header">
               <span className="card-label">⏳ Staged</span>
@@ -519,14 +519,6 @@ const Presenter = () => {
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
             <button className="go-live-button" onClick={goLive}>● Go Live</button>
-          </section>
-        ) : (
-          <section className="card card--empty">
-            <p className="empty-state">
-              {liveVerse
-                ? <><strong>{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</strong> is live — search for the next verse</>
-                : <>Tap <IconSearch /> above to search and select a verse</>}
-            </p>
           </section>
         )}
 
