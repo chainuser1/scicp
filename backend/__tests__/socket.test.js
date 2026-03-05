@@ -1,80 +1,114 @@
-const { fastify } = require('../index');
-const { io } = require('socket.io-client');
+const { fastify, registerSocketHandlers } = require('../index');
+const { Server } = require('socket.io');
 
-// We will start the Fastify server on a random port for testing.
+// Mock dependencies for test isolation
+const mockSegmentVerseText = jest.fn((text) => [text]);
+const mockDb = {
+  prepare: jest.fn().mockReturnValue({
+    get: jest.fn().mockReturnValue({
+      scripture_text: 'test text',
+      verse_title: '1 Ne 1:1',
+      book_title: '1 Nephi'
+    })
+  })
+};
+const mockDbCebuano = { ...mockDb };
+const mockDbTagalog = { ...mockDb };
+
+// Create a mock io server instance for testing
+const mockIo = {
+  on: jest.fn(),
+  emit: jest.fn()
+};
+
+// Mock socket instance
+const mockSocket = {
+  on: jest.fn(),
+  emit: jest.fn(),
+  id: 'test-socket-id'
+};
+
+// Mock the connection event to return our mock socket
+mockIo.on.mockImplementation((event, callback) => {
+  if (event === 'connection') {
+    callback(mockSocket);
+  }
+});
+
+// Ensure all mocks are reset before each test
+beforeEach(() => {
+  jest.clearAllMocks();
+});
 
 describe('socket events', () => {
-  let clientA, clientB;
-  let port;
-
-  beforeAll(async () => {
-    await fastify.ready();
-    // fastify.server.address() may not yet have a port if not listening
-    // but our server listens on 3000 by default; we'll assume that or listen now if not.
-    if (!fastify.server.address()) {
-      await fastify.listen({ port: 0 });
-    }
-    port = fastify.server.address().port;
-  });
-
-  afterAll(async () => {
-    if (clientA) clientA.close();
-    if (clientB) clientB.close();
-    await fastify.close();
-  });
-
-  test('go-live from one client is broadcast to others', (done) => {
-    const url = `http://localhost:${port}`;
-    clientA = io(url, { transports: ['websocket'], forceNew: true });
-    clientB = io(url, { transports: ['websocket'], forceNew: true });
-
-    const payload = { verse: { scripture_text: 'foo', verse_title: '1 Ne 1:1', theme: {} }, theme: {} };
-
-    clientB.on('update-verse', (data) => {
-      // Verify the broadcast includes the original verse data plus segmentation info
-      expect(data.scripture_text).toBe(payload.verse.scripture_text);
-      expect(data.verse_title).toBe(payload.verse.verse_title);
-      expect(data.segments).toBeDefined(); // Should have segments array
-      expect(data.currentSegment).toBe(0); // Should start at first segment
-      expect(data.totalSegments).toBeDefined();
-      clientA.close();
-      clientB.close();
-      done();
+  test('go-live handler emits update-verse with segmented payload', () => {
+    // Register handlers with mocked dependencies
+    registerSocketHandlers(mockIo, { 
+      segmentVerseText: mockSegmentVerseText, 
+      db: mockDb, 
+      db_cebuano: mockDbCebuano, 
+      db_tagalog: mockDbTagalog 
     });
 
-    clientA.on('connect', () => {
-      clientB.on('connect', () => {
-        clientA.emit('go-live', payload);
-      });
-    });
-  });
-
-  test('segment update from one client is broadcast to others', (done) => {
-    const url = `http://localhost:${port}`;
-    const vA = io(url, { transports: ['websocket'], forceNew: true });
-    const vB = io(url, { transports: ['websocket'], forceNew: true });
-
-    const verseUpdate = {
-      scripture_text: 'bar',
-      verse_title: '1 Ne 1:2',
-      segments: ['bar'],
-      currentSegment: 1,
-      totalSegments: 2,
+    // Simulate go-live event
+    const payload = { 
+      verse: { 
+        scripture_text: 'foo', 
+        verse_title: '1 Ne 1:1', 
+        book_title: '1 Nephi',
+        verse_id: '1' 
+      }, 
+      theme: {} 
     };
-
-    vB.on('update-verse', (data) => {
-      expect(data.currentSegment).toBe(verseUpdate.currentSegment);
-      expect(data.totalSegments).toBe(verseUpdate.totalSegments);
-      expect(data.scripture_text).toBe(verseUpdate.scripture_text);
-      vA.close();
-      vB.close();
-      done();
+    
+    // Call the registered 'go-live' handler logic
+    mockSocket.on.mock.calls.forEach(([event, handler]) => {
+      if (event === 'go-live') {
+        handler(payload);
+      }
     });
 
-    vA.on('connect', () => {
-      vB.on('connect', () => {
-        vA.emit('update-verse', verseUpdate);
-      });
+    // Verify update-verse was emitted with expected structure
+    expect(mockIo.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
+      scripture_text: 'test text',
+      verse_title: '1 Ne 1:1',
+      book_title: '1 Nephi',
+      segments: ['test text'],
+      totalSegments: 1,
+      currentSegment: 0
+    }));
+    
+    // Verify update-theme was also emitted
+    expect(mockIo.emit).toHaveBeenCalledWith('update-theme', {});
+  });
+
+  test('update-verse handler broadcasts to all clients', () => {
+    // Register handlers with mocked dependencies
+    registerSocketHandlers(mockIo, { 
+      segmentVerseText: mockSegmentVerseText, 
+      db: mockDb, 
+      db_cebuano: mockDbCebuano, 
+      db_tagalog: mockDbTagalog 
     });
+
+    // Simulate update-verse event
+    const payload = { 
+      scripture_text: 'bar', 
+      verse_title: '2 Ne 2:2', 
+      theme: {}, 
+      segments: [], 
+      currentSegment: 0, 
+      totalSegments: 0 
+    };
+    
+    // Call the registered 'update-verse' handler logic
+    mockSocket.on.mock.calls.forEach(([event, handler]) => {
+      if (event === 'update-verse') {
+        handler(payload);
+      }
+    });
+
+    // Verify broadcast occurred
+    expect(mockIo.emit).toHaveBeenCalledWith('update-verse', payload);
   });
 });
