@@ -44,5 +44,24 @@ describe('searchScripture', () => {
     expect(Array.isArray(results)).toBe(true);
     expect(results.length).toBeGreaterThan(0);
     expect(results[0]).toHaveProperty('verse_title');
+    expect(results[0].book_title).toBe('John');
+    expect(results[0].chapter_number).toBe(3);
+    expect(results[0].verse_number).toBe(16);
+  });
+
+  test('alias query returns ranked results', () => {
+    const results = searchScripture('plan of salvation');
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0]).toHaveProperty('scripture_text');
+  });
+
+  test('book abbreviation reference remains precise', () => {
+    const results = searchScripture('Matt 3:16');
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].book_title).toBe('Matthew');
+    expect(results[0].chapter_number).toBe(3);
+    expect(results[0].verse_number).toBe(16);
   });
 });
