@@ -129,8 +129,6 @@ const Presenter = () => {
   const [history, setHistory]               = useState([]);
   const [staged, setStaged]                 = useState(null);
   const [liveVerse, setLiveVerse]           = useState(null);
-  const [savedThemes, setSavedThemes]       = useState([]);
-  const [newThemeName, setNewThemeName]     = useState('');
   const [bgUrlInput, setBgUrlInput]         = useState('');
   const [currentSegment, setCurrentSegment] = useState(0);
   const [highlightedText, setHighlightedText] = useState('');
@@ -146,10 +144,10 @@ const Presenter = () => {
   useEffect(() => {
     socket.on('search-results', data => { setResults(data); setCurrentPage(0); });
     socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
-    fetch(`${API_URL}/themes`)
-      .then(r => r.json())
-      .then(setSavedThemes)
-      .catch(err => console.error('themes load failed', err));
+    // fetch(`${API_URL}/themes`)
+    //   .then(r => r.json())
+    //   .then(setSavedThemes)
+    //   .catch(err => console.error('themes load failed', err));
     return () => { socket.off('search-results'); socket.off('update-verse'); };
   }, []);
 
@@ -355,7 +353,7 @@ const Presenter = () => {
                 {[
                   { label: '☀ Light', theme: themes.light },
                   { label: '☽ Dark',  theme: themes.dark  },
-                  ...savedThemes.map(t => ({ label: t.name, theme: t.data }))
+                  // ...savedThemes.map(t => ({ label: t.name, theme: t.data }))
                 ].map(({ label, theme }) => (
                   <button
                     key={label}
@@ -380,6 +378,7 @@ const Presenter = () => {
                     setThemePopover(false);
                   }}>Apply</button>
                 </div>
+                {/*
                 <div className="popover-label" style={{ marginTop: '0.4rem' }}>Save theme</div>
                 <div className="popover-row">
                   <input
@@ -401,6 +400,7 @@ const Presenter = () => {
                       .catch(err => console.error('save theme failed', err));
                   }}>Save</button>
                 </div>
+                */}
               </div>
             )}
           </div>
@@ -452,7 +452,7 @@ const Presenter = () => {
                 </div>
               )}
               <input
-                type="text"
+                type="search"
                 className="search-input"
                 placeholder="John 3:16 or 'faith'…"
                 value={query}
@@ -549,9 +549,11 @@ const Presenter = () => {
           <div className="theme-buttons">
             <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
             <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
+            {/*
             {savedThemes.map(t => (
               <button key={t.id} className={`theme-btn saved${currentTheme === t.data ? ' active' : ''}`} onClick={() => handleThemeChange(t.data)}>{t.name}</button>
             ))}
+            */}
           </div>
           <div className="theme-inputs">
             <div className="theme-control-group">
@@ -565,6 +567,7 @@ const Presenter = () => {
                 }}>Apply</button>
               </div>
             </div>
+            {/*
             <div className="theme-control-group">
               <label htmlFor="theme-name">Save Current Theme</label>
               <div className="input-group">
@@ -582,6 +585,7 @@ const Presenter = () => {
                 }}>Save</button>
               </div>
             </div>
+            */}
           </div>
         </section>
 
