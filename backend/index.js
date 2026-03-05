@@ -807,11 +807,62 @@ const DOCTRINE_ALIASES = {
     terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob'],
   },
 };
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeAliasEntry(entry) {
+  const uniqPhrases = [];
+  const seenPhrases = new Set();
+  for (const phrase of entry.phrases || []) {
+    const normalized = String(phrase || '').trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seenPhrases.has(key)) continue;
+    seenPhrases.add(key);
+    uniqPhrases.push(normalized);
+  }
+
+  const uniqTerms = [];
+  const seenTerms = new Set();
+  for (const term of entry.terms || []) {
+    const normalized = String(term || '').trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seenTerms.has(key)) continue;
+    seenTerms.add(key);
+    uniqTerms.push(normalized);
+  }
+
+  return { phrases: uniqPhrases, terms: uniqTerms };
+}
+
+function compileDoctrineAliases(aliases) {
+  const normalizedMap = {};
+  const keys = Object.keys(aliases);
+  for (const key of keys) {
+    normalizedMap[key.toLowerCase().trim()] = sanitizeAliasEntry(aliases[key]);
+  }
+
+  const sortedKeys = Object.keys(normalizedMap).sort((a, b) => b.length - a.length);
+  return { normalizedMap, sortedKeys };
+}
+
+const COMPILED_ALIASES = compileDoctrineAliases(DOCTRINE_ALIASES);
+
 function applyDoctrineAliases(input) {
-  const lower = input.toLowerCase().trim();
-  if (DOCTRINE_ALIASES[lower]) return DOCTRINE_ALIASES[lower];
-  for (const [key, entry] of Object.entries(DOCTRINE_ALIASES)) {
-    if (lower.includes(key)) return entry;
+  const lower = String(input || '').toLowerCase().trim();
+  if (!lower) return null;
+
+  const exact = COMPILED_ALIASES.normalizedMap[lower];
+  if (exact) return exact;
+
+  for (const key of COMPILED_ALIASES.sortedKeys) {
+    const pattern = new RegExp(`(^|\\W)${escapeRegex(key)}(?=\\W|$)`, 'i');
+    if (pattern.test(lower)) {
+      return COMPILED_ALIASES.normalizedMap[key];
+    }
   }
   return null;
 }
@@ -822,11 +873,17 @@ const buildFTSPhraseQuery = (phrase) => {
 
 const buildFTSTermQuery = (terms, mode = 'and') => {
   if (!terms || !terms.length) return '';
-  const cleaned = terms
-    .map(t => t.replace(/["']/g, '').replace(/[^a-zA-Z0-9\-\s]/g, '').trim())
-    .filter(t => t.length > 1);
+  const cleaned = terms.map((t) => String(t || '').trim()).filter(Boolean);
   if (!cleaned.length) return '';
-  const wildcarded = cleaned.map(t => `${t.split(/\s+/)[0]}*`);
+  const wildcarded = cleaned
+    .map((t) => {
+      const safe = t.replace(/["']/g, '').replace(/[^a-zA-Z0-9\-\s]/g, '').trim();
+      if (!safe) return '';
+      if (safe.includes(' ')) return `"${safe.replace(/\"/g, '\"\"')}"`;
+      return `${safe}*`;
+    })
+    .filter(Boolean);
+  if (!wildcarded.length) return '';
   return mode === 'or'
     ? wildcarded.join(' OR ')
     : wildcarded.join(' AND ');
@@ -996,8 +1053,8 @@ const searchScripture = (input) => {
     FROM
         scriptures
     WHERE
-        book_title LIKE ?`;
-        const params = [`%${ref.book}%`];
+        LOWER(book_title) = LOWER(?)`;
+        const params = [ref.book];
         
         sql += '\n        AND chapter_number = ?';
         params.push(ref.chapter);
@@ -1010,7 +1067,14 @@ const searchScripture = (input) => {
         sql += '\n    ORDER BY verse_number ASC\n    LIMIT 50';
         const stmt = db.prepare(sql);
         const result = stmt.all(...params);
-        return result.length > 0 ? result : phraseSearch(input);
+        if (result.length > 0) return result;
+
+        // Fallback for unexpected title variants while preserving precision-first behavior.
+        const fallbackSql = sql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?');
+        const fallbackParams = [`%${ref.book}%`, ...params.slice(1)];
+        const fallbackStmt = db.prepare(fallbackSql);
+        const fallbackResult = fallbackStmt.all(...fallbackParams);
+        return fallbackResult.length > 0 ? fallbackResult : phraseSearch(input);
     }
 
     // fallback: phrase search in scripture text and titles
