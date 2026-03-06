@@ -718,6 +718,28 @@ button,
   position: relative;
 }
 
+.presenter-container--light {
+  --obsidian: #ece6d8;
+  --surface: #f7f2e8;
+  --surface-2: #efe7d8;
+  --surface-3: #e6dcc9;
+  --text-primary: #2f291d;
+  --text-secondary: #4a4030;
+  --text-dim: #7f745f;
+  --gold-border: rgba(156, 120, 26, 0.35);
+  --gold-dim: rgba(156, 120, 26, 0.1);
+}
+
+.presenter-container--dark {
+  --obsidian: #0a0a0f;
+  --surface: #14141f;
+  --surface-2: #1c1c2e;
+  --surface-3: #22223a;
+  --text-primary: #f0ece0;
+  --text-secondary: #a09880;
+  --text-dim: #5a5468;
+}
+
 /* Gold crown line across the very top */
 .presenter-container::before {
   content: '';
