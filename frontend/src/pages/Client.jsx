@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 
 function Client() {
@@ -22,8 +22,18 @@ function Client() {
   const [joinedSession, setJoinedSession] = useState('');
   const [sessionMessage, setSessionMessage] = useState(urlSession ? 'Joining session...' : 'Enter session code');
   const [connectionState, setConnectionState] = useState('connecting');
+  const joinedSessionRef = useRef('');
+  const sessionInputRef = useRef(normalizeSessionId(urlSession));
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
   const [labelKey, setLabelKey] = useState(0);
+
+  useEffect(() => {
+    joinedSessionRef.current = joinedSession;
+  }, [joinedSession]);
+
+  useEffect(() => {
+    sessionInputRef.current = sessionInput;
+  }, [sessionInput]);
 
   useEffect(() => {
     document.title = 'Client Display | Scriptures in View';
@@ -78,7 +88,7 @@ function Client() {
     };
     const handleConnect = () => {
       setConnectionState('connected');
-      const target = normalizeSessionId(joinedSession || urlSession || sessionInput);
+      const target = normalizeSessionId(joinedSessionRef.current || urlSession || sessionInputRef.current);
       if (!target) return;
       socket.emit('join-session', { sessionId: target, role: 'viewer' }, (response) => {
         if (!response?.ok) {
@@ -129,7 +139,7 @@ function Client() {
       socket.off('reconnect_attempt', handleReconnectAttempt);
       socket.off('connect_error', handleConnectError);
     };
-  }, [urlSession, joinedSession, sessionInput]);
+  }, [urlSession]);
 
   if (!joinedSession) {
     return (
