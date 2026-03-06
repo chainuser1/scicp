@@ -10,7 +10,7 @@ function Client() {
     currentSegment: 0,
     totalSegments: 0,
     theme: {
-      background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Salt%20Lake%20Temple%20UT2.jpg')",
+      background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Friedenskirche%2C%20Potsdam%20-%20replica%20of%20Thorvaldsen%27s%20Christus-7512.jpg')",
       font_family: "'Cormorant Garamond', Georgia, serif",
       font_size: "4.1rem",
       layout: "centered"
