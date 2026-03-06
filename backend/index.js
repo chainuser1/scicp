@@ -1165,6 +1165,25 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     io.to(sessionId).emit(event, payload);
   }
 
+  function getRoomSize(sessionId) {
+    const rooms = io && io.sockets && io.sockets.adapter && io.sockets.adapter.rooms;
+    if (!rooms || typeof rooms.get !== 'function') return null;
+    const room = rooms.get(sessionId);
+    return room ? room.size : 0;
+  }
+
+  function cleanupSessionIfUnused(sessionId, { disconnecting = false } = {}) {
+    const normalized = normalizeSessionId(sessionId);
+    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
+    const roomSize = getRoomSize(normalized);
+    if (roomSize === null) return;
+    const isUnused = disconnecting ? roomSize <= 1 : roomSize === 0;
+    if (isUnused && sessionState.has(normalized)) {
+      sessionState.delete(normalized);
+      fastify.log.info(`Session ${normalized} terminated (no active sockets)`);
+    }
+  }
+
   io.on('connection', (socket) => {
     console.log('a user connected');
     let activeSessionId = DEFAULT_SESSION_ID;
@@ -1174,8 +1193,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     const joinSession = (candidateSessionId) => {
       const normalized = normalizeSessionId(candidateSessionId);
       if (!normalized) return null;
+      const previousSessionId = activeSessionId;
       if (activeSessionId && activeSessionId !== normalized) {
         socket.leave(activeSessionId);
+        cleanupSessionIfUnused(previousSessionId);
       }
       activeSessionId = normalized;
       socket.join(activeSessionId);
@@ -1315,6 +1336,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       // Send only to clients in the same session
       emitToSession(sessionId, 'update-verse', verseWithSegments);
       emitToSession(sessionId, 'update-theme', theme);
+    });
+
+    socket.on('disconnecting', () => {
+      if (socket.rooms && typeof socket.rooms.forEach === 'function') {
+        socket.rooms.forEach((roomId) => {
+          if (roomId !== socket.id) {
+            cleanupSessionIfUnused(roomId, { disconnecting: true });
+          }
+        });
+      } else {
+        cleanupSessionIfUnused(activeSessionId, { disconnecting: true });
+      }
     });
 
     socket.on('disconnect', () => {
