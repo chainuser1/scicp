@@ -1230,8 +1230,26 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     }
   }
 
+  function hasConnectedSocket(socketId) {
+    if (!socketId) return false;
+    const socketMap = io && io.sockets && io.sockets.sockets;
+    if (!socketMap) return false;
+    if (typeof socketMap.has === 'function') return socketMap.has(socketId);
+    if (typeof socketMap.get === 'function') return Boolean(socketMap.get(socketId));
+    return false;
+  }
+
+  function clearStalePresenterLock(state) {
+    if (!state || !state.presenterSocketId) return;
+    if (!hasConnectedSocket(state.presenterSocketId)) {
+      state.presenterSocketId = null;
+      state.updatedAt = Date.now();
+    }
+  }
+
   function ensurePresenterAccess(sessionId, socket) {
     const state = getSessionState(sessionId);
+    clearStalePresenterLock(state);
     if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
       const error = { message: 'Another presenter is active in this session' };
       socket.emit('session-error', error);
@@ -1257,6 +1275,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const previousSessionId = activeSessionId;
       if (role === 'presenter') {
         const state = getSessionState(normalized);
+        clearStalePresenterLock(state);
         if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
           return { error: 'Another presenter is active in this session' };
         }
@@ -1475,6 +1494,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('disconnect', () => {
+      releasePresenterLock(activeSessionId, socket.id);
+      scheduleCleanup(activeSessionId);
       console.log('user disconnected');
     });
   });
