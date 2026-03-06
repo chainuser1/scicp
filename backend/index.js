@@ -1128,32 +1128,130 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 });
 
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog }) {
+  const DEFAULT_SESSION_ID = 'GLOBAL';
+  const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const SESSION_CODE_LENGTH = 6;
+  const sessionState = new Map();
+
+  function normalizeSessionId(value) {
+    if (!value) return '';
+    return String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+  }
+
+  function getSessionState(sessionId) {
+    if (!sessionState.has(sessionId)) {
+      sessionState.set(sessionId, {
+        theme: null,
+        liveVerse: null,
+        highlightedText: '',
+        updatedAt: Date.now(),
+      });
+    }
+    return sessionState.get(sessionId);
+  }
+
+  function generateSessionId() {
+    for (let i = 0; i < 16; i += 1) {
+      let generated = '';
+      for (let j = 0; j < SESSION_CODE_LENGTH; j += 1) {
+        const idx = Math.floor(Math.random() * SESSION_CODE_CHARS.length);
+        generated += SESSION_CODE_CHARS[idx];
+      }
+      if (!sessionState.has(generated) && generated !== DEFAULT_SESSION_ID) {
+        return generated;
+      }
+    }
+    return `${SESSION_CODE_CHARS[Math.floor(Math.random() * SESSION_CODE_CHARS.length)]}${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  }
+
+  function emitToSession(sessionId, event, payload) {
+    io.to(sessionId).emit(event, payload);
+  }
+
   io.on('connection', (socket) => {
     console.log('a user connected');
+    let activeSessionId = DEFAULT_SESSION_ID;
+    socket.join(activeSessionId);
+    getSessionState(activeSessionId);
 
-    socket.on('search', (query) => {
+    const joinSession = (candidateSessionId) => {
+      const normalized = normalizeSessionId(candidateSessionId);
+      if (!normalized) return null;
+      if (activeSessionId && activeSessionId !== normalized) {
+        socket.leave(activeSessionId);
+      }
+      activeSessionId = normalized;
+      socket.join(activeSessionId);
+      const state = getSessionState(activeSessionId);
+      socket.emit('session-joined', { sessionId: activeSessionId });
+      if (state.theme) socket.emit('update-theme', state.theme);
+      if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
+      if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
+      return activeSessionId;
+    };
+
+    socket.on('create-session', (_payload, callback) => {
+      const sessionId = generateSessionId();
+      const joined = joinSession(sessionId);
+      socket.emit('session-created', { sessionId: joined });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined });
+    });
+
+    socket.on('join-session', (payload, callback) => {
+      const joined = joinSession(payload && payload.sessionId);
+      if (!joined) {
+        const error = { message: 'Valid session code is required' };
+        socket.emit('session-error', error);
+        if (typeof callback === 'function') callback({ ok: false, ...error });
+        return;
+      }
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined });
+    });
+
+    socket.on('search', (payload) => {
+        const query = typeof payload === 'string' ? payload : payload && payload.query;
+        if (!query || !String(query).trim()) {
+          socket.emit('search-results', []);
+          return;
+        }
         console.log('searching for:', query);
         const results = searchScripture(query);
         socket.emit('search-results', results);
     });
 
-    socket.on('update-verse', (verse) => {
+    socket.on('update-verse', (payload) => {
+      const verse = payload && payload.verse ? payload.verse : payload;
+      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
       console.log('updating verse:', verse);
-      io.emit('update-verse', verse);
+      const state = getSessionState(sessionId);
+      state.liveVerse = verse;
+      state.updatedAt = Date.now();
+      emitToSession(sessionId, 'update-verse', verse);
     });
 
-    socket.on('update-theme', (theme) => {
+    socket.on('update-theme', (payload) => {
+      const theme = payload && payload.theme ? payload.theme : payload;
+      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
       console.log('updating theme:', theme);
-      io.emit('update-theme', theme);
+      const state = getSessionState(sessionId);
+      state.theme = theme;
+      state.updatedAt = Date.now();
+      emitToSession(sessionId, 'update-theme', theme);
     });
 
-    socket.on('highlight-text', (text) => {
+    socket.on('highlight-text', (payload) => {
+      const text = payload && Object.prototype.hasOwnProperty.call(payload, 'text') ? payload.text : payload;
+      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
       console.log('highlighting text:', text);
-      io.emit('highlight-text', text);
+      const state = getSessionState(sessionId);
+      state.highlightedText = text ? String(text).trim() : '';
+      state.updatedAt = Date.now();
+      emitToSession(sessionId, 'highlight-text', state.highlightedText);
     });
 
-    socket.on('go-live', ({verse, theme, language}) => {
-      console.log('go-live triggered', verse, theme, language);
+    socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
+      const sessionId = normalizeSessionId(rawSessionId) || activeSessionId || DEFAULT_SESSION_ID;
+      console.log('go-live triggered', verse, theme, language, sessionId);
       
       let scriptureText = verse.scripture_text;
       let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; 
@@ -1211,9 +1309,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         currentSegment: 0
       };
       
-      // Send to all clients
-      io.emit('update-verse', verseWithSegments);
-      io.emit('update-theme', theme);
+      const state = getSessionState(sessionId);
+      state.liveVerse = verseWithSegments;
+      state.theme = theme;
+      state.highlightedText = '';
+      state.updatedAt = Date.now();
+
+      // Send only to clients in the same session
+      emitToSession(sessionId, 'update-verse', verseWithSegments);
+      emitToSession(sessionId, 'update-theme', theme);
     });
 
     socket.on('disconnect', () => {

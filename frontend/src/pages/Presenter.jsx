@@ -123,6 +123,7 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
 
 /* ─── Main component ─── */
 const Presenter = () => {
+  const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
   const [currentTheme, setCurrentTheme]     = useState(themes.light);
@@ -137,18 +138,80 @@ const Presenter = () => {
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
   const [themePopover, setThemePopover]     = useState(false);
+  const [sessionId, setSessionId]           = useState('');
+  const [sessionInput, setSessionInput]     = useState('');
+  const [sessionMessage, setSessionMessage] = useState('Creating session...');
 
   const PAGE_SIZE = 5;
+  const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+
+  const requestCreateSession = () => {
+    setSessionMessage('Creating session...');
+    socket.emit('create-session', {}, (response) => {
+      if (!response?.ok) {
+        setSessionMessage('Failed to create session');
+      }
+    });
+  };
+
+  const joinSession = () => {
+    const normalized = normalizeSessionId(sessionInput);
+    if (!normalized) {
+      setSessionMessage('Enter a valid session code');
+      return;
+    }
+    setSessionMessage('Joining session...');
+    socket.emit('join-session', { sessionId: normalized }, (response) => {
+      if (!response?.ok) {
+        setSessionMessage(response?.message || 'Unable to join session');
+      }
+    });
+  };
+
+  const copyClientLink = async () => {
+    if (!sessionId) return;
+    const clientLink = `${window.location.origin}/client?session=${sessionId}`;
+    try {
+      await navigator.clipboard.writeText(clientLink);
+      setSessionMessage(`Copied client link for ${sessionId}`);
+    } catch {
+      setSessionMessage('Clipboard unavailable - copy URL from address bar');
+    }
+  };
 
   /* ── Socket & data ── */
   useEffect(() => {
+    const handleSessionJoined = (data) => {
+      if (!data?.sessionId) return;
+      setSessionId(data.sessionId);
+      setSessionInput(data.sessionId);
+      setSessionMessage(`Session ${data.sessionId} ready`);
+      setHighlightedText('');
+    };
+    const handleSessionError = (data) => {
+      setSessionMessage(data?.message || 'Session error');
+    };
     socket.on('search-results', data => { setResults(data); setCurrentPage(0); });
     socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
+    socket.on('session-created', handleSessionJoined);
+    socket.on('session-joined', handleSessionJoined);
+    socket.on('session-error', handleSessionError);
+    socket.emit('create-session', {}, (response) => {
+      if (!response?.ok) {
+        setSessionMessage('Failed to create session');
+      }
+    });
     // fetch(`${API_URL}/themes`)
     //   .then(r => r.json())
     //   .then(setSavedThemes)
     //   .catch(err => console.error('themes load failed', err));
-    return () => { socket.off('search-results'); socket.off('update-verse'); };
+    return () => {
+      socket.off('search-results');
+      socket.off('update-verse');
+      socket.off('session-created', handleSessionJoined);
+      socket.off('session-joined', handleSessionJoined);
+      socket.off('session-error', handleSessionError);
+    };
   }, []);
 
   /* ── Close drawer & theme popover on outside tap ── */
@@ -172,13 +235,13 @@ const Presenter = () => {
   const handleThemeChange = theme => {
     setCurrentTheme(theme);
     if (staged) setStaged(prev => ({ ...prev, theme }));
-    socket.emit('update-theme', theme);
+    emitWithSession('update-theme', { theme });
   };
 
   const handleSearch = e => {
     setQuery(e.target.value);
     setCurrentPage(0);
-    socket.emit('search', e.target.value);
+    emitWithSession('search', { query: e.target.value });
   };
 
   const handleSearchKeyDown = e => {
@@ -192,7 +255,7 @@ const Presenter = () => {
 
   const goLiveDirectly = verse => {
     const v = { ...verse, theme: currentTheme };
-    socket.emit('go-live', { verse: v, theme: v.theme, language: currentLanguage });
+    emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
     setLiveVerse(v);
     setCurrentSegment(0);
     setHistory(h => [v, ...h.slice(0, 9)]);
@@ -201,7 +264,7 @@ const Presenter = () => {
 
   const goLive = () => {
     if (!staged) return;
-    socket.emit('go-live', { verse: staged, theme: staged.theme, language: currentLanguage });
+    emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage });
     setLiveVerse(staged);
     setCurrentSegment(0);
     setHistory(h => [staged, ...h.slice(0, 9)]);
@@ -214,7 +277,7 @@ const Presenter = () => {
     const next = direction === 'next' ? Math.min(currentSegment + 1, limit) : Math.max(currentSegment - 1, 0);
     if (next !== currentSegment) {
       setCurrentSegment(next);
-      socket.emit('update-verse', { ...liveVerse, currentSegment: next });
+      emitWithSession('update-verse', { verse: { ...liveVerse, currentSegment: next } });
     }
   };
 
@@ -233,7 +296,7 @@ const Presenter = () => {
       if (preferStaged && staged) {
         setStaged(v);
       } else {
-        socket.emit('go-live', { verse: v, theme: v.theme, language: currentLanguage });
+        emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
         setLiveVerse(v);
         setCurrentSegment(0);
         setHistory(h => [v, ...h.slice(0, 9)]);
@@ -245,14 +308,14 @@ const Presenter = () => {
     const sel = window.getSelection()?.toString().trim();
     if (!sel) return;
     setHighlightedText(sel);
-    socket.emit('highlight-text', sel);
+    emitWithSession('highlight-text', { text: sel });
   };
 
   const handleLanguageChange = e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
-    socket.emit('update-language', lang);
-    if (liveVerse) socket.emit('go-live', { verse: liveVerse, theme: currentTheme, language: lang });
+    emitWithSession('update-language', { language: lang });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang });
   };
 
   const renderPreviewText = () => {
@@ -335,6 +398,20 @@ const Presenter = () => {
 
         {/* Right controls */}
         <div className="hdr-right">
+          <div className="live-badge" title="Session code">
+            <span>Session {sessionId || '...'}</span>
+          </div>
+          <input
+            className="hdr-lang-select"
+            value={sessionInput}
+            onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
+            placeholder="Session"
+            aria-label="Session code"
+          />
+          <HdrBtn onClick={joinSession} label="Join session" title="Join session">Join</HdrBtn>
+          <HdrBtn onClick={requestCreateSession} label="Create new session" title="Create new session">New</HdrBtn>
+          <HdrBtn onClick={copyClientLink} label="Copy client link" title="Copy client link">Copy</HdrBtn>
+
           {/* Language */}
           <select className="hdr-lang-select" value={currentLanguage} onChange={handleLanguageChange} aria-label="Language">
             <option value="en">EN</option>
@@ -424,6 +501,7 @@ const Presenter = () => {
           )}
         </div>
       </header>
+      <div style={{ color: '#a09880', fontSize: '0.8rem', padding: '0 1.1rem 0.5rem 1.1rem' }}>{sessionMessage}</div>
 
       {/* ════════════════════════════════════════
           SLIDE-IN DRAWER  (search + history)
