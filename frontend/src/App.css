@@ -437,7 +437,7 @@ button,
   overflow: hidden;
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-weight: 400;
-  line-height: 1.6;
+  line-height: 1.5;
   transition: opacity 0.6s ease;
   position: relative;
   background-color: #07090d;
@@ -448,9 +448,23 @@ button,
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 25%, rgba(0,0,0,0.6) 100%);
+  background:
+    linear-gradient(to bottom, rgba(6, 8, 12, 0.34) 0%, rgba(6, 8, 12, 0.56) 100%),
+    radial-gradient(ellipse at center, transparent 22%, rgba(0, 0, 0, 0.68) 100%);
   pointer-events: none;
   z-index: 0;
+}
+
+.client-view.readability-soft::before {
+  background:
+    linear-gradient(to bottom, rgba(6, 8, 12, 0.28) 0%, rgba(6, 8, 12, 0.48) 100%),
+    radial-gradient(ellipse at center, transparent 26%, rgba(0, 0, 0, 0.6) 100%);
+}
+
+.client-view.readability-strong::before {
+  background:
+    linear-gradient(to bottom, rgba(3, 5, 9, 0.46) 0%, rgba(3, 5, 9, 0.72) 100%),
+    radial-gradient(ellipse at center, transparent 16%, rgba(0, 0, 0, 0.78) 100%);
 }
 
 /* ─── Layout variants ─── */
@@ -464,7 +478,7 @@ button,
   justify-content: flex-end;
   align-items: center;
   text-align: center;
-  padding-bottom: clamp(3rem, 8vh, 7rem);
+  padding-bottom: clamp(2.4rem, 7vh, 6rem);
 }
 
 /* ─── Verse content wrapper ─── */
@@ -476,7 +490,7 @@ button,
   flex: 1;
   position: relative;
   z-index: 1;
-  padding: clamp(1.5rem, 4vh, 4rem) clamp(1.5rem, 6vw, 6rem);
+  padding: clamp(1.2rem, 3vh, 3rem) clamp(1.1rem, 5vw, 4.5rem);
   width: 100%;
 }
 
@@ -486,25 +500,33 @@ button,
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: clamp(1.25rem, 3vh, 3rem) clamp(1.5rem, 4vw, 5rem);
+  padding: clamp(1rem, 2.4vh, 2.2rem) clamp(1.1rem, 3.2vw, 3rem);
   /* Cap width for readability — ~70 char line length sweet spot */
-  max-width: min(88vw, 1100px);
+  max-width: min(90vw, 1250px);
   width: 100%;
   /* Solid fallback for TVs/projectors without backdrop-filter support */
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: clamp(2px, 0.4vw, 6px);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: clamp(4px, 0.5vw, 10px);
   box-shadow:
-    0 1px 0 0 rgba(201, 168, 76, 0.35) inset,
-    0 clamp(12px, 3vh, 40px) clamp(30px, 8vw, 100px) rgba(0, 0, 0, 0.5);
+    0 1px 0 0 rgba(201, 168, 76, 0.26) inset,
+    0 clamp(10px, 2.5vh, 28px) clamp(22px, 6vw, 70px) rgba(0, 0, 0, 0.56);
+}
+
+.client-view.readability-strong .verse-backdrop {
+  background: rgba(0, 0, 0, 0.56);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 1px 0 0 rgba(201, 168, 76, 0.28) inset,
+    0 clamp(12px, 3vh, 36px) clamp(28px, 7vw, 90px) rgba(0, 0, 0, 0.68);
 }
 
 /* Progressive enhancement: blur only when browser supports it */
 @supports (backdrop-filter: blur(1px)) {
   .verse-backdrop {
-    background: linear-gradient(135deg, rgba(0,0,0,0.36) 0%, rgba(0,0,0,0.20) 100%);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: linear-gradient(130deg, rgba(0, 0, 0, 0.34) 0%, rgba(0, 0, 0, 0.17) 100%);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
   }
 }
 
@@ -527,15 +549,21 @@ button,
   width: 100%;
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-weight: 400;
-  font-style: italic;
-  letter-spacing: 0.025em;
+  font-style: normal;
+  letter-spacing: 0.015em;
   /* Fluid base size — JS inline style overrides this, breakpoints add !important guards */
   font-size: clamp(1.4rem, 2.2vw, 3.8rem);
-  line-height: 1.65;
-  color: rgba(255, 255, 255, 0.97);
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.985);
   text-shadow:
-    0 2px 14px rgba(0, 0, 0, 0.65),
-    0 1px 3px rgba(0, 0, 0, 0.9);
+    0 3px 18px rgba(0, 0, 0, 0.72),
+    0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+.client-view.readability-strong p {
+  text-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.78),
+    0 2px 6px rgba(0, 0, 0, 0.95);
 }
 
 /* ─── Verse reference label ─── */
@@ -545,15 +573,15 @@ button,
   left: clamp(1rem, 2.5vw, 3rem);
   z-index: 10;
   font-family: 'Cinzel', serif;
-  font-size: clamp(0.75rem, 1.1vw, 1.4rem);
+  font-size: clamp(0.64rem, 0.95vw, 1.05rem);
   font-weight: 600;
   font-style: normal;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #e8c97a;
+  color: rgba(238, 221, 175, 0.88);
   text-shadow:
     0 1px 0 rgba(0, 0, 0, 0.95),
-    0 0 24px rgba(201, 168, 76, 0.45);
+    0 0 14px rgba(201, 168, 76, 0.22);
   padding-bottom: clamp(0.2rem, 0.4vh, 0.4rem);
   border-bottom: 1px solid rgba(201, 168, 76, 0.35);
   opacity: 0;
@@ -570,14 +598,14 @@ button,
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(232, 201, 122, 0.9);
+  color: rgba(238, 221, 175, 0.84);
   text-shadow:
     0 1px 0 rgba(0, 0, 0, 0.95),
-    0 0 16px rgba(201, 168, 76, 0.4);
+    0 0 10px rgba(201, 168, 76, 0.22);
   padding: 0.28rem 0.5rem;
   border: 1px solid rgba(201, 168, 76, 0.35);
   border-radius: 999px;
-  background: rgba(10, 10, 15, 0.45);
+  background: rgba(10, 10, 15, 0.35);
   opacity: 0;
   animation: label-arrive 0.8s 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
@@ -594,7 +622,7 @@ button,
   font-size: clamp(0.6rem, 0.8vw, 0.9rem);
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(232, 201, 122, 0.6);
+  color: rgba(240, 226, 190, 0.56);
   font-style: normal;
 }
 
@@ -629,62 +657,52 @@ button,
 
 /* ── Small tablet / landscape phone (≤640px) ── */
 @media (max-width: 640px) {
-  .client-view {
-    background-size: contain;
-    background-position: center top;
-    background-color: #040507;
-  }
+  .client-view { background-size: cover; background-position: center center; }
   .client-view::before {
     background:
-      linear-gradient(to bottom, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.66) 100%),
-      radial-gradient(ellipse at center, transparent 18%, rgba(0, 0, 0, 0.64) 100%);
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.62) 100%),
+      radial-gradient(ellipse at center, transparent 20%, rgba(0, 0, 0, 0.68) 100%);
   }
   .client-view.centered {
-    justify-content: flex-end;
-    padding-bottom: clamp(1rem, 4vh, 2.1rem);
+    justify-content: center;
+    padding-bottom: 0;
   }
   .client-view.lower-third {
-    padding-bottom: clamp(1.1rem, 4.5vh, 2.2rem);
+    padding-bottom: clamp(0.7rem, 3.2vh, 1.6rem);
   }
   .verse-content {
-    justify-content: flex-end;
+    justify-content: center;
     padding:
-      calc(env(safe-area-inset-top, 0px) + 0.85rem)
-      0.75rem
-      calc(env(safe-area-inset-bottom, 0px) + 0.95rem);
+      calc(env(safe-area-inset-top, 0px) + 0.65rem)
+      0.7rem
+      calc(env(safe-area-inset-bottom, 0px) + 0.7rem);
   }
   .verse-backdrop {
-    max-width: 94vw;
-    padding: 0.85rem 0.95rem;
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.58);
-    border-color: rgba(255, 255, 255, 0.1);
+    max-width: 95vw;
+    padding: 0.82rem 0.9rem;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.54);
   }
   .client-view p {
-    font-size: clamp(1rem, 5.2vw, 1.45rem) !important;
-    line-height: 1.5;
+    font-size: clamp(1.1rem, 4.8vw, 1.6rem) !important;
+    line-height: 1.43;
     letter-spacing: 0.01em;
   }
   .verse-title-top-left {
-    font-size: clamp(0.56rem, 2vw, 0.74rem);
+    font-size: clamp(0.52rem, 1.8vw, 0.68rem);
     top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
     left: 0.62rem;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.1em;
+    border-bottom: none;
+    opacity: 0.88;
   }
   .session-id-top-right {
-    top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
-    right: 0.62rem;
-    font-size: clamp(0.48rem, 1.8vw, 0.68rem);
-    padding: 0.18rem 0.33rem;
-    max-width: 58vw;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: none;
   }
   .cont-indicator {
-    margin-top: 0.45rem;
-    font-size: 0.58rem;
-    letter-spacing: 0.16em;
+    margin-top: 0.35rem;
+    font-size: 0.54rem;
+    letter-spacing: 0.13em;
   }
 }
 
@@ -695,20 +713,21 @@ button,
     padding: clamp(1rem, 2.5vh, 2rem) clamp(1.25rem, 4vw, 2.5rem);
   }
   .client-view p {
-    font-size: clamp(1.3rem, 3.5vw, 2.8rem) !important;
-    line-height: 1.6;
+    font-size: clamp(1.45rem, 3.5vw, 3.05rem) !important;
+    line-height: 1.48;
   }
+  .session-id-top-right { display: none; }
 }
 
 /* ── Standard HD projectors: 720p–1080p (901px–1920px) ── */
 @media (min-width: 901px) and (max-width: 1920px) {
   .client-view p {
     /* vw-based so text fills the screen proportionally at projection distance */
-    font-size: clamp(1.4rem, 2.4vw, 3.6rem) !important;
+    font-size: clamp(1.8rem, 2.6vw, 4.8rem) !important;
   }
   .verse-backdrop {
-    max-width: min(88vw, 1100px);
-    padding: clamp(1.5rem, 3vh, 3rem) clamp(2rem, 4vw, 5rem);
+    max-width: min(88vw, 1280px);
+    padding: clamp(1.35rem, 2.6vh, 2.6rem) clamp(1.6rem, 3.8vw, 4.5rem);
   }
 }
 
