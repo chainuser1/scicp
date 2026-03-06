@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 
 function Client() {
+  const normalizeSessionId = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+  const [urlSession] = useState(() => new URLSearchParams(window.location.search).get('session') || '');
   const [verse, setVerse] = useState({
     scripture_text: 'Waiting for a scripture...',
     segments: [],
@@ -16,8 +18,25 @@ function Client() {
   });
   const [animating, setAnimating] = useState(false);
   const [highlightedText, setHighlightedText] = useState('');
+  const [sessionInput, setSessionInput] = useState(normalizeSessionId(urlSession));
+  const [joinedSession, setJoinedSession] = useState('');
+  const [sessionMessage, setSessionMessage] = useState(urlSession ? 'Joining session...' : 'Enter session code');
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
   const [labelKey, setLabelKey] = useState(0);
+
+  const attemptJoin = (candidate) => {
+    const normalized = normalizeSessionId(candidate);
+    if (!normalized) {
+      setSessionMessage('Enter a valid session code');
+      return;
+    }
+    setSessionMessage('Joining session...');
+    socket.emit('join-session', { sessionId: normalized }, (response) => {
+      if (!response?.ok) {
+        setSessionMessage(response?.message || 'Unable to join session');
+      }
+    });
+  };
 
   useEffect(() => {
     const handleVerse = (data) => {
@@ -40,17 +59,67 @@ function Client() {
     const handleHighlight = (text) => {
       setHighlightedText(text ? text.trim() : '');
     };
+    const handleSessionJoined = (data) => {
+      if (!data?.sessionId) return;
+      setJoinedSession(data.sessionId);
+      setSessionInput(data.sessionId);
+      setSessionMessage(`Connected to ${data.sessionId}`);
+      setHighlightedText('');
+    };
+    const handleSessionError = (data) => {
+      setSessionMessage(data?.message || 'Session error');
+    };
 
     socket.on('update-verse', handleVerse);
     socket.on('update-theme', handleTheme);
     socket.on('highlight-text', handleHighlight);
+    socket.on('session-joined', handleSessionJoined);
+    socket.on('session-error', handleSessionError);
+
+    if (urlSession) {
+      socket.emit('join-session', { sessionId: normalizeSessionId(urlSession) }, (response) => {
+        if (!response?.ok) {
+          setSessionMessage(response?.message || 'Unable to join session');
+        }
+      });
+    }
 
     return () => {
       socket.off('update-verse', handleVerse);
       socket.off('update-theme', handleTheme);
       socket.off('highlight-text', handleHighlight);
+      socket.off('session-joined', handleSessionJoined);
+      socket.off('session-error', handleSessionError);
     };
-  }, []);
+  }, [urlSession]);
+
+  if (!joinedSession) {
+    return (
+      <div className="home-page" style={{ alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div className="card card--theme" style={{ width: '100%', maxWidth: '540px' }}>
+          <div className="card-header">
+            <span className="card-label">Join Display Session</span>
+          </div>
+          <div className="theme-inputs">
+            <div className="theme-control-group">
+              <label htmlFor="client-session-code">Session Code</label>
+              <div className="input-group">
+                <input
+                  id="client-session-code"
+                  type="text"
+                  placeholder="AB12CD"
+                  value={sessionInput}
+                  onChange={(e) => setSessionInput(normalizeSessionId(e.target.value))}
+                />
+                <button className="control-button" onClick={() => attemptJoin(sessionInput)}>Join</button>
+              </div>
+            </div>
+            <div style={{ color: '#a09880', fontSize: '0.85rem' }}>{sessionMessage}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Determine display text (segment or full)
   const displayText = verse.segments && verse.segments.length > 0
@@ -92,7 +161,7 @@ function Client() {
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
       {verse.book_title && verse.chapter_number && verse.verse_number && (
         <span key={labelKey} className="verse-title-top-left">
-          {verse.book_title} {verse.chapter_number}:{verse.verse_number}
+          [{joinedSession}] {verse.book_title} {verse.chapter_number}:{verse.verse_number}
         </span>
       )}
 
