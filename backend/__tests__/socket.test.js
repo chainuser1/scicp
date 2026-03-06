@@ -1,5 +1,4 @@
 const { fastify, registerSocketHandlers } = require('../index');
-const { Server } = require('socket.io');
 
 // Mock dependencies for test isolation
 const mockSegmentVerseText = jest.fn((text) => [text]);
@@ -15,25 +14,19 @@ const mockDb = {
 const mockDbCebuano = { ...mockDb };
 const mockDbTagalog = { ...mockDb };
 
-// Create a mock io server instance for testing
-const mockIo = {
-  on: jest.fn(),
-  emit: jest.fn()
-};
-
-// Mock socket instance
-const mockSocket = {
+const createMockSocket = (id = 'test-socket-id') => ({
   on: jest.fn(),
   emit: jest.fn(),
-  id: 'test-socket-id'
-};
-
-// Mock the connection event to return our mock socket
-mockIo.on.mockImplementation((event, callback) => {
-  if (event === 'connection') {
-    callback(mockSocket);
-  }
+  join: jest.fn(),
+  leave: jest.fn(),
+  id,
 });
+
+const findHandler = (socket, event) => {
+  const registered = socket.on.mock.calls.find(([name]) => name === event);
+  if (!registered) throw new Error(`Missing socket handler for ${event}`);
+  return registered[1];
+};
 
 // Ensure all mocks are reset before each test
 beforeEach(() => {
@@ -41,35 +34,43 @@ beforeEach(() => {
 });
 
 describe('socket events', () => {
-  test('go-live handler emits update-verse with segmented payload', () => {
-    // Register handlers with mocked dependencies
-    registerSocketHandlers(mockIo, { 
+  test('go-live emits only to target session room', () => {
+    const roomEmitter = { emit: jest.fn() };
+    const mockIo = {
+      on: jest.fn(),
+      to: jest.fn(() => roomEmitter),
+    };
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
+    });
+
+    registerSocketHandlers(mockIo, {
       segmentVerseText: mockSegmentVerseText, 
       db: mockDb, 
       db_cebuano: mockDbCebuano, 
       db_tagalog: mockDbTagalog 
     });
 
-    // Simulate go-live event
+    const socket = createMockSocket('presenter-1');
+    connectHandler(socket);
+
+    const goLive = findHandler(socket, 'go-live');
     const payload = { 
       verse: { 
         scripture_text: 'foo', 
         verse_title: '1 Ne 1:1', 
         book_title: '1 Nephi',
         verse_id: '1' 
-      }, 
-      theme: {} 
+      },
+      theme: {},
+      sessionId: 'AB12CD',
     };
-    
-    // Call the registered 'go-live' handler logic
-    mockSocket.on.mock.calls.forEach(([event, handler]) => {
-      if (event === 'go-live') {
-        handler(payload);
-      }
-    });
 
-    // Verify update-verse was emitted with expected structure
-    expect(mockIo.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
+    goLive(payload);
+
+    expect(mockIo.to).toHaveBeenCalledWith('AB12CD');
+    expect(roomEmitter.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
       scripture_text: 'test text',
       verse_title: '1 Ne 1:1',
       book_title: '1 Nephi',
@@ -78,20 +79,36 @@ describe('socket events', () => {
       currentSegment: 0
     }));
     
-    // Verify update-theme was also emitted
-    expect(mockIo.emit).toHaveBeenCalledWith('update-theme', {});
+    expect(roomEmitter.emit).toHaveBeenCalledWith('update-theme', {});
   });
 
-  test('update-verse handler broadcasts to all clients', () => {
-    // Register handlers with mocked dependencies
-    registerSocketHandlers(mockIo, { 
+  test('update-verse uses active joined session when payload omits sessionId', () => {
+    const roomEmitter = { emit: jest.fn() };
+    const mockIo = {
+      on: jest.fn(),
+      to: jest.fn(() => roomEmitter),
+    };
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
+    });
+
+    registerSocketHandlers(mockIo, {
       segmentVerseText: mockSegmentVerseText, 
       db: mockDb, 
       db_cebuano: mockDbCebuano, 
       db_tagalog: mockDbTagalog 
     });
 
-    // Simulate update-verse event
+    const socket = createMockSocket('presenter-2');
+    connectHandler(socket);
+
+    const joinSession = findHandler(socket, 'join-session');
+    const joinAck = jest.fn();
+    joinSession({ sessionId: 'ZX90QP' }, joinAck);
+    expect(joinAck).toHaveBeenCalledWith({ ok: true, sessionId: 'ZX90QP' });
+
+    const updateVerse = findHandler(socket, 'update-verse');
     const payload = { 
       scripture_text: 'bar', 
       verse_title: '2 Ne 2:2', 
@@ -100,15 +117,53 @@ describe('socket events', () => {
       currentSegment: 0, 
       totalSegments: 0 
     };
-    
-    // Call the registered 'update-verse' handler logic
-    mockSocket.on.mock.calls.forEach(([event, handler]) => {
-      if (event === 'update-verse') {
-        handler(payload);
-      }
+    updateVerse(payload);
+
+    expect(mockIo.to).toHaveBeenLastCalledWith('ZX90QP');
+    expect(roomEmitter.emit).toHaveBeenCalledWith('update-verse', payload);
+  });
+
+  test('joining existing session receives latest verse snapshot', () => {
+    const roomEmitter = { emit: jest.fn() };
+    const mockIo = {
+      on: jest.fn(),
+      to: jest.fn(() => roomEmitter),
+    };
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
     });
 
-    // Verify broadcast occurred
-    expect(mockIo.emit).toHaveBeenCalledWith('update-verse', payload);
+    registerSocketHandlers(mockIo, {
+      segmentVerseText: mockSegmentVerseText,
+      db: mockDb,
+      db_cebuano: mockDbCebuano,
+      db_tagalog: mockDbTagalog
+    });
+
+    const presenterSocket = createMockSocket('presenter-3');
+    connectHandler(presenterSocket);
+    const goLive = findHandler(presenterSocket, 'go-live');
+    goLive({
+      sessionId: 'ROOM99',
+      verse: {
+        scripture_text: 'foo',
+        verse_title: '1 Ne 1:1',
+        book_title: '1 Nephi',
+        verse_id: '1',
+      },
+      theme: {},
+    });
+
+    const clientSocket = createMockSocket('client-1');
+    connectHandler(clientSocket);
+    const joinSession = findHandler(clientSocket, 'join-session');
+    joinSession({ sessionId: 'ROOM99' }, jest.fn());
+
+    expect(clientSocket.emit).toHaveBeenCalledWith('session-joined', { sessionId: 'ROOM99' });
+    expect(clientSocket.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
+      scripture_text: 'test text',
+      verse_title: '1 Ne 1:1',
+    }));
   });
 });
