@@ -1128,7 +1128,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
+  const SESSION_GRACE_MS = 30000;
   const sessionState = new Map();
+  const cleanupTimers = new Map();
 
   function normalizeSessionId(value) {
     if (!value) return '';
@@ -1141,6 +1143,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         theme: null,
         liveVerse: null,
         highlightedText: '',
+        presenterSocketId: null,
         updatedAt: Date.now(),
       });
     }
@@ -1172,58 +1175,173 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     return room ? room.size : 0;
   }
 
-  function cleanupSessionIfUnused(sessionId, { disconnecting = false } = {}) {
+  function cancelCleanup(sessionId) {
+    const normalized = normalizeSessionId(sessionId);
+    if (!normalized) return;
+    const timer = cleanupTimers.get(normalized);
+    if (timer) {
+      clearTimeout(timer);
+      cleanupTimers.delete(normalized);
+    }
+  }
+
+  function cleanupSessionIfUnused(sessionId) {
     const normalized = normalizeSessionId(sessionId);
     if (!normalized || normalized === DEFAULT_SESSION_ID) return;
     const roomSize = getRoomSize(normalized);
-    if (roomSize === null) return;
-    const isUnused = disconnecting ? roomSize <= 1 : roomSize === 0;
-    if (isUnused && sessionState.has(normalized)) {
+    if (roomSize !== 0) return;
+    cancelCleanup(normalized);
+    if (sessionState.has(normalized)) {
       sessionState.delete(normalized);
       fastify.log.info(`Session ${normalized} terminated (no active sockets)`);
     }
   }
 
+  function scheduleCleanup(sessionId, { disconnecting = false } = {}) {
+    const normalized = normalizeSessionId(sessionId);
+    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
+    const roomSize = getRoomSize(normalized);
+    if (roomSize === null || (!disconnecting && roomSize > 0) || (disconnecting && roomSize > 1)) {
+      cancelCleanup(normalized);
+      return;
+    }
+    cancelCleanup(normalized);
+    const timer = setTimeout(() => {
+      cleanupSessionIfUnused(normalized);
+    }, SESSION_GRACE_MS);
+    cleanupTimers.set(normalized, timer);
+  }
+
+  function sessionExists(sessionId) {
+    const normalized = normalizeSessionId(sessionId);
+    if (!normalized) return false;
+    if (sessionState.has(normalized)) return true;
+    const roomSize = getRoomSize(normalized);
+    return typeof roomSize === 'number' && roomSize > 0;
+  }
+
+  function releasePresenterLock(sessionId, socketId) {
+    const normalized = normalizeSessionId(sessionId);
+    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
+    const state = sessionState.get(normalized);
+    if (state && state.presenterSocketId === socketId) {
+      state.presenterSocketId = null;
+      state.updatedAt = Date.now();
+    }
+  }
+
+  function ensurePresenterAccess(sessionId, socket) {
+    const state = getSessionState(sessionId);
+    if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
+      const error = { message: 'Another presenter is active in this session' };
+      socket.emit('session-error', error);
+      return false;
+    }
+    if (!state.presenterSocketId) {
+      state.presenterSocketId = socket.id;
+      state.updatedAt = Date.now();
+    }
+    return true;
+  }
+
   io.on('connection', (socket) => {
     console.log('a user connected');
     let activeSessionId = DEFAULT_SESSION_ID;
+    let activeRole = 'viewer';
     socket.join(activeSessionId);
     getSessionState(activeSessionId);
 
-    const joinSession = (candidateSessionId) => {
+    const joinSession = (candidateSessionId, role = 'viewer') => {
       const normalized = normalizeSessionId(candidateSessionId);
       if (!normalized) return null;
       const previousSessionId = activeSessionId;
+      if (role === 'presenter') {
+        const state = getSessionState(normalized);
+        if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
+          return { error: 'Another presenter is active in this session' };
+        }
+      }
       if (activeSessionId && activeSessionId !== normalized) {
         socket.leave(activeSessionId);
-        cleanupSessionIfUnused(previousSessionId);
+        if (activeRole === 'presenter') {
+          releasePresenterLock(previousSessionId, socket.id);
+        }
+        scheduleCleanup(previousSessionId);
       }
       activeSessionId = normalized;
+      activeRole = role;
       socket.join(activeSessionId);
+      cancelCleanup(activeSessionId);
       const state = getSessionState(activeSessionId);
+      if (role === 'presenter') {
+        state.presenterSocketId = socket.id;
+      }
       socket.emit('session-joined', { sessionId: activeSessionId });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
       if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
-      return activeSessionId;
+      return { sessionId: activeSessionId };
     };
 
-    socket.on('create-session', (_payload, callback) => {
+    const leaveActiveSession = () => {
+      if (!activeSessionId || activeSessionId === DEFAULT_SESSION_ID) {
+        return { sessionId: DEFAULT_SESSION_ID };
+      }
+      const previousSessionId = activeSessionId;
+      if (activeRole === 'presenter') {
+        releasePresenterLock(previousSessionId, socket.id);
+      }
+      socket.leave(previousSessionId);
+      activeSessionId = DEFAULT_SESSION_ID;
+      activeRole = 'viewer';
+      socket.join(DEFAULT_SESSION_ID);
+      scheduleCleanup(previousSessionId);
+      socket.emit('session-left', { sessionId: previousSessionId });
+      return { sessionId: previousSessionId };
+    };
+
+    socket.on('create-session', (payload, callback) => {
       const sessionId = generateSessionId();
-      const joined = joinSession(sessionId);
-      socket.emit('session-created', { sessionId: joined });
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined });
+      const role = payload && payload.role === 'presenter' ? 'presenter' : 'presenter';
+      const joined = joinSession(sessionId, role);
+      if (joined && joined.error) {
+        const error = { message: joined.error };
+        socket.emit('session-error', error);
+        if (typeof callback === 'function') callback({ ok: false, ...error });
+        return;
+      }
+      socket.emit('session-created', { sessionId: joined.sessionId });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId });
     });
 
     socket.on('join-session', (payload, callback) => {
-      const joined = joinSession(payload && payload.sessionId);
-      if (!joined) {
+      const requested = normalizeSessionId(payload && payload.sessionId);
+      const role = payload && payload.role === 'presenter' ? 'presenter' : 'viewer';
+      if (!sessionExists(requested)) {
+        const error = { message: 'Session not found' };
+        socket.emit('session-error', error);
+        if (typeof callback === 'function') callback({ ok: false, ...error });
+        return;
+      }
+      const joined = joinSession(requested, role);
+      if (!joined || joined.error) {
+        const error = { message: joined && joined.error ? joined.error : 'Valid session code is required' };
+        socket.emit('session-error', error);
+        if (typeof callback === 'function') callback({ ok: false, ...error });
+        return;
+      }
+      if (!joined.sessionId) {
         const error = { message: 'Valid session code is required' };
         socket.emit('session-error', error);
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId });
+    });
+
+    socket.on('leave-session', (payload, callback) => {
+      const left = leaveActiveSession();
+      if (typeof callback === 'function') callback({ ok: true, sessionId: left.sessionId });
     });
 
     socket.on('search', (payload) => {
@@ -1239,7 +1357,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('update-verse', (payload) => {
       const verse = payload && payload.verse ? payload.verse : payload;
-      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
+      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('updating verse:', verse);
       const state = getSessionState(sessionId);
       state.liveVerse = verse;
@@ -1249,7 +1368,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('update-theme', (payload) => {
       const theme = payload && payload.theme ? payload.theme : payload;
-      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
+      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('updating theme:', theme);
       const state = getSessionState(sessionId);
       state.theme = theme;
@@ -1259,7 +1379,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('highlight-text', (payload) => {
       const text = payload && Object.prototype.hasOwnProperty.call(payload, 'text') ? payload.text : payload;
-      const sessionId = normalizeSessionId(payload && payload.sessionId) || activeSessionId || DEFAULT_SESSION_ID;
+      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('highlighting text:', text);
       const state = getSessionState(sessionId);
       state.highlightedText = text ? String(text).trim() : '';
@@ -1268,7 +1389,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
-      const sessionId = normalizeSessionId(rawSessionId) || activeSessionId || DEFAULT_SESSION_ID;
+      const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('go-live triggered', verse, theme, language, sessionId);
       
       let scriptureText = verse.scripture_text;
@@ -1342,11 +1464,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (socket.rooms && typeof socket.rooms.forEach === 'function') {
         socket.rooms.forEach((roomId) => {
           if (roomId !== socket.id) {
-            cleanupSessionIfUnused(roomId, { disconnecting: true });
+            releasePresenterLock(roomId, socket.id);
+            scheduleCleanup(roomId, { disconnecting: true });
           }
         });
       } else {
-        cleanupSessionIfUnused(activeSessionId, { disconnecting: true });
+        releasePresenterLock(activeSessionId, socket.id);
+        scheduleCleanup(activeSessionId, { disconnecting: true });
       }
     });
 

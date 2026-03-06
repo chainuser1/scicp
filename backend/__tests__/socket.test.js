@@ -104,6 +104,11 @@ describe('socket events', () => {
     harness.connectSocket(socket);
     connectHandler(socket);
 
+    const createSession = findHandler(socket, 'create-session');
+    const createAck = jest.fn();
+    createSession({}, createAck);
+    const sessionId = createAck.mock.calls[0][0].sessionId;
+
     const goLive = findHandler(socket, 'go-live');
     const payload = { 
       verse: { 
@@ -113,13 +118,13 @@ describe('socket events', () => {
         verse_id: '1' 
       },
       theme: {},
-      sessionId: 'AB12CD',
+      sessionId,
     };
 
     goLive(payload);
 
-    expect(mockIo.to).toHaveBeenCalledWith('AB12CD');
-    expect(harness.roomEmitter('AB12CD').emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
+    expect(mockIo.to).toHaveBeenCalledWith(sessionId);
+    expect(harness.roomEmitter(sessionId).emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
       scripture_text: 'test text',
       verse_title: '1 Ne 1:1',
       book_title: '1 Nephi',
@@ -128,7 +133,7 @@ describe('socket events', () => {
       currentSegment: 0
     }));
     
-    expect(harness.roomEmitter('AB12CD').emit).toHaveBeenCalledWith('update-theme', {});
+    expect(harness.roomEmitter(sessionId).emit).toHaveBeenCalledWith('update-theme', {});
   });
 
   test('update-verse uses active joined session when payload omits sessionId', () => {
@@ -150,10 +155,10 @@ describe('socket events', () => {
     harness.connectSocket(socket);
     connectHandler(socket);
 
-    const joinSession = findHandler(socket, 'join-session');
-    const joinAck = jest.fn();
-    joinSession({ sessionId: 'ZX90QP' }, joinAck);
-    expect(joinAck).toHaveBeenCalledWith({ ok: true, sessionId: 'ZX90QP' });
+    const createSession = findHandler(socket, 'create-session');
+    const createAck = jest.fn();
+    createSession({}, createAck);
+    const sessionId = createAck.mock.calls[0][0].sessionId;
 
     const updateVerse = findHandler(socket, 'update-verse');
     const payload = { 
@@ -166,8 +171,8 @@ describe('socket events', () => {
     };
     updateVerse(payload);
 
-    expect(mockIo.to).toHaveBeenLastCalledWith('ZX90QP');
-    expect(harness.roomEmitter('ZX90QP').emit).toHaveBeenCalledWith('update-verse', payload);
+    expect(mockIo.to).toHaveBeenLastCalledWith(sessionId);
+    expect(harness.roomEmitter(sessionId).emit).toHaveBeenCalledWith('update-verse', payload);
   });
 
   test('joining existing session receives latest verse snapshot', () => {
@@ -188,9 +193,12 @@ describe('socket events', () => {
     const presenterSocket = createMockSocket('presenter-3');
     harness.connectSocket(presenterSocket);
     connectHandler(presenterSocket);
+    const presenterCreate = findHandler(presenterSocket, 'create-session');
+    const presenterCreateAck = jest.fn();
+    presenterCreate({}, presenterCreateAck);
+    const sessionId = presenterCreateAck.mock.calls[0][0].sessionId;
     const goLive = findHandler(presenterSocket, 'go-live');
     goLive({
-      sessionId: 'ROOM99',
       verse: {
         scripture_text: 'foo',
         verse_title: '1 Ne 1:1',
@@ -204,9 +212,9 @@ describe('socket events', () => {
     harness.connectSocket(clientSocket);
     connectHandler(clientSocket);
     const joinSession = findHandler(clientSocket, 'join-session');
-    joinSession({ sessionId: 'ROOM99' }, jest.fn());
+    joinSession({ sessionId }, jest.fn());
 
-    expect(clientSocket.emit).toHaveBeenCalledWith('session-joined', { sessionId: 'ROOM99' });
+    expect(clientSocket.emit).toHaveBeenCalledWith('session-joined', { sessionId });
     expect(clientSocket.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
       scripture_text: 'test text',
       verse_title: '1 Ne 1:1',
@@ -214,6 +222,7 @@ describe('socket events', () => {
   });
 
   test('session persists while one socket remains and is removed when last leaves', () => {
+    jest.useFakeTimers();
     const harness = createMockIo();
     const mockIo = harness.io;
     let connectHandler;
@@ -231,9 +240,11 @@ describe('socket events', () => {
     const presenterSocket = createMockSocket('presenter-4');
     harness.connectSocket(presenterSocket);
     connectHandler(presenterSocket);
-    findHandler(presenterSocket, 'join-session')({ sessionId: 'KEEP01' }, jest.fn());
+    const createSession = findHandler(presenterSocket, 'create-session');
+    const createAck = jest.fn();
+    createSession({}, createAck);
+    const sessionId = createAck.mock.calls[0][0].sessionId;
     findHandler(presenterSocket, 'go-live')({
-      sessionId: 'KEEP01',
       verse: { scripture_text: 'foo', verse_title: '1 Ne 1:1', book_title: '1 Nephi', verse_id: '1' },
       theme: {},
     });
@@ -241,7 +252,7 @@ describe('socket events', () => {
     const clientSocket = createMockSocket('client-2');
     harness.connectSocket(clientSocket);
     connectHandler(clientSocket);
-    findHandler(clientSocket, 'join-session')({ sessionId: 'KEEP01' }, jest.fn());
+    findHandler(clientSocket, 'join-session')({ sessionId }, jest.fn());
 
     // Presenter disconnects first; session should still be replayable for remaining client
     findHandler(presenterSocket, 'disconnecting')();
@@ -251,7 +262,7 @@ describe('socket events', () => {
     const lateSocket = createMockSocket('client-3');
     harness.connectSocket(lateSocket);
     connectHandler(lateSocket);
-    findHandler(lateSocket, 'join-session')({ sessionId: 'KEEP01' }, jest.fn());
+    findHandler(lateSocket, 'join-session')({ sessionId }, jest.fn());
     expect(lateSocket.emit).toHaveBeenCalledWith('update-verse', expect.objectContaining({
       scripture_text: 'test text',
     }));
@@ -263,11 +274,87 @@ describe('socket events', () => {
     findHandler(lateSocket, 'disconnecting')();
     harness.disconnectSocket(lateSocket);
     findHandler(lateSocket, 'disconnect')();
+    jest.runOnlyPendingTimers();
 
     const afterCleanup = createMockSocket('client-4');
     harness.connectSocket(afterCleanup);
     connectHandler(afterCleanup);
-    findHandler(afterCleanup, 'join-session')({ sessionId: 'KEEP01' }, jest.fn());
+    findHandler(afterCleanup, 'join-session')({ sessionId }, jest.fn());
     expect(afterCleanup.emit).not.toHaveBeenCalledWith('update-verse', expect.anything());
+    jest.useRealTimers();
+  });
+
+  test('join-session rejects unknown session ids', () => {
+    const harness = createMockIo();
+    const mockIo = harness.io;
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
+    });
+
+    registerSocketHandlers(mockIo, {
+      segmentVerseText: mockSegmentVerseText,
+      db: mockDb,
+      db_cebuano: mockDbCebuano,
+      db_tagalog: mockDbTagalog
+    });
+
+    const socket = createMockSocket('presenter-5');
+    harness.connectSocket(socket);
+    connectHandler(socket);
+
+    const joinAck = jest.fn();
+    findHandler(socket, 'join-session')({ sessionId: 'ZZ999Z' }, joinAck);
+    expect(joinAck).toHaveBeenCalledWith({ ok: false, message: 'Session not found' });
+    expect(socket.emit).toHaveBeenCalledWith('session-error', { message: 'Session not found' });
+  });
+
+  test('only one presenter can control a session until current presenter leaves', () => {
+    const harness = createMockIo();
+    const mockIo = harness.io;
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
+    });
+
+    registerSocketHandlers(mockIo, {
+      segmentVerseText: mockSegmentVerseText,
+      db: mockDb,
+      db_cebuano: mockDbCebuano,
+      db_tagalog: mockDbTagalog
+    });
+
+    const presenterA = createMockSocket('presenter-a');
+    harness.connectSocket(presenterA);
+    connectHandler(presenterA);
+
+    const createSessionA = findHandler(presenterA, 'create-session');
+    const createAckA = jest.fn();
+    createSessionA({}, createAckA);
+    const sessionId = createAckA.mock.calls[0][0].sessionId;
+
+    const presenterB = createMockSocket('presenter-b');
+    harness.connectSocket(presenterB);
+    connectHandler(presenterB);
+
+    const joinAsPresenterB = findHandler(presenterB, 'join-session');
+    const joinAckBFirst = jest.fn();
+    joinAsPresenterB({ sessionId, role: 'presenter' }, joinAckBFirst);
+    expect(joinAckBFirst).toHaveBeenCalledWith({
+      ok: false,
+      message: 'Another presenter is active in this session'
+    });
+    expect(presenterB.emit).toHaveBeenCalledWith('session-error', {
+      message: 'Another presenter is active in this session'
+    });
+
+    const leaveA = findHandler(presenterA, 'leave-session');
+    const leaveAckA = jest.fn();
+    leaveA({}, leaveAckA);
+    expect(leaveAckA).toHaveBeenCalledWith({ ok: true, sessionId });
+
+    const joinAckBSecond = jest.fn();
+    joinAsPresenterB({ sessionId, role: 'presenter' }, joinAckBSecond);
+    expect(joinAckBSecond).toHaveBeenCalledWith({ ok: true, sessionId });
   });
 });

@@ -21,6 +21,7 @@ function Client() {
   const [sessionInput, setSessionInput] = useState(normalizeSessionId(urlSession));
   const [joinedSession, setJoinedSession] = useState('');
   const [sessionMessage, setSessionMessage] = useState(urlSession ? 'Joining session...' : 'Enter session code');
+  const [connectionState, setConnectionState] = useState('connecting');
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
   const [labelKey, setLabelKey] = useState(0);
 
@@ -37,7 +38,7 @@ function Client() {
       return;
     }
     setSessionMessage('Joining session...');
-    socket.emit('join-session', { sessionId: normalized }, (response) => {
+    socket.emit('join-session', { sessionId: normalized, role: 'viewer' }, (response) => {
       if (!response?.ok) {
         setSessionMessage(response?.message || 'Unable to join session');
       }
@@ -75,19 +76,46 @@ function Client() {
     const handleSessionError = (data) => {
       setSessionMessage(data?.message || 'Session error');
     };
+    const handleConnect = () => {
+      setConnectionState('connected');
+      const target = normalizeSessionId(joinedSession || urlSession || sessionInput);
+      if (!target) return;
+      socket.emit('join-session', { sessionId: target, role: 'viewer' }, (response) => {
+        if (!response?.ok) {
+          setSessionMessage(response?.message || 'Unable to join session');
+        }
+      });
+    };
+    const handleDisconnect = () => {
+      setConnectionState('disconnected');
+      setSessionMessage('Disconnected - attempting to reconnect...');
+    };
+    const handleReconnectAttempt = () => {
+      setConnectionState('reconnecting');
+    };
+    const handleConnectError = () => {
+      setConnectionState('error');
+    };
 
     socket.on('update-verse', handleVerse);
     socket.on('update-theme', handleTheme);
     socket.on('highlight-text', handleHighlight);
     socket.on('session-joined', handleSessionJoined);
     socket.on('session-error', handleSessionError);
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('reconnect_attempt', handleReconnectAttempt);
+    socket.on('connect_error', handleConnectError);
 
     if (urlSession) {
-      socket.emit('join-session', { sessionId: normalizeSessionId(urlSession) }, (response) => {
+      socket.emit('join-session', { sessionId: normalizeSessionId(urlSession), role: 'viewer' }, (response) => {
         if (!response?.ok) {
           setSessionMessage(response?.message || 'Unable to join session');
         }
       });
+    }
+    if (socket.connected) {
+      handleConnect();
     }
 
     return () => {
@@ -96,8 +124,12 @@ function Client() {
       socket.off('highlight-text', handleHighlight);
       socket.off('session-joined', handleSessionJoined);
       socket.off('session-error', handleSessionError);
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('reconnect_attempt', handleReconnectAttempt);
+      socket.off('connect_error', handleConnectError);
     };
-  }, [urlSession]);
+  }, [urlSession, joinedSession, sessionInput]);
 
   if (!joinedSession) {
     return (
@@ -121,6 +153,7 @@ function Client() {
               </div>
             </div>
             <div style={{ color: '#a09880', fontSize: '0.85rem' }}>{sessionMessage}</div>
+            <div style={{ color: '#7f745f', fontSize: '0.75rem' }}>Connection: {connectionState}</div>
           </div>
         </div>
       </div>
