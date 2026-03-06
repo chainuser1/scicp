@@ -424,6 +424,14 @@ button,
    laptop (13"–15"), desktop monitor, tablet portrait/landscape
    ================================================================ */
 
+/* ================================================================
+   CLIENT DISPLAY — THEME SYSTEM
+   Two identities sharing one vocabulary:
+     Dark  = evening candlelight. Ancient stone. Scripture by flame.
+     Light = morning sun through parchment. Illuminated manuscript.
+             Stone warmed by daylight.
+   ================================================================ */
+
 .client-view {
   width: 100vw;
   height: 100vh;
@@ -433,82 +441,126 @@ button,
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  color: rgb(206, 198, 198);
   overflow: hidden;
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-weight: 400;
   line-height: 1.5;
   position: relative;
-  background-color: #07090d;
-  --client-accent-strong: rgba(238, 221, 175, 0.88);
-  --client-accent-soft: rgba(238, 221, 175, 0.84);
-  --client-accent-glow: rgba(201, 168, 76, 0.3);
-  --client-accent-line: rgba(201, 168, 76, 0.65);
-  --client-accent-dim: rgba(240, 226, 190, 0.56);
-  /* [5] Highlight shifted to warm amber-ivory — within the gold family, not caution-tape yellow */
-  --client-highlight: rgba(255, 235, 190, 0.96);
-  --client-highlight-glow: rgba(240, 200, 140, 0.45);
+
+  /* ── Dark theme (default) — evening candlelight ── */
+  /* Fallback bg: the colour of a nave at night */
+  background-color: #080604;
+
+  /* Accents: antique gold, richer and less diluted than before */
+  --client-accent-strong: rgba(232, 210, 158, 0.92);
+  --client-accent-soft:   rgba(228, 206, 152, 0.86);
+  --client-accent-glow:   rgba(188, 148, 54, 0.32);
+  --client-accent-line:   rgba(188, 148, 54, 0.78);
+  --client-accent-dim:    rgba(220, 196, 140, 0.52);
+
+  /* Highlight: warm amber ember — candlelight falling on a word */
+  --client-highlight:      rgba(255, 232, 182, 0.97);
+  --client-highlight-glow: rgba(220, 172, 90, 0.42);
+
+  /* Scripture text: warm ivory — parchment-lit, not screen-white */
+  --client-text:           rgba(248, 240, 222, 0.97);
+  --client-text-shadow-1:  rgba(0, 0, 0, 0.7);
+  --client-text-shadow-2:  rgba(0, 0, 0, 0.9);
+
+  /* Backdrop: warm near-black — aged wood, not cold digital black */
+  --client-backdrop-solid: rgba(8, 5, 2, 0.44);
+  --client-backdrop-glass: linear-gradient(148deg, rgba(12, 7, 3, 0.36) 0%, rgba(6, 4, 2, 0.2) 100%);
+  --client-backdrop-strong-solid: rgba(4, 2, 1, 0.64);
+  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(4, 2, 1, 0.56) 0%, rgba(2, 1, 0, 0.38) 100%);
+  --client-backdrop-blur:  blur(9px) saturate(1.12) sepia(0.1);
+  --client-backdrop-shadow: rgba(0, 0, 0, 0.65);
+  --client-caption-text-shadow: 0 1px 2px rgba(0,0,0,0.92), 0 0 16px var(--client-accent-glow);
+
+  /* Vignette overlays */
+  --client-vignette-edge:  rgba(0, 0, 0, 0.74);
+  --client-vignette-centre: rgba(0, 0, 0, 0.36);
+  --client-vignette-edge-soft: rgba(0, 0, 0, 0.62);
+  --client-vignette-edge-strong: rgba(0, 0, 0, 0.84);
+  --client-vignette-centre-strong: rgba(0, 0, 0, 0.52);
 }
 
+/* ── Light theme — morning light through parchment ── */
 .client-view.client-theme-light {
-  --client-accent-strong: rgba(245, 227, 196, 0.96);
-  --client-accent-soft: rgba(228, 204, 168, 0.9);
-  --client-accent-glow: rgba(182, 139, 87, 0.42);
-  --client-accent-line: rgba(204, 161, 110, 0.76);
-  --client-accent-dim: rgba(218, 187, 147, 0.72);
-  --client-highlight: rgba(252, 224, 175, 0.97);
-  --client-highlight-glow: rgba(220, 170, 100, 0.4);
+  /* Fallback bg: warm daylit stone / aged vellum */
+  background-color: #f2e8d5;
+
+  /* Accents: antique brass — deeper, more authoritative in daylight */
+  --client-accent-strong: rgba(96, 58, 12, 0.9);
+  --client-accent-soft:   rgba(110, 68, 18, 0.82);
+  --client-accent-glow:   rgba(140, 96, 32, 0.28);
+  --client-accent-line:   rgba(130, 88, 22, 0.72);
+  --client-accent-dim:    rgba(120, 78, 18, 0.55);
+
+  /* Highlight: deep amber on parchment — a beam of light, not a marker pen */
+  --client-highlight:      rgba(180, 108, 20, 0.9);
+  --client-highlight-glow: rgba(200, 140, 50, 0.3);
+
+  /* Scripture text: deep sepia ink — the colour of words on vellum */
+  --client-text:           rgba(30, 16, 4, 0.94);
+  --client-text-shadow-1:  rgba(255, 235, 190, 0.25);
+  --client-text-shadow-2:  rgba(200, 160, 90, 0.15);
+
+  /* Backdrop: warm ivory — a panel of aged paper before the scene */
+  --client-backdrop-solid: rgba(238, 224, 196, 0.68);
+  --client-backdrop-glass: linear-gradient(148deg, rgba(245, 233, 210, 0.72) 0%, rgba(232, 218, 192, 0.58) 100%);
+  --client-backdrop-strong-solid: rgba(230, 214, 184, 0.78);
+  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(238, 224, 198, 0.82) 0%, rgba(224, 208, 176, 0.68) 100%);
+  --client-backdrop-blur:  blur(10px) saturate(1.08) sepia(0.18) brightness(1.04);
+  --client-backdrop-shadow: rgba(80, 50, 10, 0.28);
+  --client-caption-text-shadow: 0 1px 0 rgba(255,240,210,0.6), 0 0 10px rgba(200,150,60,0.18);
+
+  /* Vignette: warm amber edges — sunlight burning at the margins */
+  --client-vignette-edge:  rgba(60, 35, 5, 0.42);
+  --client-vignette-centre: rgba(80, 48, 8, 0.14);
+  --client-vignette-edge-soft: rgba(60, 35, 5, 0.3);
+  --client-vignette-edge-strong: rgba(40, 22, 2, 0.56);
+  --client-vignette-centre-strong: rgba(60, 36, 6, 0.22);
 }
 
-/* [2] Vignette: edges-only — background image stays atmospheric at corners,
-   centre strip behind text is selectively deepened via ::after             */
+/* ── Vignette layer 1: edge darkening — both themes use warm-toned values ── */
 .client-view::before {
   content: '';
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 110% 90% at center, transparent 30%, rgba(0, 0, 0, 0.72) 100%);
+    radial-gradient(ellipse 110% 90% at center, transparent 30%, var(--client-vignette-edge) 100%);
   pointer-events: none;
   z-index: 0;
 }
 
-/* [2] Centre-strip shadow — a soft vertical band that ensures the text zone
-   is always legible while leaving the outer scene rich and atmospheric      */
+/* ── Vignette layer 2: centre-strip depth behind text ── */
 .client-view::after {
   content: '';
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 70% 55% at 50% 50%, rgba(0, 0, 0, 0.38) 0%, transparent 100%);
+    radial-gradient(ellipse 70% 55% at 50% 50%, var(--client-vignette-centre) 0%, transparent 100%);
   pointer-events: none;
   z-index: 0;
 }
 
+/* Readability variants just adjust opacity — variables do the heavy lifting */
 .client-view.readability-soft::before {
   background:
-    radial-gradient(ellipse 110% 90% at center, transparent 35%, rgba(0, 0, 0, 0.62) 100%);
+    radial-gradient(ellipse 110% 90% at center, transparent 36%, var(--client-vignette-edge-soft) 100%);
 }
 .client-view.readability-soft::after {
   background:
-    radial-gradient(ellipse 70% 55% at 50% 50%, rgba(0, 0, 0, 0.28) 0%, transparent 100%);
+    radial-gradient(ellipse 72% 58% at 50% 50%, var(--client-vignette-centre) 0%, transparent 100%);
+  opacity: 0.75;
 }
-
 .client-view.readability-strong::before {
   background:
-    radial-gradient(ellipse 110% 90% at center, transparent 22%, rgba(0, 0, 0, 0.82) 100%);
+    radial-gradient(ellipse 108% 88% at center, transparent 22%, var(--client-vignette-edge-strong) 100%);
 }
 .client-view.readability-strong::after {
   background:
-    radial-gradient(ellipse 65% 50% at 50% 50%, rgba(0, 0, 0, 0.52) 0%, transparent 100%);
-}
-
-.client-view.client-theme-light::before {
-  background:
-    radial-gradient(ellipse 110% 90% at center, transparent 28%, rgba(0, 0, 0, 0.55) 100%);
-}
-.client-view.client-theme-light::after {
-  background:
-    radial-gradient(ellipse 70% 55% at 50% 50%, rgba(0, 0, 0, 0.28) 0%, transparent 100%);
+    radial-gradient(ellipse 65% 50% at 50% 50%, var(--client-vignette-centre-strong) 0%, transparent 100%);
 }
 
 /* ─── Layout variants ─── */
@@ -538,11 +590,7 @@ button,
   width: 100%;
 }
 
-/* ─── Text backdrop ──────────────────────────────────────────────────────────
-   [1] Border removed — the frosted blur and shadow do the framing work.
-       A border reads as "UI card"; shadowless blur reads as "sacred vessel".
-   [7] Backdrop itself animates on entrance — scale 0.985→1 synchronised
-       with the text drift, giving the whole composition a sense of settling. */
+/* ─── Text backdrop ─── */
 .verse-backdrop {
   position: relative;
   display: flex;
@@ -551,42 +599,44 @@ button,
   padding: clamp(1rem, 2.4vh, 2.2rem) clamp(1.1rem, 3.2vw, 3rem);
   max-width: min(90vw, 1250px);
   width: 100%;
-  /* [1] No border. Solid fallback bg for browsers without backdrop-filter. */
-  background: rgba(4, 6, 11, 0.42);
+  background: var(--client-backdrop-solid);
   border: none;
   border-radius: clamp(6px, 0.6vw, 14px);
   max-height: min(82dvh, 960px);
   overflow: visible;
-  box-shadow: 0 clamp(12px, 3vh, 36px) clamp(30px, 8vw, 90px) rgba(0, 0, 0, 0.62);
+  box-shadow: 0 clamp(12px, 3vh, 36px) clamp(30px, 8vw, 90px) var(--client-backdrop-shadow);
 }
 
-/* Solid fallback sharpened for readability-strong — still no border */
 .client-view.readability-strong .verse-backdrop {
-  background: rgba(0, 0, 0, 0.6);
-  box-shadow: 0 clamp(14px, 3.5vh, 42px) clamp(36px, 9vw, 110px) rgba(0, 0, 0, 0.72);
+  background: var(--client-backdrop-strong-solid);
+  box-shadow: 0 clamp(14px, 3.5vh, 42px) clamp(36px, 9vw, 110px) var(--client-backdrop-shadow);
 }
 
-.client-view.client-theme-light .verse-backdrop {
-  background: rgba(10, 7, 5, 0.34);
-}
-
-.client-view.client-theme-light.readability-strong .verse-backdrop {
-  background: rgba(8, 5, 3, 0.44);
-}
-
-/* Progressive enhancement: frosted glass when supported */
+/* Progressive enhancement: frosted glass — uses per-theme blur filter */
 @supports (backdrop-filter: blur(1px)) {
   .verse-backdrop {
-    background: linear-gradient(145deg, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.18) 100%);
-    backdrop-filter: blur(8px) saturate(1.1);
-    -webkit-backdrop-filter: blur(8px) saturate(1.1);
+    background: var(--client-backdrop-glass);
+    backdrop-filter: var(--client-backdrop-blur);
+    -webkit-backdrop-filter: var(--client-backdrop-blur);
   }
   .client-view.readability-strong .verse-backdrop {
-    background: linear-gradient(145deg, rgba(0, 0, 0, 0.52) 0%, rgba(0, 0, 0, 0.36) 100%);
+    background: var(--client-backdrop-strong-glass);
   }
 }
 
-/* Gold accent line — top edge only, fades at corners, always present */
+.client-view.readability-dyslexia .verse-backdrop {
+  /* Dyslexia mode: solid dark always — blur can fragment letter shapes */
+  background: rgba(2, 5, 11, 0.62) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Light-theme dyslexia: use a dense warm-ivory solid */
+.client-view.client-theme-light.readability-dyslexia .verse-backdrop {
+  background: rgba(235, 220, 190, 0.88) !important;
+}
+
+/* Accent line — top edge, fades at corners */
 .verse-backdrop::before {
   content: '';
   position: absolute;
@@ -596,10 +646,7 @@ button,
   border-radius: 1px;
 }
 
-/* ─── Scripture text ─────────────────────────────────────────────────────────
-   [4] font-style: italic — Cormorant Garamond Italic is among the finest
-       devotional type cuts available on the web. It transforms the mood from
-       "information displayed" to "word proclaimed".                          */
+/* ─── Scripture text ─── */
 .client-view p {
   margin: 0;
   white-space: pre-wrap;
@@ -613,18 +660,19 @@ button,
   letter-spacing: 0.018em;
   font-size: clamp(1.4rem, 2.2vw, 3.8rem);
   line-height: 1.52;
-  color: rgba(255, 255, 255, 0.97);
+  color: var(--client-text);
   text-shadow:
-    0 2px 16px rgba(0, 0, 0, 0.68),
-    0 1px 3px rgba(0, 0, 0, 0.88);
+    0 2px 16px var(--client-text-shadow-1),
+    0 1px 3px var(--client-text-shadow-2);
 }
 
 .client-view.readability-strong p {
   text-shadow:
-    0 3px 18px rgba(0, 0, 0, 0.76),
-    0 1px 5px rgba(0, 0, 0, 0.94);
+    0 3px 20px var(--client-text-shadow-1),
+    0 1px 5px var(--client-text-shadow-2);
 }
 
+/* Dyslexia: heavier, upright, generous spacing — both themes */
 .client-view.readability-dyslexia p {
   font-family: "Atkinson Hyperlegible", "Verdana", "Trebuchet MS", "Arial", sans-serif !important;
   font-style: normal;
@@ -634,8 +682,11 @@ button,
   word-spacing: 0.12em;
 }
 
-.client-view.readability-dyslexia .verse-backdrop {
-  background: rgba(2, 5, 11, 0.62);
+/* Light theme dyslexia text needs stronger shadow for legibility on ivory */
+.client-view.client-theme-light.readability-dyslexia p {
+  text-shadow:
+    0 1px 0 rgba(255, 245, 220, 0.5),
+    0 2px 8px rgba(80, 48, 8, 0.18) !important;
 }
 
 /* ─── Verse reference caption ─── */
@@ -651,21 +702,14 @@ button,
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--client-accent-strong);
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.9),
-    0 0 14px var(--client-accent-glow);
+  text-shadow: var(--client-caption-text-shadow);
   opacity: 0;
   animation: caption-arrive 0.65s 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes caption-arrive {
   from { opacity: 0; transform: translateY(5px); }
-  to   { opacity: 0.9; transform: translateY(0); }
-}
-
-.client-view.client-theme-light .verse-caption {
-  color: var(--client-accent-strong);
-  border-top-color: var(--client-accent-line);
+  to   { opacity: 0.92; transform: translateY(0); }
 }
 
 /* ─── Session watermark ─── */
@@ -680,15 +724,13 @@ button,
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--client-accent-dim);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.95);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
   opacity: 0.4;
   pointer-events: none;
   user-select: none;
 }
 
-/* ─── Continuation indicator ─────────────────────────────────────────────────
-   [6] Demoted: smaller, dimmer, no letter-spacing. It should whisper,
-       not compete with the word being read.                                  */
+/* ─── Continuation indicator — whisper, not announce ─── */
 .cont-indicator {
   margin-top: clamp(0.35rem, 0.9vh, 0.7rem);
   font-family: 'Cinzel', serif;
@@ -700,12 +742,7 @@ button,
   font-style: normal;
 }
 
-/* ─── Verse transition ───────────────────────────────────────────────────────
-   [3] Exit: fade out + slight upward drift (verse ascends away)
-       Enter: fade in + downward drift to rest (verse descends into view)
-   [7] Backdrop scale animation is applied to .verse-backdrop on enter.      */
-
-/* Exit phase — whole view fades and drifts up */
+/* ─── Verse transitions ─── */
 .client-view.verse-exit .verse-content {
   opacity: 0;
   transform: translateY(-7px);
@@ -714,39 +751,25 @@ button,
     transform 0.48s cubic-bezier(0.4, 0, 1, 1);
 }
 
-/* Enter phase — content descends into view */
 .client-view.verse-enter .verse-content {
   animation: verse-descend 0.52s cubic-bezier(0, 0, 0.2, 1) both;
 }
 
 @keyframes verse-descend {
-  from {
-    opacity: 0;
-    transform: translateY(-9px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(-9px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* [7] Backdrop settles into place alongside the text */
 .client-view.verse-enter .verse-backdrop {
   animation: backdrop-settle 0.58s cubic-bezier(0, 0, 0.2, 1) both;
 }
 
 @keyframes backdrop-settle {
-  from {
-    opacity: 0.4;
-    transform: scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0.4; transform: scale(0.985); }
+  to   { opacity: 1;   transform: scale(1); }
 }
 
-/* Reduced motion — skip all transform-based animation, keep instant opacity */
+/* Reduced motion */
 .client-view.reduce-motion-auto .verse-content,
 .client-view.reduce-motion-auto .verse-backdrop {
   animation: none !important;
@@ -756,20 +779,19 @@ button,
 }
 .client-view.reduce-motion-auto .verse-caption {
   animation: none !important;
-  opacity: 0.9 !important;
+  opacity: 0.92 !important;
   transform: none !important;
 }
 .client-view.reduce-motion-auto .highlight-yellow {
   animation: none !important;
 }
 
-/* ─── Highlight — candlelight warmth, not highlighter aggression ─────────────
-   [5] Amber-ivory tone, tighter glow radius, stays within the gold palette.  */
+/* ─── Highlight ─── */
 .highlight-yellow {
   color: var(--client-highlight);
   text-shadow:
     0 0 18px var(--client-highlight-glow),
-    0 1px 3px rgba(0, 0, 0, 0.82);
+    0 1px 3px rgba(0, 0, 0, 0.6);
   font-size: inherit !important;
   font-weight: 600 !important;
   font-style: inherit !important;
@@ -780,29 +802,26 @@ button,
 }
 
 @keyframes highlight-glow {
-  from { color: rgba(255, 255, 255, 0.97); text-shadow: 0 1px 10px rgba(0,0,0,0.6); }
-  to   { color: var(--client-highlight); text-shadow: 0 0 18px var(--client-highlight-glow), 0 1px 3px rgba(0,0,0,0.82); }
+  from { color: var(--client-text); text-shadow: 0 1px 8px rgba(0,0,0,0.4); }
+  to   { color: var(--client-highlight); text-shadow: 0 0 18px var(--client-highlight-glow), 0 1px 3px rgba(0,0,0,0.6); }
 }
 
-/* Light theme: highlight stays in the warm-amber family */
+/* Light theme highlight: heavier weight — dark text on ivory needs it */
 .client-view.client-theme-light .highlight-yellow {
-  font-weight: 500 !important;
+  font-weight: 700 !important;
+  text-shadow:
+    0 0 14px var(--client-highlight-glow),
+    0 1px 0 rgba(255, 240, 200, 0.5) !important;
 }
 
 /* ================================================================
    CLIENT — RESPONSIVE BREAKPOINTS
    ================================================================ */
 
-/* ── Small screens / landscape phone (≤640px) ── */
 @media (max-width: 640px) {
   .client-view { background-size: cover; background-position: center center; }
-  .client-view.centered {
-    justify-content: center;
-    padding-bottom: 0;
-  }
-  .client-view.lower-third {
-    padding-bottom: clamp(0.7rem, 3.2vh, 1.6rem);
-  }
+  .client-view.centered { justify-content: center; padding-bottom: 0; }
+  .client-view.lower-third { padding-bottom: clamp(0.7rem, 3.2vh, 1.6rem); }
   .verse-content {
     justify-content: center;
     padding:
@@ -833,13 +852,9 @@ button,
     bottom: 0.38rem;
     right: 0.48rem;
   }
-  .cont-indicator {
-    margin-top: 0.3rem;
-    font-size: 0.48rem;
-  }
+  .cont-indicator { margin-top: 0.3rem; font-size: 0.48rem; }
 }
 
-/* ── Tablet portrait (641px–900px) ── */
 @media (min-width: 641px) and (max-width: 900px) {
   .verse-backdrop {
     max-width: 94vw;
@@ -847,47 +862,28 @@ button,
     padding: clamp(1rem, 2.5vh, 2rem) clamp(1.25rem, 4vw, 2.5rem);
     overflow: visible;
   }
-  .client-view p {
-    font-size: clamp(1.45rem, 3.5vw, 3.05rem);
-    line-height: 1.48;
-  }
+  .client-view p { font-size: clamp(1.45rem, 3.5vw, 3.05rem); line-height: 1.48; }
 }
 
-/* ── Standard HD projectors: 720p–1080p (901px–1920px) ── */
 @media (min-width: 901px) and (max-width: 1920px) {
-  .client-view p {
-    font-size: clamp(1.8rem, 2.6vw, 4.8rem);
-  }
+  .client-view p { font-size: clamp(1.8rem, 2.6vw, 4.8rem); }
   .verse-backdrop {
     max-width: min(88vw, 1280px);
     padding: clamp(1.35rem, 2.6vh, 2.6rem) clamp(1.6rem, 3.8vw, 4.5rem);
   }
 }
 
-/* ── 4K TVs and large displays (≥2400px) ── */
 @media (min-width: 2400px) {
-  .client-view p {
-    font-size: clamp(2rem, 2.5vw, 6rem);
-    line-height: 1.7;
-  }
-  .verse-backdrop {
-    max-width: min(78vw, 1600px);
-    padding: 4rem 6rem;
-  }
+  .client-view p { font-size: clamp(2rem, 2.5vw, 6rem); line-height: 1.7; }
+  .verse-backdrop { max-width: min(78vw, 1600px); padding: 4rem 6rem; }
   .verse-caption {
     font-size: clamp(0.85rem, 1vw, 1.3rem);
     letter-spacing: 0.26em;
     margin-top: 1.4rem;
     padding-top: 0.9rem;
   }
-  .session-watermark {
-    font-size: clamp(0.52rem, 0.62vw, 0.82rem);
-    bottom: 2rem;
-    right: 3rem;
-  }
-  .cont-indicator {
-    font-size: clamp(0.8rem, 0.92vw, 1.15rem);
-  }
+  .session-watermark { font-size: clamp(0.52rem, 0.62vw, 0.82rem); bottom: 2rem; right: 3rem; }
+  .cont-indicator { font-size: clamp(0.8rem, 0.92vw, 1.15rem); }
 }
 
 /* ================================================================
