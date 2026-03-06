@@ -799,17 +799,17 @@ button,
 }
 
 .presenter-container--light {
-  --obsidian: #e9edf2;
-  --surface: #f3f6fa;
-  --surface-2: #e6ebf1;
-  --surface-3: #dce2ea;
-  --text-primary: #1f2937;
-  --text-secondary: #334155;
-  --text-dim: #64748b;
-  --gold: #9a8450;
-  --gold-light: #b59b63;
-  --gold-border: rgba(154, 132, 80, 0.28);
-  --gold-dim: rgba(154, 132, 80, 0.08);
+  --obsidian: #f7f4ef;
+  --surface: #fffdf9;
+  --surface-2: #f5eee6;
+  --surface-3: #ece2d7;
+  --text-primary: #2c1f24;
+  --text-secondary: #4a3038;
+  --text-dim: #7a636b;
+  --gold: #7a1f34;
+  --gold-light: #9a2f49;
+  --gold-border: rgba(122, 31, 52, 0.34);
+  --gold-dim: rgba(122, 31, 52, 0.1);
 }
 
 .presenter-container--dark {
