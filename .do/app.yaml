@@ -1,0 +1,19 @@
+name: scicp
+region: nyc
+services:
+  - name: web
+    environment_slug: node-js
+    dockerfile_path: Dockerfile
+    source_dir: /
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /health
+    envs:
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: REBUILD_FTS_ON_START
+        value: "false"
+        scope: RUN_TIME

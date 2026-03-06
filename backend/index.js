@@ -1,12 +1,15 @@
 const fastify = require('fastify')({ logger: true });
 const { Server } = require("socket.io");
-// english scriptures database (LDS standard works)
-const db = require('better-sqlite3')('../resources/db/lds-scriptures-sqlite.db', { fileMustExist: true });
-// additional language databases (optional)
-const db_tagalog = require('better-sqlite3')('../resources/db/tagalog-scriptures-sqlite.db', { fileMustExist: true });
-const db_cebuano = require('better-sqlite3')('../resources/db/cebuano-scriptures-sqlite.db', { fileMustExist: true });
-
 const path = require('path');
+
+const DB_DIR = path.resolve(__dirname, '../resources/db');
+const FRONTEND_DIST_DIR = path.resolve(__dirname, '../frontend/dist');
+// english scriptures database (LDS standard works)
+const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), { fileMustExist: true });
+// additional language databases (optional)
+const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'), { fileMustExist: true });
+const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'), { fileMustExist: true });
+
 const fastifyStatic = require('@fastify/static');
 
 fastify.register(require('@fastify/cors'), {
@@ -15,7 +18,7 @@ fastify.register(require('@fastify/cors'), {
 
 // Register static file serving for frontend distribution
 fastify.register(fastifyStatic, {
-  root: path.join(__dirname, '../frontend/dist'),
+  root: FRONTEND_DIST_DIR,
   prefix: '/',
 });
 
@@ -24,19 +27,16 @@ fastify.setNotFoundHandler((request, reply) => {
   reply.sendFile('index.html');
 });
 
-fastify.get('/', async (request, reply) => {
-  return { hello: 'world' }
+fastify.get('/health', async () => {
+  return { status: 'ok' };
 });
 
 // theme management endpoints
-/*
 fastify.get('/themes', async (request, reply) => {
   const rows = db.prepare('SELECT id, name, data FROM themes').all();
   return rows.map(r => ({ id: r.id, name: r.name, data: JSON.parse(r.data) }));
 });
-*/
 
-/*
 fastify.post('/themes', async (request, reply) => {
   const { name, data } = request.body;
   if (!name || !data) {
@@ -53,9 +53,7 @@ fastify.post('/themes', async (request, reply) => {
     return { error: 'could not create theme' };
   }
 });
-*/
 
-/*
 fastify.put('/themes/:id', async (request, reply) => {
   const { id } = request.params;
   const { name, data } = request.body;
@@ -73,9 +71,7 @@ fastify.put('/themes/:id', async (request, reply) => {
     return { error: 'could not update theme' };
   }
 });
-*/
 
-/*
 fastify.delete('/themes/:id', async (request, reply) => {
   const { id } = request.params;
   try {
@@ -88,7 +84,6 @@ fastify.delete('/themes/:id', async (request, reply) => {
     return { error: 'could not delete theme' };
   }
 });
-*/
 
 const io = new Server(fastify.server, {
   cors: {
@@ -96,7 +91,6 @@ const io = new Server(fastify.server, {
   }
 });
 
-/*
 // ensure themes table exists
 try {
   db.exec(`
@@ -109,41 +103,12 @@ try {
 } catch (err) {
   fastify.log.error('failed to ensure themes table', err);
 }
-*/
 
-// ─── FTS5 Setup: Drop & Rebuild with advanced features ───────────────────────
-//
-//  Upgrades over the previous table:
-//  1. tokenize = "porter ascii"
-//     Porter stemmer reduces words to their root so that:
-//       "redemption" matches "redeem", "atoning" matches "atone",
-//       "baptisms" matches "baptism", "believing" matches "believe"
-//     Without this, prefix wildcards (*) only help suffix variation, not
-//     root-level morphological variation.
-//
-//  2. Weighted columns via bm25()
-//     BM25 (Best Match 25) is the industry-standard relevance ranking algorithm.
-//     We give scripture_text the highest weight (10), verse_title medium (5),
-//     book_title low (1) so a match in the verse body ranks above a title match.
-//     Column weights in bm25() are negative by convention (higher = more negative).
-//
-//  3. Results ordered by rank (bm25 score) instead of verse_id
-//     Previously results came back in canonical order regardless of relevance.
-//     Now the most relevant verse surfaces first — critical for doctrinal queries
-//     where a keyword appears in hundreds of verses.
-//
-//  4. LIMIT 50 applied at the FTS level
-//     Prevents returning thousands of rows for common words like "faith".
-// ─────────────────────────────────────────────────────────────────────────────
-try {
-  // Drop old table unconditionally so we always get the upgraded schema.
-  // This is safe because scriptures_fts is a pure index — all source data
-  // lives in the canonical `verses`, `chapters`, and `books` tables.
-  db.exec(`DROP TABLE IF EXISTS scriptures_fts`);
-  fastify.log.info('Dropped old scriptures_fts table');
+// Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
+function initializeFts() {
+  const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
 
-  // Rebuild with porter stemmer + column structure preserved
-  db.exec(`
+  const createFtsTableSql = `
     CREATE VIRTUAL TABLE scriptures_fts USING fts5(
       verse_id   UNINDEXED,
       scripture_text,
@@ -153,35 +118,56 @@ try {
       verse_number   UNINDEXED,
       tokenize = "porter ascii"
     )
-  `);
-  fastify.log.info('Rebuilt scriptures_fts with porter stemmer');
+  `;
 
-  // Populate from canonical tables (same join as before)
-  fastify.log.info('Populating FTS5 table from verses...');
-  const insertStmt = db.prepare(`
-    INSERT INTO scriptures_fts(verse_id, scripture_text, verse_title, book_title, chapter_number, verse_number)
-    SELECT
-      verses.id,
-      verses.scripture_text,
-      (books.book_title || ' ' || chapters.chapter_number || ':' || verses.verse_number),
-      books.book_title,
-      chapters.chapter_number,
-      verses.verse_number
-    FROM verses
-    JOIN chapters ON chapters.id = verses.chapter_id
-    JOIN books    ON books.id    = chapters.book_id
-  `);
-  const result = insertStmt.run();
-  fastify.log.info(`FTS5 table populated with ${result.changes} verses`);
+  const populateFts = () => {
+    fastify.log.info('Populating FTS5 table from verses...');
+    const insertStmt = db.prepare(`
+      INSERT INTO scriptures_fts(verse_id, scripture_text, verse_title, book_title, chapter_number, verse_number)
+      SELECT
+        verses.id,
+        verses.scripture_text,
+        (books.book_title || ' ' || chapters.chapter_number || ':' || verses.verse_number),
+        books.book_title,
+        chapters.chapter_number,
+        verses.verse_number
+      FROM verses
+      JOIN chapters ON chapters.id = verses.chapter_id
+      JOIN books    ON books.id    = chapters.book_id
+    `);
+    const result = insertStmt.run();
+    fastify.log.info(`FTS5 table populated with ${result.changes} verses`);
+    db.exec(`INSERT INTO scriptures_fts(scriptures_fts) VALUES('optimize')`);
+    fastify.log.info('FTS5 index optimized');
+  };
 
-  // Run OPTIMIZE so the index is fully merged into a single segment —
-  // this cuts query time on large result sets (e.g. "faith") significantly.
-  db.exec(`INSERT INTO scriptures_fts(scriptures_fts) VALUES('optimize')`);
-  fastify.log.info('FTS5 index optimized');
+  try {
+    const existing = db.prepare(`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'scriptures_fts'
+    `).get();
+    const hasExpectedTokenizer = existing?.sql?.includes('porter ascii');
 
-} catch (err) {
-  fastify.log.error('FTS5 setup failed:', err && err.message ? err.message : err);
+    if (forceRebuild || !existing || !hasExpectedTokenizer) {
+      db.exec(`DROP TABLE IF EXISTS scriptures_fts`);
+      db.exec(createFtsTableSql);
+      populateFts();
+      return;
+    }
+
+    const ftsCount = db.prepare(`SELECT COUNT(*) AS count FROM scriptures_fts`).get()?.count ?? 0;
+    if (ftsCount === 0) {
+      populateFts();
+    } else {
+      fastify.log.info(`FTS5 table ready with ${ftsCount} indexed verses`);
+    }
+  } catch (err) {
+    fastify.log.error('FTS5 setup failed:', err && err.message ? err.message : err);
+  }
 }
+
+initializeFts();
 
 
 // Map of book abbreviations to full names (LDS scriptures)
