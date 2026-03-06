@@ -161,7 +161,12 @@ function Client() {
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
       {verse.book_title && verse.chapter_number && verse.verse_number && (
         <span key={labelKey} className="verse-title-top-left">
-          [{joinedSession}] {verse.book_title} {verse.chapter_number}:{verse.verse_number}
+          {verse.book_title} {verse.chapter_number}:{verse.verse_number}
+        </span>
+      )}
+      {joinedSession && (
+        <span className="session-id-top-right">
+          Session {joinedSession}
         </span>
       )}
 
