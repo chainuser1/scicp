@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Presenter from './pages/Presenter';
 import Client from './pages/Client';
@@ -28,6 +28,25 @@ const EmblemSVG = ({ size = 72 }) => (
 );
 
 function Home() {
+  const HOME_TOUR_KEY = 'scicp.home_tour_prompt_seen_v1';
+  const [showHomeTourPrompt, setShowHomeTourPrompt] = useState(() => {
+    try {
+      const seen = window.localStorage.getItem(HOME_TOUR_KEY) === 'true';
+      return !seen;
+    } catch {
+      return true;
+    }
+  });
+
+  const dismissHomeTourPrompt = () => {
+    setShowHomeTourPrompt(false);
+    try {
+      window.localStorage.setItem(HOME_TOUR_KEY, 'true');
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   return (
     <div className="home-page">
       {/* Hero */}
@@ -87,6 +106,21 @@ function Home() {
           <span>Sacred Tech by <em>Dagami Ward Dev Team</em></span>
         </div>
       </footer>
+
+      {showHomeTourPrompt && (
+        <aside className="home-tour-prompt" aria-live="polite">
+          <div className="home-tour-prompt-title">First Time Here?</div>
+          <div className="home-tour-prompt-body">
+            Open Chapel Control and we will show a short walkthrough of sessions, search, and going live.
+          </div>
+          <div className="home-tour-prompt-actions">
+            <Link to="/presenter?tour=1" className="home-tour-btn home-tour-btn--primary" onClick={dismissHomeTourPrompt}>
+              Start Tour
+            </Link>
+            <button className="home-tour-btn" onClick={dismissHomeTourPrompt}>Dismiss</button>
+          </div>
+        </aside>
+      )}
 
     </div>
   );
