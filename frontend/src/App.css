@@ -729,44 +729,39 @@ button,
 }
 
 /* ── lower-third: broadcast-inspired bottom strip ───────────────────────────
-   Sits *on* the scene rather than floating in it. Wider than the centred
-   card, flatter proportions, left-edge accent line instead of top edge.
-   The backdrop aligns to the left wall so it reads as anchored to the scene.
-   Text remains centred within it for legibility.                           */
+   Anchors to bottom of scene. Card stays horizontally centred — the left-edge
+   accent line on the backdrop is the visual anchor, not the flex alignment.
+   The container keeps align-items: center so the card never drifts left.   */
 .client-view.lower-third {
   justify-content: flex-end;
-  align-items: flex-start;
+  align-items: center;
   text-align: center;
   padding-bottom: clamp(1.8rem, 5vh, 4.5rem);
-  padding-left: clamp(1.8rem, 4vw, 5rem);
 }
 
 .client-view.lower-third .verse-content {
-  padding: 0;
+  padding: 0 clamp(1.1rem, 5vw, 4.5rem) 0;
   width: 100%;
-  max-width: min(80vw, 1100px);
-  align-items: flex-start;
+  max-width: min(88vw, 1280px);
+  align-items: center;
 }
 
 .client-view.lower-third .verse-backdrop {
   max-width: 100%;
   width: 100%;
-  border-radius: clamp(4px, 0.4vw, 10px);
-  clip-path: inset(0 round clamp(4px, 0.4vw, 10px));
-  /* Left-edge accent bar instead of top edge */
-  border-left: 2px solid var(--client-accent-line);
   border-radius: 0 clamp(4px, 0.4vw, 10px) clamp(4px, 0.4vw, 10px) 0;
-  clip-path: none; /* left border handles the visual boundary */
+  clip-path: none;
+  /* Left-edge accent bar — visual anchor to the scene edge */
+  border-left: 2px solid var(--client-accent-line);
   padding-left: clamp(1.2rem, 2.8vw, 3.2rem);
 }
 
-/* Remove the top-edge ::before gold line from lower-third — the left border
-   takes over that role. */
+/* Remove the top-edge ::before gold line — left border takes that role */
 .client-view.lower-third .verse-backdrop::before {
   display: none;
 }
 
-/* Caption aligns left in lower-third to match the left-anchored layout */
+/* Caption aligns left in lower-third to match the left-bar anchor */
 .client-view.lower-third .verse-caption {
   text-align: left;
 }
@@ -1022,7 +1017,6 @@ button,
   .client-view.centered { justify-content: center; padding-bottom: 0; }
   .client-view.lower-third {
     padding-bottom: clamp(0.7rem, 3.2vh, 1.6rem);
-    padding-left: clamp(0.7rem, 2.5vw, 1.4rem);
   }
   .verse-content {
     justify-content: center;
