@@ -441,6 +441,23 @@ button,
   transition: opacity 0.6s ease;
   position: relative;
   background-color: #07090d;
+  --client-accent-strong: rgba(238, 221, 175, 0.88);
+  --client-accent-soft: rgba(238, 221, 175, 0.84);
+  --client-accent-glow: rgba(201, 168, 76, 0.3);
+  --client-accent-line: rgba(201, 168, 76, 0.65);
+  --client-accent-dim: rgba(240, 226, 190, 0.56);
+  --client-highlight: #ffe566;
+  --client-highlight-glow: rgba(255, 220, 50, 0.6);
+}
+
+.client-view.client-theme-light {
+  --client-accent-strong: rgba(151, 45, 72, 0.9);
+  --client-accent-soft: rgba(151, 45, 72, 0.84);
+  --client-accent-glow: rgba(122, 31, 52, 0.36);
+  --client-accent-line: rgba(122, 31, 52, 0.72);
+  --client-accent-dim: rgba(151, 45, 72, 0.62);
+  --client-highlight: #8a233b;
+  --client-highlight-glow: rgba(138, 35, 59, 0.52);
 }
 
 /* Vignette — darkens all four edges so text always pops regardless of bg */
@@ -509,7 +526,7 @@ button,
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: clamp(4px, 0.5vw, 10px);
   box-shadow:
-    0 1px 0 0 rgba(201, 168, 76, 0.26) inset,
+    0 1px 0 0 var(--client-accent-glow) inset,
     0 clamp(10px, 2.5vh, 28px) clamp(22px, 6vw, 70px) rgba(0, 0, 0, 0.56);
 }
 
@@ -517,7 +534,7 @@ button,
   background: rgba(0, 0, 0, 0.56);
   border-color: rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 1px 0 0 rgba(201, 168, 76, 0.28) inset,
+    0 1px 0 0 var(--client-accent-glow) inset,
     0 clamp(12px, 3vh, 36px) clamp(28px, 7vw, 90px) rgba(0, 0, 0, 0.68);
 }
 
@@ -536,7 +553,7 @@ button,
   position: absolute;
   top: 0; left: 12%; right: 12%;
   height: 1px;
-  background: linear-gradient(to right, transparent, rgba(201, 168, 76, 0.65), transparent);
+  background: linear-gradient(to right, transparent, var(--client-accent-line), transparent);
 }
 
 /* ─── Scripture text ─── */
@@ -592,12 +609,12 @@ button,
   font-style: normal;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(238, 221, 175, 0.88);
+  color: var(--client-accent-strong);
   text-shadow:
     0 1px 0 rgba(0, 0, 0, 0.95),
-    0 0 14px rgba(201, 168, 76, 0.22);
+    0 0 14px var(--client-accent-glow);
   padding-bottom: clamp(0.2rem, 0.4vh, 0.4rem);
-  border-bottom: 1px solid rgba(201, 168, 76, 0.35);
+  border-bottom: 1px solid var(--client-accent-glow);
   opacity: 0;
   animation: label-arrive 0.8s 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
@@ -612,12 +629,12 @@ button,
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(238, 221, 175, 0.84);
+  color: var(--client-accent-soft);
   text-shadow:
     0 1px 0 rgba(0, 0, 0, 0.95),
-    0 0 10px rgba(201, 168, 76, 0.22);
+    0 0 10px var(--client-accent-glow);
   padding: 0.28rem 0.5rem;
-  border: 1px solid rgba(201, 168, 76, 0.35);
+  border: 1px solid var(--client-accent-glow);
   border-radius: 999px;
   background: rgba(10, 10, 15, 0.35);
   opacity: 0;
@@ -636,7 +653,7 @@ button,
   font-size: clamp(0.6rem, 0.8vw, 0.9rem);
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(240, 226, 190, 0.56);
+  color: var(--client-accent-dim);
   font-style: normal;
 }
 
@@ -653,11 +670,11 @@ button,
   animation: none !important;
 }
 
-/* ─── Highlight — gold glow with smooth fade-in ─── */
+/* ─── Highlight — theme-aware glow with smooth fade-in ─── */
 .highlight-yellow {
-  color: #ffe566;
+  color: var(--client-highlight);
   text-shadow:
-    0 0 22px rgba(255, 220, 50, 0.6),
+    0 0 22px var(--client-highlight-glow),
     0 1px 4px rgba(0, 0, 0, 0.85);
   font-size: inherit !important;
   font-weight: 600 !important;
@@ -670,7 +687,7 @@ button,
 
 @keyframes highlight-glow {
   from { color: rgba(255,255,255,0.97); text-shadow: 0 2px 14px rgba(0,0,0,0.65); }
-  to   { color: #ffe566; text-shadow: 0 0 22px rgba(255,220,50,0.6), 0 1px 4px rgba(0,0,0,0.85); }
+  to   { color: var(--client-highlight); text-shadow: 0 0 22px var(--client-highlight-glow), 0 1px 4px rgba(0,0,0,0.85); }
 }
 
 /* ================================================================
@@ -911,7 +928,7 @@ button,
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   min-width: 0;
   overflow: hidden;
 }
@@ -924,15 +941,6 @@ button,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* Inline nav cluster */
-.hdr-nav {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  min-width: 0;
-  flex: 1;
 }
 
 /* Verse info — ref + segment count */
@@ -964,49 +972,6 @@ button,
   color: var(--text-dim);
   letter-spacing: 0.05em;
   line-height: 1.2;
-}
-
-/* Nav buttons — verse (double chevron) and segment (single) */
-.hdr-nav-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  background: var(--surface-2);
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: var(--radius);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background var(--transition), border-color var(--transition), color var(--transition), transform 0.1s;
-  padding: 0;
-  flex-shrink: 0;
-}
-
-.hdr-nav-btn--verse {
-  background: transparent;
-  border-color: rgba(201, 168, 76, 0.18);
-}
-
-.hdr-nav-btn:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: var(--gold-border);
-  color: var(--gold-light);
-}
-
-.hdr-nav-btn:active:not(:disabled) {
-  transform: scale(0.9);
-}
-
-.hdr-nav-btn:disabled {
-  opacity: 0.22;
-  cursor: not-allowed;
-}
-
-/* Double-chevron = verse nav — slight negative margin to overlap them */
-.hdr-nav-btn--verse svg + svg {
-  margin-left: -4px;
 }
 
 /* Right cluster */
@@ -1894,6 +1859,76 @@ button,
   -webkit-user-select: text;
 }
 
+.preview-nav {
+  margin: 0.5rem 0 0.45rem;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.preview-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition), transform 0.1s;
+  padding: 0;
+}
+
+.preview-nav-btn--verse {
+  background: transparent;
+  border-color: rgba(201, 168, 76, 0.24);
+}
+
+.preview-nav-btn--verse svg + svg {
+  margin-left: -4px;
+}
+
+.preview-nav-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--gold-border);
+  color: var(--gold-light);
+}
+
+.preview-nav-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.preview-nav-btn:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.preview-nav-meta {
+  min-width: 0;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.preview-nav-meta span:first-child {
+  font-family: 'Cinzel', serif;
+  font-size: 0.67rem;
+  letter-spacing: 0.08em;
+  color: var(--gold-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-nav-meta span:last-child {
+  font-size: 0.56rem;
+  color: var(--text-dim);
+}
+
 .preview-box::-webkit-scrollbar { width: 3px; }
 .preview-box::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.25); border-radius: 3px; }
 
@@ -2030,7 +2065,7 @@ button,
   .presenter-header { height: 56px; min-height: 56px; padding: 0 1.5rem; }
   .search-drawer { top: 56px; width: min(440px, 60vw); }
   .drawer-backdrop { top: 56px; }
-  .hdr-nav-btn { width: 34px; height: 34px; }
+  .preview-nav-btn { width: 34px; height: 34px; }
   .hdr-btn { width: 34px; height: 34px; }
   .hdr-lang-select { height: 34px; }
   .main-panel { padding: 1.4rem; gap: 1rem; }
@@ -2081,7 +2116,7 @@ button, [role="button"] {
   .history-item:hover::before { transform: scaleY(0); }
 
   /* Minimum touch targets */
-  .hdr-nav-btn, .hdr-btn { min-width: 42px; min-height: 42px; }
+  .preview-nav-btn, .hdr-btn { min-width: 42px; min-height: 42px; }
   .result-live-icon { min-width: 42px; min-height: 42px; }
   .go-live-button { min-height: 52px; }
   .search-input { min-height: 48px; }
