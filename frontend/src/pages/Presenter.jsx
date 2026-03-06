@@ -5,7 +5,7 @@ const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3
 
 const themes = {
   light: {
-    background_url: "url('https://www.churchofjesuschrist.org/imgs/0ec17f8ba62b51ed5cfbc746cb506d40c8e7392f/full/!640%2C/0/default')",
+    background_url: "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.1rem",
     layout: "centered",
