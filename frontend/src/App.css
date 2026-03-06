@@ -573,6 +573,11 @@ button,
   background: rgba(255, 250, 240, 0.15);
 }
 
+/* Fix highlighted text being too bold in light theme */
+.client-view.client-theme-light .highlight-yellow {
+  font-weight: normal !important;
+}
+
 /* Progressive enhancement: blur only when browser supports it */
 @supports (backdrop-filter: blur(1px)) {
   .verse-backdrop {
