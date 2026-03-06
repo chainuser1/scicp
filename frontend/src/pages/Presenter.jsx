@@ -73,6 +73,13 @@ const IconSession = () => (
     <circle cx="12" cy="13" r="1.3"/>
   </svg>
 );
+const IconInfo = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="12" y1="16" x2="12" y2="12"/>
+    <line x1="12" y1="8" x2="12.01" y2="8"/>
+  </svg>
+);
 
 /* ─── Reusable components ─── */
 
@@ -130,7 +137,30 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
 
 /* ─── Main component ─── */
 const Presenter = () => {
+  const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
   const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+  const presenterTourSteps = [
+    {
+      target: 'session',
+      title: 'Session First',
+      description: 'Create or join a session from this menu, then share the client link.',
+    },
+    {
+      target: 'search',
+      title: 'Search Scriptures',
+      description: 'Use search to find references or keywords, then click a result to stage it.',
+    },
+    {
+      target: 'golive',
+      title: 'Go Live',
+      description: 'Review the staged verse and send it to your connected clients.',
+    },
+    {
+      target: 'nav',
+      title: 'Navigate Fast',
+      description: 'Use the top arrows for previous/next verse and segment controls while live.',
+    },
+  ];
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
   const [currentTheme, setCurrentTheme]     = useState(themes.light);
@@ -149,9 +179,21 @@ const Presenter = () => {
   const [sessionId, setSessionId]           = useState('');
   const [sessionInput, setSessionInput]     = useState('');
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
+  const [tourOpen, setTourOpen]             = useState(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const forceTour = urlParams.get('tour') === '1';
+      const hasSeenTour = window.localStorage.getItem(PRESENTER_TOUR_KEY) === 'true';
+      return forceTour || !hasSeenTour;
+    } catch {
+      return true;
+    }
+  });
+  const [tourStep, setTourStep]             = useState(0);
 
   const PAGE_SIZE = 5;
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+  const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
 
   const requestCreateSession = () => {
     setSessionMessage('Creating session...');
@@ -185,6 +227,20 @@ const Presenter = () => {
     } catch {
       setSessionMessage('Clipboard unavailable - copy URL from address bar');
     }
+  };
+
+  const closeTour = () => {
+    setTourOpen(false);
+    try {
+      window.localStorage.setItem(PRESENTER_TOUR_KEY, 'true');
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const openTour = () => {
+    setTourStep(0);
+    setTourOpen(true);
   };
 
   /* ── Socket & data ── */
@@ -370,7 +426,7 @@ const Presenter = () => {
         <div className="hdr-center">
           {liveVerse ? (
             <>
-              <div className="hdr-nav">
+              <div className={`hdr-nav${activeTourTarget === 'nav' ? ' tour-focus' : ''}`}>
                 {/* ←← prev verse */}
                 <button className="hdr-nav-btn hdr-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
                   <IconChevronLeft /><IconChevronLeft />
@@ -409,7 +465,10 @@ const Presenter = () => {
 
         {/* Right controls */}
         <div className="hdr-right">
-          <div className="hdr-session-wrap">
+          <HdrBtn onClick={openTour} label="Open walkthrough" title="Open walkthrough">
+            <IconInfo />
+          </HdrBtn>
+          <div className={`hdr-session-wrap${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
             <HdrBtn
               onClick={() => setSessionPopover(o => !o)}
               active={sessionPopover}
@@ -513,9 +572,11 @@ const Presenter = () => {
           </div>
 
           {/* Search toggle */}
-          <HdrBtn onClick={() => openDrawer('search')} active={drawerOpen && drawerTab === 'search'} label="Search scripture">
-            <IconSearch />
-          </HdrBtn>
+          <div className={activeTourTarget === 'search' ? 'tour-focus' : ''}>
+            <HdrBtn onClick={() => openDrawer('search')} active={drawerOpen && drawerTab === 'search'} label="Search scripture">
+              <IconSearch />
+            </HdrBtn>
+          </div>
 
           {/* Recent toggle */}
           <HdrBtn onClick={() => openDrawer('history')} active={drawerOpen && drawerTab === 'history'} label="Recent verses">
@@ -531,6 +592,24 @@ const Presenter = () => {
           )}
         </div>
       </header>
+
+      {tourOpen && (
+        <aside className="tour-card" role="dialog" aria-live="polite" aria-label="Presenter walkthrough">
+          <div className="tour-chip">Quick Walkthrough</div>
+          <div className="tour-title">{presenterTourSteps[tourStep].title}</div>
+          <div className="tour-desc">{presenterTourSteps[tourStep].description}</div>
+          <div className="tour-progress">{tourStep + 1}/{presenterTourSteps.length}</div>
+          <div className="tour-actions">
+            <button className="tour-btn" onClick={closeTour}>Skip</button>
+            <button className="tour-btn" onClick={() => setTourStep(s => Math.max(0, s - 1))} disabled={tourStep === 0}>Back</button>
+            {tourStep < presenterTourSteps.length - 1 ? (
+              <button className="tour-btn tour-btn--primary" onClick={() => setTourStep(s => Math.min(presenterTourSteps.length - 1, s + 1))}>Next</button>
+            ) : (
+              <button className="tour-btn tour-btn--primary" onClick={closeTour}>Done</button>
+            )}
+          </div>
+        </aside>
+      )}
 
       {/* ════════════════════════════════════════
           SLIDE-IN DRAWER  (search + history)
@@ -625,7 +704,7 @@ const Presenter = () => {
               <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
-            <button className="go-live-button" onClick={goLive}>● Go Live</button>
+            <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
           </section>
         )}
 
