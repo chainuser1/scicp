@@ -2105,6 +2105,329 @@ button,
 .control-button:active { transform: scale(0.97); }
 
 /* ══════════════════════════════════════════════════════════════
+   IDLE / WELCOME STATE
+   Shown when no verse is staged or live yet.
+   ══════════════════════════════════════════════════════════════ */
+
+.idle-state {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  animation: fade-up 0.45s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* ── Verse of the Day ── */
+.idle-votd {
+  border-color: var(--gold-border);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.idle-votd::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 10%; right: 10%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--gold), transparent);
+}
+
+.votd-text {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.15rem;
+  font-style: italic;
+  color: var(--text-primary);
+  line-height: 1.7;
+  margin: 0 0 1rem;
+}
+
+.votd-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.votd-ref {
+  font-family: 'Cinzel', serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.votd-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.votd-btn {
+  padding: 0.42rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.votd-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--gold-border);
+  color: var(--gold-light);
+}
+
+.votd-btn--live {
+  background: rgba(192, 57, 43, 0.14);
+  border-color: rgba(192, 57, 43, 0.38);
+  color: #e74c3c;
+}
+
+.votd-btn--live:hover {
+  background: rgba(192, 57, 43, 0.26);
+  border-color: rgba(192, 57, 43, 0.65);
+  color: #ff6b5b;
+}
+
+.votd-loading {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  font-style: italic;
+  margin: 0.5rem 0;
+}
+
+/* ── Two-column grid ── */
+.idle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+@media (max-width: 540px) {
+  .idle-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Session card ── */
+.idle-session {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.idle-conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.idle-conn-dot--connected    { background: #2ecc71; box-shadow: 0 0 0 2px rgba(46,204,113,0.2); }
+.idle-conn-dot--connecting,
+.idle-conn-dot--reconnecting { background: var(--gold); animation: live-pulse 1.4s ease-in-out infinite; }
+.idle-conn-dot--disconnected,
+.idle-conn-dot--error        { background: #e74c3c; }
+
+.idle-session-id {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: var(--gold-light);
+  line-height: 1.1;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--gold-border);
+}
+
+.idle-session-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0;
+  font-style: italic;
+}
+
+.idle-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding: 0.5rem 0.85rem;
+  background: var(--gold-dim);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  color: var(--gold-light);
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all var(--transition);
+  width: 100%;
+  justify-content: center;
+}
+
+.idle-copy-btn:hover {
+  background: rgba(201,168,76,0.22);
+  border-color: rgba(201,168,76,0.55);
+}
+
+/* ── Checklist card ── */
+.idle-checklist {
+  display: flex;
+  flex-direction: column;
+}
+
+.idle-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.idle-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
+.idle-check-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: var(--text-dim);
+}
+
+.idle-check--ok .idle-check-icon {
+  background: rgba(46,204,113,0.12);
+  border-color: rgba(46,204,113,0.3);
+  color: #2ecc71;
+}
+
+.idle-check--wait {
+  opacity: 0.55;
+}
+
+.idle-check--tip .idle-check-icon {
+  background: var(--gold-dim);
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+
+.idle-check--tip {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ── Quick Topics card ── */
+.idle-topics {
+  border-color: rgba(255,255,255,0.04);
+}
+
+.idle-topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.idle-chip {
+  padding: 0.38rem 0.82rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 20px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+}
+
+.idle-chip:hover {
+  background: var(--gold-dim);
+  border-color: var(--gold-border);
+  color: var(--gold-light);
+  transform: translateY(-1px);
+}
+
+.idle-chip:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Light theme overrides for idle state */
+.presenter-container--light .idle-votd {
+  background: linear-gradient(135deg, #faf7f2 0%, #ede7dc 100%);
+  border-color: rgba(139, 58, 26, 0.2);
+}
+.presenter-container--light .idle-votd::before {
+  background: linear-gradient(to right, transparent, rgba(139,58,26,0.4), transparent);
+}
+.presenter-container--light .votd-btn {
+  background: #ede7dc;
+  border-color: rgba(139,58,26,0.15);
+  color: #5c3d2e;
+}
+.presenter-container--light .votd-btn:hover {
+  background: #e2d9cc;
+  border-color: rgba(139,58,26,0.4);
+  color: #8b3a1a;
+}
+.presenter-container--light .votd-btn--live {
+  background: rgba(139,58,26,0.1);
+  border-color: rgba(139,58,26,0.35);
+  color: #8b3a1a;
+}
+.presenter-container--light .idle-session-id { color: #8b3a1a; }
+.presenter-container--light .idle-copy-btn {
+  background: rgba(139,58,26,0.08);
+  border-color: rgba(139,58,26,0.3);
+  color: #8b3a1a;
+}
+.presenter-container--light .idle-copy-btn:hover {
+  background: rgba(139,58,26,0.15);
+}
+.presenter-container--light .idle-check--ok .idle-check-icon {
+  background: rgba(46,204,113,0.1);
+  border-color: rgba(46,204,113,0.25);
+}
+.presenter-container--light .idle-check--tip .idle-check-icon {
+  background: rgba(139,58,26,0.08);
+  border-color: rgba(139,58,26,0.25);
+  color: #8b3a1a;
+}
+.presenter-container--light .idle-chip {
+  background: #ede7dc;
+  border-color: rgba(139,58,26,0.12);
+  color: #5c3d2e;
+}
+.presenter-container--light .idle-chip:hover {
+  background: rgba(139,58,26,0.08);
+  border-color: rgba(139,58,26,0.35);
+  color: #8b3a1a;
+}
+
+/* ══════════════════════════════════════════════════════════════
    RESPONSIVE COMFORT — scale up elegantly on large screens
    Same layout architecture, just more breathing room
    ══════════════════════════════════════════════════════════════ */
