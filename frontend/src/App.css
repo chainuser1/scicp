@@ -884,6 +884,10 @@ button,
   position: relative;
 }
 
+.hdr-session-wrap {
+  position: relative;
+}
+
 /* Theme popover panel */
 .hdr-theme-popover {
   position: absolute;
@@ -900,6 +904,40 @@ button,
   z-index: 200;
   box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.1);
   animation: popover-in 0.18s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+.hdr-session-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 230px;
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  z-index: 200;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.1);
+  animation: popover-in 0.18s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+.session-code-display {
+  font-family: 'Cinzel', serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: var(--gold-light);
+  background: var(--surface-2);
+  border: 1px solid rgba(201, 168, 76, 0.22);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.55rem;
+}
+
+.session-message {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  padding: 0.1rem 0.1rem 0;
 }
 
 @keyframes popover-in {

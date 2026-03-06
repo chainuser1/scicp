@@ -66,6 +66,13 @@ const IconChevronRight = () => (
     <polyline points="9 18 15 12 9 6"/>
   </svg>
 );
+const IconSession = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 7V5a4 4 0 0 1 8 0v2"/>
+    <rect x="5" y="7" width="14" height="12" rx="2"/>
+    <circle cx="12" cy="13" r="1.3"/>
+  </svg>
+);
 
 /* ─── Reusable components ─── */
 
@@ -138,6 +145,7 @@ const Presenter = () => {
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
   const [themePopover, setThemePopover]     = useState(false);
+  const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
   const [sessionInput, setSessionInput]     = useState('');
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
@@ -187,6 +195,7 @@ const Presenter = () => {
       setSessionInput(data.sessionId);
       setSessionMessage(`Session ${data.sessionId} ready`);
       setHighlightedText('');
+      setSessionPopover(false);
     };
     const handleSessionError = (data) => {
       setSessionMessage(data?.message || 'Session error');
@@ -214,14 +223,16 @@ const Presenter = () => {
     };
   }, []);
 
-  /* ── Close drawer & theme popover on outside tap ── */
+  /* ── Close drawer, theme popover, and session popover on outside tap ── */
   useEffect(() => {
-    if (!drawerOpen && !themePopover) return;
+    if (!drawerOpen && !themePopover && !sessionPopover) return;
     const handler = e => {
       if (!e.target.closest('.search-drawer') && !e.target.closest('.hdr-btn') && !e.target.closest('.hdr-theme-wrap'))
         setDrawerOpen(false);
       if (!e.target.closest('.hdr-theme-wrap'))
         setThemePopover(false);
+      if (!e.target.closest('.hdr-session-wrap'))
+        setSessionPopover(false);
     };
     document.addEventListener('mousedown', handler);
     document.addEventListener('touchstart', handler, { passive: true });
@@ -229,7 +240,7 @@ const Presenter = () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('touchstart', handler);
     };
-  }, [drawerOpen, themePopover]);
+  }, [drawerOpen, themePopover, sessionPopover]);
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
@@ -398,19 +409,38 @@ const Presenter = () => {
 
         {/* Right controls */}
         <div className="hdr-right">
-          <div className="live-badge" title="Session code">
-            <span>Session {sessionId || '...'}</span>
+          <div className="hdr-session-wrap">
+            <HdrBtn
+              onClick={() => setSessionPopover(o => !o)}
+              active={sessionPopover}
+              label="Session controls"
+              title={`Session ${sessionId || '...'}`}
+            >
+              <IconSession />
+            </HdrBtn>
+            {sessionPopover && (
+              <div className="hdr-session-popover">
+                <div className="popover-label">Session</div>
+                <div className="session-code-display">{sessionId || 'NOT READY'}</div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    value={sessionInput}
+                    onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
+                    placeholder="AB12CD"
+                    aria-label="Session code"
+                  />
+                  <button className="popover-apply" onClick={joinSession}>Join</button>
+                </div>
+                <div className="popover-row">
+                  <button className="theme-btn" onClick={requestCreateSession}>New Session</button>
+                  <button className="theme-btn" onClick={copyClientLink}>Copy Link</button>
+                </div>
+                <div className="session-message">{sessionMessage}</div>
+              </div>
+            )}
           </div>
-          <input
-            className="hdr-lang-select"
-            value={sessionInput}
-            onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
-            placeholder="Session"
-            aria-label="Session code"
-          />
-          <HdrBtn onClick={joinSession} label="Join session" title="Join session">Join</HdrBtn>
-          <HdrBtn onClick={requestCreateSession} label="Create new session" title="Create new session">New</HdrBtn>
-          <HdrBtn onClick={copyClientLink} label="Copy client link" title="Copy client link">Copy</HdrBtn>
 
           {/* Language */}
           <select className="hdr-lang-select" value={currentLanguage} onChange={handleLanguageChange} aria-label="Language">
@@ -501,7 +531,6 @@ const Presenter = () => {
           )}
         </div>
       </header>
-      <div style={{ color: '#a09880', fontSize: '0.8rem', padding: '0 1.1rem 0.5rem 1.1rem' }}>{sessionMessage}</div>
 
       {/* ════════════════════════════════════════
           SLIDE-IN DRAWER  (search + history)
