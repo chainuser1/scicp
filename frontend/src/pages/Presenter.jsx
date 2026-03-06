@@ -138,6 +138,7 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
 /* ─── Main component ─── */
 const Presenter = () => {
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
+  const PRESENTER_LAST_SESSION_KEY = 'scicp.presenter_last_session_v1';
   const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
   const presenterTourSteps = [
     {
@@ -179,6 +180,7 @@ const Presenter = () => {
   const [sessionId, setSessionId]           = useState('');
   const [sessionInput, setSessionInput]     = useState('');
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
+  const [connectionState, setConnectionState] = useState('connecting');
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -203,8 +205,17 @@ const Presenter = () => {
 
   const requestCreateSession = () => {
     setSessionMessage('Creating session...');
-    socket.emit('create-session', {}, (response) => {
-      if (!response?.ok) {
+    socket.emit('create-session', { role: 'presenter' }, (response) => {
+      if (response?.ok && response.sessionId) {
+        setSessionId(response.sessionId);
+        setSessionInput(response.sessionId);
+        setSessionMessage(`Session ${response.sessionId} ready`);
+        try {
+          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
+        } catch {
+          // ignore storage errors
+        }
+      } else {
         setSessionMessage('Failed to create session');
       }
     });
@@ -217,8 +228,18 @@ const Presenter = () => {
       return;
     }
     setSessionMessage('Joining session...');
-    socket.emit('join-session', { sessionId: normalized }, (response) => {
-      if (!response?.ok) {
+    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
+      if (response?.ok && response.sessionId) {
+        setSessionId(response.sessionId);
+        setSessionInput(response.sessionId);
+        setSessionMessage(`Session ${response.sessionId} ready`);
+        setSessionPopover(false);
+        try {
+          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
+        } catch {
+          // ignore storage errors
+        }
+      } else {
         setSessionMessage(response?.message || 'Unable to join session');
       }
     });
@@ -233,6 +254,23 @@ const Presenter = () => {
     } catch {
       setSessionMessage('Clipboard unavailable - copy URL from address bar');
     }
+  };
+
+  const leaveSession = () => {
+    socket.emit('leave-session', {}, (response) => {
+      if (response?.ok) {
+        setSessionId('');
+        setSessionInput('');
+        setSessionMessage('You left the session');
+        try {
+          window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+        } catch {
+          // ignore storage errors
+        }
+      } else {
+        setSessionMessage(response?.message || 'Unable to leave session');
+      }
+    });
   };
 
   const closeTour = () => {
@@ -262,16 +300,62 @@ const Presenter = () => {
     const handleSessionError = (data) => {
       setSessionMessage(data?.message || 'Session error');
     };
+    const handleSessionLeft = () => {
+      setSessionId('');
+      setSessionInput('');
+      setSessionMessage('You left the session');
+      try {
+        window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+      } catch {
+        // ignore storage errors
+      }
+    };
+    const handleConnect = () => {
+      setConnectionState('connected');
+      const current = (() => {
+        try {
+          return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || '';
+        } catch {
+          return '';
+        }
+      })();
+      if (current) {
+        socket.emit('join-session', { sessionId: current, role: 'presenter' }, (response) => {
+          if (response?.ok && response.sessionId) {
+            setSessionId(response.sessionId);
+            setSessionInput(response.sessionId);
+            setSessionMessage(`Session ${response.sessionId} ready`);
+          } else {
+            requestCreateSession();
+          }
+        });
+      } else {
+        requestCreateSession();
+      }
+    };
+    const handleDisconnect = () => {
+      setConnectionState('disconnected');
+      setSessionMessage('Disconnected - attempting to reconnect...');
+    };
+    const handleReconnectAttempt = () => {
+      setConnectionState('reconnecting');
+    };
+    const handleConnectError = () => {
+      setConnectionState('error');
+    };
     socket.on('search-results', data => { setResults(data); setCurrentPage(0); });
     socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
     socket.on('session-created', handleSessionJoined);
     socket.on('session-joined', handleSessionJoined);
     socket.on('session-error', handleSessionError);
-    socket.emit('create-session', {}, (response) => {
-      if (!response?.ok) {
-        setSessionMessage('Failed to create session');
-      }
-    });
+    socket.on('session-left', handleSessionLeft);
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('reconnect_attempt', handleReconnectAttempt);
+    socket.on('connect_error', handleConnectError);
+    if (socket.connected) {
+      handleConnect();
+    }
     // fetch(`${API_URL}/themes`)
     //   .then(r => r.json())
     //   .then(setSavedThemes)
@@ -282,6 +366,11 @@ const Presenter = () => {
       socket.off('session-created', handleSessionJoined);
       socket.off('session-joined', handleSessionJoined);
       socket.off('session-error', handleSessionError);
+      socket.off('session-left', handleSessionLeft);
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('reconnect_attempt', handleReconnectAttempt);
+      socket.off('connect_error', handleConnectError);
     };
   }, []);
 
@@ -505,7 +594,11 @@ const Presenter = () => {
                   <button className="theme-btn" onClick={requestCreateSession}>New Session</button>
                   <button className="theme-btn" onClick={copyClientLink}>Copy Link</button>
                 </div>
+                <div className="popover-row">
+                  <button className="theme-btn" onClick={leaveSession} disabled={!sessionId}>Leave Session</button>
+                </div>
                 <div className="session-message">{sessionMessage}</div>
+                <div className="session-message">Connection: {connectionState}</div>
               </div>
             )}
           </div>
