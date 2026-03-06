@@ -2,6 +2,55 @@ import React, { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 
 function Client() {
+  const extractImageUrl = (value) => {
+    const match = String(value || '').match(/url\((['"]?)(.*?)\1\)/i);
+    return match ? match[2] : '';
+  };
+
+  const estimateAverageLuminance = (imageUrl) => new Promise((resolve) => {
+    if (!imageUrl) {
+      resolve(null);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.referrerPolicy = 'no-referrer';
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 24;
+        canvas.height = 24;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let total = 0;
+        const pixels = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i] / 255;
+          const g = data[i + 1] / 255;
+          const b = data[i + 2] / 255;
+          total += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        }
+        resolve(total / pixels);
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = imageUrl;
+  });
+
+  const pushReadabilityMode = (mode, steps = 1) => {
+    const order = ['soft', 'balanced', 'strong'];
+    const start = order.indexOf(mode);
+    const index = start === -1 ? 1 : start;
+    return order[Math.min(order.length - 1, index + steps)];
+  };
+
   const normalizeSessionId = (value) => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
   const [urlSession] = useState(() => new URLSearchParams(window.location.search).get('session') || '');
   const [verse, setVerse] = useState({
@@ -22,6 +71,8 @@ function Client() {
   const [joinedSession, setJoinedSession] = useState('');
   const [sessionMessage, setSessionMessage] = useState(urlSession ? 'Joining session...' : 'Enter session code');
   const [connectionState, setConnectionState] = useState('connecting');
+  const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const [readabilityMode, setReadabilityMode] = useState('balanced');
   const joinedSessionRef = useRef('');
   const sessionInputRef = useRef(normalizeSessionId(urlSession));
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
@@ -34,6 +85,14 @@ function Client() {
   useEffect(() => {
     sessionInputRef.current = sessionInput;
   }, [sessionInput]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     document.title = 'Client Display | Scriptures in View';
@@ -141,6 +200,39 @@ function Client() {
     };
   }, [urlSession]);
 
+  // Determine display text (segment or full)
+  const displayText = verse.segments && verse.segments.length > 0
+    ? verse.segments[verse.currentSegment] || verse.scripture_text
+    : verse.scripture_text;
+
+  useEffect(() => {
+    let active = true;
+    const tuneReadability = async () => {
+      const bgUrl = extractImageUrl(verse?.theme?.background_url);
+      const luminance = await estimateAverageLuminance(bgUrl);
+      if (!active) return;
+
+      let mode = 'balanced';
+      if (typeof luminance === 'number') {
+        if (luminance >= 0.62) mode = 'strong';
+        else if (luminance <= 0.22) mode = 'soft';
+      }
+
+      let pressure = 0;
+      if (viewport.w <= 900) pressure += 1;
+      if (displayText.length > 220) pressure += 1;
+      if (displayText.length > 420) pressure += 1;
+
+      if (pressure > 0) mode = pushReadabilityMode(mode, pressure >= 2 ? 2 : 1);
+      setReadabilityMode(mode);
+    };
+
+    tuneReadability();
+    return () => {
+      active = false;
+    };
+  }, [verse?.theme?.background_url, displayText.length, viewport.w]);
+
   if (!joinedSession) {
     return (
       <div className="home-page" style={{ alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
@@ -170,11 +262,6 @@ function Client() {
     );
   }
 
-  // Determine display text (segment or full)
-  const displayText = verse.segments && verse.segments.length > 0
-    ? verse.segments[verse.currentSegment] || verse.scripture_text
-    : verse.scripture_text;
-
   const hasMoreSegments = verse.segments && verse.currentSegment < verse.segments.length - 1;
 
   // Render text with highlight spans (each highlighted word re-mounts → re-triggers animation)
@@ -193,8 +280,9 @@ function Client() {
   const base = parseFloat(verse.theme?.font_size) || 4;
   const length = displayText.length;
   let calculated = base - length / 100;
-  if (calculated < 1.5) calculated = 1.5;
-  const computedFontSize = `${calculated}rem`;
+  if (calculated < 1.9) calculated = 1.9;
+  const modeScale = readabilityMode === 'strong' ? 1.18 : readabilityMode === 'soft' ? 1.0 : 1.1;
+  const computedFontSize = `${Math.min(7, calculated * modeScale)}rem`;
 
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,
@@ -204,7 +292,7 @@ function Client() {
 
   return (
     <div
-      className={`client-view ${verse.theme?.layout || 'centered'} ${animating ? 'fade' : ''}`}
+      className={`client-view readability-${readabilityMode} ${verse.theme?.layout || 'centered'} ${animating ? 'fade' : ''}`}
       style={themeStyles}
     >
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
