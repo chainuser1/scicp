@@ -440,6 +440,7 @@ button,
   line-height: 1.6;
   transition: opacity 0.6s ease;
   position: relative;
+  background-color: #07090d;
 }
 
 /* Vignette — darkens all four edges so text always pops regardless of bg */
@@ -628,24 +629,62 @@ button,
 
 /* ── Small tablet / landscape phone (≤640px) ── */
 @media (max-width: 640px) {
+  .client-view {
+    background-size: contain;
+    background-position: center top;
+    background-color: #040507;
+  }
+  .client-view::before {
+    background:
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.66) 100%),
+      radial-gradient(ellipse at center, transparent 18%, rgba(0, 0, 0, 0.64) 100%);
+  }
+  .client-view.centered {
+    justify-content: flex-end;
+    padding-bottom: clamp(1rem, 4vh, 2.1rem);
+  }
+  .client-view.lower-third {
+    padding-bottom: clamp(1.1rem, 4.5vh, 2.2rem);
+  }
+  .verse-content {
+    justify-content: flex-end;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 0.85rem)
+      0.75rem
+      calc(env(safe-area-inset-bottom, 0px) + 0.95rem);
+  }
   .verse-backdrop {
-    max-width: 96vw;
-    padding: 1rem 1.25rem;
+    max-width: 94vw;
+    padding: 0.85rem 0.95rem;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.58);
+    border-color: rgba(255, 255, 255, 0.1);
   }
   .client-view p {
-    font-size: clamp(1.1rem, 4vw, 2.2rem) !important;
-    line-height: 1.55;
+    font-size: clamp(1rem, 5.2vw, 1.45rem) !important;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
   }
   .verse-title-top-left {
-    font-size: clamp(0.65rem, 2.5vw, 1rem);
-    top: 0.75rem;
-    left: 0.75rem;
+    font-size: clamp(0.56rem, 2vw, 0.74rem);
+    top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
+    left: 0.62rem;
+    letter-spacing: 0.12em;
   }
   .session-id-top-right {
-    top: 0.75rem;
-    right: 0.75rem;
-    font-size: clamp(0.52rem, 2vw, 0.82rem);
-    padding: 0.22rem 0.38rem;
+    top: calc(env(safe-area-inset-top, 0px) + 0.55rem);
+    right: 0.62rem;
+    font-size: clamp(0.48rem, 1.8vw, 0.68rem);
+    padding: 0.18rem 0.33rem;
+    max-width: 58vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cont-indicator {
+    margin-top: 0.45rem;
+    font-size: 0.58rem;
+    letter-spacing: 0.16em;
   }
 }
 
