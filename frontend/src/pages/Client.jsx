@@ -73,6 +73,9 @@ function Client() {
   const [connectionState, setConnectionState] = useState('connecting');
   const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   const [readabilityMode, setReadabilityMode] = useState('balanced');
+  const [dyslexiaMode, setDyslexiaMode] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [autoReducedMotion, setAutoReducedMotion] = useState(false);
   const joinedSessionRef = useRef('');
   const sessionInputRef = useRef(normalizeSessionId(urlSession));
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
@@ -92,6 +95,14 @@ function Client() {
     };
     window.addEventListener('resize', handleResize, { passive: true });
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setPrefersReducedMotion(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
   }, []);
 
   useEffect(() => {
@@ -225,13 +236,19 @@ function Client() {
 
       if (pressure > 0) mode = pushReadabilityMode(mode, pressure >= 2 ? 2 : 1);
       setReadabilityMode(mode);
+
+      const words = displayText.trim().split(/\s+/).filter(Boolean);
+      const avgWordLength = words.length ? words.join('').length / words.length : 0;
+      const difficultText = displayText.length > 260 || avgWordLength >= 5.6;
+      setDyslexiaMode(viewport.w <= 1024 && difficultText);
+      setAutoReducedMotion(prefersReducedMotion || viewport.w <= 640 || displayText.length > 320);
     };
 
     tuneReadability();
     return () => {
       active = false;
     };
-  }, [verse?.theme?.background_url, displayText.length, viewport.w]);
+  }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
   if (!joinedSession) {
     return (
@@ -280,9 +297,11 @@ function Client() {
   const base = parseFloat(verse.theme?.font_size) || 4;
   const length = displayText.length;
   let calculated = base - length / 100;
-  if (calculated < 1.9) calculated = 1.9;
+  const minFloor = viewport.w >= 1920 ? 2.8 : viewport.w >= 901 ? 2.3 : viewport.w >= 641 ? 1.95 : 1.28;
+  if (calculated < minFloor) calculated = minFloor;
   const modeScale = readabilityMode === 'strong' ? 1.18 : readabilityMode === 'soft' ? 1.0 : 1.1;
-  const computedFontSize = `${Math.min(7, calculated * modeScale)}rem`;
+  const maxCap = viewport.w >= 2400 ? 8.5 : viewport.w >= 1920 ? 7.6 : viewport.w >= 901 ? 6.2 : viewport.w >= 641 ? 4.8 : 3.1;
+  const computedFontSize = `${Math.min(maxCap, calculated * modeScale)}rem`;
 
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,
@@ -292,7 +311,7 @@ function Client() {
 
   return (
     <div
-      className={`client-view readability-${readabilityMode} ${verse.theme?.layout || 'centered'} ${animating ? 'fade' : ''}`}
+      className={`client-view readability-${readabilityMode}${dyslexiaMode ? ' readability-dyslexia' : ''}${autoReducedMotion ? ' reduce-motion-auto' : ''} ${verse.theme?.layout || 'centered'} ${animating && !autoReducedMotion ? 'fade' : ''}`}
       style={themeStyles}
     >
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
