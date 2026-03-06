@@ -865,17 +865,19 @@ button,
 }
 
 .presenter-container--light {
-  --obsidian: #f7f4ef;
-  --surface: #fffdf9;
-  --surface-2: #f5eee6;
-  --surface-3: #ece2d7;
-  --text-primary: #2c1f24;
-  --text-secondary: #4a3038;
-  --text-dim: #7a636b;
-  --gold: #7a1f34;
-  --gold-light: #9a2f49;
-  --gold-border: rgba(122, 31, 52, 0.34);
-  --gold-dim: rgba(122, 31, 52, 0.1);
+  --obsidian: #f0ebe2;
+  --surface: #faf7f2;
+  --surface-2: #ede7dc;
+  --surface-3: #e2d9cc;
+  --text-primary: #2a1c14;
+  --text-secondary: #5c3d2e;
+  --text-dim: #9a7b68;
+  --gold: #8b3a1a;
+  --gold-light: #a84820;
+  --gold-border: rgba(139, 58, 26, 0.3);
+  --gold-dim: rgba(139, 58, 26, 0.08);
+  --accent-red: #8b3a1a;
+  --accent-red-glow: rgba(139, 58, 26, 0.3);
 }
 
 .presenter-container--dark {
@@ -1998,6 +2000,25 @@ button,
   line-height: 1.6;
 }
 
+/* Bold emphasis for highlighted text inside the presenter preview box.
+   Keeps the italic/serif context of the preview but makes the selection
+   immediately legible at a glance — without the glow effects meant
+   for the projected client display. */
+.preview-text .preview-highlight {
+  font-weight: 700 !important;
+  color: var(--text-primary) !important;
+  text-shadow: none !important;
+  animation: none !important;
+  background: rgba(201, 168, 76, 0.14);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.presenter-container--light .preview-text .preview-highlight {
+  color: #2a1c14 !important;
+  background: rgba(139, 58, 26, 0.12);
+}
+
 .preview-cont {
   font-size: 0.65rem;
   color: var(--text-dim);
@@ -2425,6 +2446,315 @@ button,
   background: rgba(139,58,26,0.08);
   border-color: rgba(139,58,26,0.35);
   color: #8b3a1a;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE HEADER — hamburger for narrow / mobile screens
+   ══════════════════════════════════════════════════════════════ */
+
+/* Desktop: show full bar, hide mobile bar */
+.hdr-right--mobile  { display: none; }
+.hdr-right--desktop {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  margin-left: 0.25rem;
+}
+
+/* Narrow screens (≤540px): flip visibility */
+@media (max-width: 540px) {
+  .hdr-right--desktop { display: none !important; }
+  .hdr-right--mobile  {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    margin-left: 0.25rem;
+    position: relative;
+  }
+}
+
+/* Compact live badge — dot only, no text */
+.live-badge--compact {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.4);
+}
+
+/* Mobile dropdown panel */
+.hdr-mobile-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(320px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  z-index: 300;
+  box-shadow: 0 20px 56px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.08);
+  animation: popover-in 0.2s cubic-bezier(0.4,0,0.2,1) both;
+  max-height: 80vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.mobile-menu-section {
+  padding: 0.5rem 0.3rem;
+}
+
+.mobile-menu-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.45rem;
+}
+
+.mobile-menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mobile-menu-row .theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.mobile-menu-divider {
+  height: 1px;
+  background: var(--gold-border);
+  margin: 0.1rem 0.3rem;
+  opacity: 0.5;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LIGHT THEME — comprehensive element overrides
+   Warm parchment / terracotta — easy on the eyes
+   ══════════════════════════════════════════════════════════════ */
+
+.presenter-container--light .presenter-header {
+  background: #faf7f2;
+  border-bottom-color: rgba(139, 58, 26, 0.18);
+  box-shadow: 0 1px 8px rgba(139, 58, 26, 0.06);
+}
+
+.presenter-container--light .hdr-brand {
+  border-right-color: rgba(139, 58, 26, 0.15);
+}
+
+.presenter-container--light .hdr-btn {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #5c3d2e;
+}
+
+.presenter-container--light .hdr-btn:hover {
+  background: #e2d9cc;
+  border-color: rgba(139, 58, 26, 0.4);
+  color: #8b3a1a;
+}
+
+.presenter-container--light .hdr-btn--active {
+  background: rgba(139, 58, 26, 0.1);
+  border-color: rgba(139, 58, 26, 0.4);
+  color: #8b3a1a;
+}
+
+.presenter-container--light .hdr-lang-select {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.25);
+  color: #8b3a1a;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%238b3a1a' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+}
+
+.presenter-container--light .main-panel { background: #f0ebe2; }
+
+.presenter-container--light .card {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.12);
+  box-shadow: 0 2px 12px rgba(139, 58, 26, 0.05);
+}
+
+.presenter-container--light .card-label  { color: #8b3a1a; }
+.presenter-container--light .card-hint   { color: #9a7b68; }
+
+.presenter-container--light .card-header {
+  border-bottom-color: rgba(139, 58, 26, 0.1);
+}
+
+.presenter-container--light .staged-title { color: #8b3a1a; }
+.presenter-container--light .staged-text  { color: #2a1c14; }
+
+.presenter-container--light .nav-button {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #5c3d2e;
+}
+.presenter-container--light .nav-button:hover {
+  background: #e2d9cc;
+  border-color: rgba(139, 58, 26, 0.4);
+  color: #8b3a1a;
+}
+
+.presenter-container--light .go-live-button {
+  background: linear-gradient(135deg, #a84820 0%, #8b3a1a 100%);
+  box-shadow: 0 4px 16px rgba(139, 58, 26, 0.35);
+}
+
+.presenter-container--light .preview-nav-btn {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #5c3d2e;
+}
+.presenter-container--light .preview-nav-btn--verse {
+  background: transparent;
+  border-color: rgba(139, 58, 26, 0.22);
+}
+.presenter-container--light .preview-nav-btn:hover:not(:disabled) {
+  background: #e2d9cc;
+  border-color: rgba(139, 58, 26, 0.4);
+  color: #8b3a1a;
+}
+
+.presenter-container--light .preview-box {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .preview-title { color: #8b3a1a; }
+.presenter-container--light .preview-text  { color: #5c3d2e; }
+
+.presenter-container--light .search-drawer {
+  background: #f0ebe2;
+  border-right-color: rgba(139, 58, 26, 0.12);
+}
+.presenter-container--light .drawer-header {
+  background: #faf7f2;
+  border-bottom-color: rgba(139, 58, 26, 0.12);
+}
+.presenter-container--light .drawer-tab        { color: #9a7b68; }
+.presenter-container--light .drawer-tab.active {
+  color: #8b3a1a;
+  border-bottom-color: #8b3a1a;
+}
+
+.presenter-container--light .search-input {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.2);
+  color: #2a1c14;
+}
+.presenter-container--light .search-input:focus {
+  border-color: rgba(139, 58, 26, 0.45);
+  box-shadow: 0 0 0 2px rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .search-input::placeholder { color: #9a7b68; }
+
+.presenter-container--light .result-item {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .result-item:hover {
+  background: #f0ebe2;
+  border-color: rgba(139, 58, 26, 0.22);
+}
+.presenter-container--light .result-title { color: #8b3a1a; }
+.presenter-container--light .result-text  { color: #5c3d2e; }
+
+.presenter-container--light .empty-state  { color: #9a7b68; }
+
+.presenter-container--light .history-item {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .history-ref  { color: #8b3a1a; }
+.presenter-container--light .history-hint { color: #9a7b68; }
+
+.presenter-container--light .theme-btn {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.14);
+  color: #5c3d2e;
+}
+.presenter-container--light .theme-btn:hover {
+  background: #e2d9cc;
+  border-color: rgba(139, 58, 26, 0.35);
+  color: #8b3a1a;
+}
+.presenter-container--light .theme-btn.active {
+  background: rgba(139, 58, 26, 0.1);
+  border-color: rgba(139, 58, 26, 0.45);
+  color: #8b3a1a;
+}
+
+.presenter-container--light .hdr-session-popover,
+.presenter-container--light .hdr-theme-popover,
+.presenter-container--light .hdr-mobile-menu {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.22);
+  box-shadow: 0 16px 48px rgba(139, 58, 26, 0.14), 0 0 0 1px rgba(139, 58, 26, 0.07);
+}
+
+.presenter-container--light .popover-label { color: #9a7b68; }
+.presenter-container--light .session-code-display {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.2);
+  color: #8b3a1a;
+}
+.presenter-container--light .session-message { color: #5c3d2e; }
+.presenter-container--light .popover-input {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #2a1c14;
+}
+.presenter-container--light .popover-input::placeholder { color: #9a7b68; }
+.presenter-container--light .popover-apply {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.22);
+  color: #8b3a1a;
+}
+.presenter-container--light .popover-apply:hover {
+  background: rgba(139, 58, 26, 0.12);
+  border-color: rgba(139, 58, 26, 0.42);
+}
+
+.presenter-container--light .mobile-menu-divider {
+  background: rgba(139, 58, 26, 0.15);
+}
+.presenter-container--light .mobile-menu-label { color: #9a7b68; }
+
+.presenter-container--light .input-group input {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #2a1c14;
+}
+.presenter-container--light .input-group input:focus {
+  border-color: rgba(139, 58, 26, 0.45);
+  box-shadow: 0 0 0 2px rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .control-button {
+  background: #ede7dc;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #8b3a1a;
+}
+.presenter-container--light .control-button:hover {
+  background: rgba(139, 58, 26, 0.1);
+  border-color: rgba(139, 58, 26, 0.38);
+}
+
+.presenter-container--light .drawer-backdrop {
+  background: rgba(42, 28, 20, 0.35);
 }
 
 /* ══════════════════════════════════════════════════════════════
