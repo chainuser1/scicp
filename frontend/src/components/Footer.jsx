@@ -13,17 +13,20 @@ export default function Footer() {
         <span className="home-footer-name">Scripture Projector</span>
       </div>
 
-      <div className="home-footer-links">
-        <Link to="/presenter">Chapel Control</Link>
-        <Link to="/client">Sacred Display</Link>
-        <Link to="/about">About</Link>
-        <Link to="/contact">Contact</Link>
-      </div>
+      <nav className="home-footer-links">
+        <ul>
+          <li><Link to="/">Home</Link></li>
+          <li><Link to="/presenter">Chapel Control</Link></li>
+          <li><Link to="/client">Sacred Display</Link></li>
+          <li><Link to="/about">About</Link></li>
+          <li><Link to="/contact">Contact</Link></li>
+          <li><Link to="/privacy">Privacy Policy</Link></li>
+          <li><Link to="/terms">Terms of Service</Link></li>
+        </ul>
+      </nav>
 
       <div className="home-footer-credit">
-        <span>© {new Date().getFullYear()} Scripture Projector</span>
-        <span className="home-footer-separator">&nbsp;|&nbsp;</span>
-        <span>Sacred Tech by <em>Dagami Ward Dev Team</em></span>
+        <span>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by LDS Dev Team.</span>
       </div>
     </footer>
   );
