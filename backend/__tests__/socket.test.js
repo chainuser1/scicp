@@ -32,6 +32,7 @@ const findHandler = (socket, event) => {
 const createMockIo = () => {
   const roomEmitters = new Map();
   const roomMembership = new Map();
+  const connectedSockets = new Map();
 
   const getRoomEmitter = (roomId) => {
     if (!roomEmitters.has(roomId)) roomEmitters.set(roomId, { emit: jest.fn() });
@@ -43,6 +44,7 @@ const createMockIo = () => {
       on: jest.fn(),
       to: jest.fn((roomId) => getRoomEmitter(roomId)),
       sockets: {
+        sockets: connectedSockets,
         adapter: {
           rooms: {
             get: (roomId) => {
@@ -54,6 +56,7 @@ const createMockIo = () => {
       },
     },
     connectSocket: (socket) => {
+      connectedSockets.set(socket.id, socket);
       socket.join.mockImplementation((roomId) => {
         socket.rooms.add(roomId);
         roomMembership.set(roomId, (roomMembership.get(roomId) || 0) + 1);
@@ -69,6 +72,7 @@ const createMockIo = () => {
     roomEmitter: (roomId) => getRoomEmitter(roomId),
     roomSize: (roomId) => roomMembership.get(roomId) || 0,
     disconnectSocket: (socket) => {
+      connectedSockets.delete(socket.id);
       socket.rooms.forEach((roomId) => {
         if (roomId === socket.id) return;
         const next = (roomMembership.get(roomId) || 0) - 1;
@@ -356,5 +360,42 @@ describe('socket events', () => {
     const joinAckBSecond = jest.fn();
     joinAsPresenterB({ sessionId, role: 'presenter' }, joinAckBSecond);
     expect(joinAckBSecond).toHaveBeenCalledWith({ ok: true, sessionId });
+  });
+
+  test('stale presenter lock is released when prior presenter disconnects', () => {
+    const harness = createMockIo();
+    const mockIo = harness.io;
+    let connectHandler;
+    mockIo.on.mockImplementation((event, callback) => {
+      if (event === 'connection') connectHandler = callback;
+    });
+
+    registerSocketHandlers(mockIo, {
+      segmentVerseText: mockSegmentVerseText,
+      db: mockDb,
+      db_cebuano: mockDbCebuano,
+      db_tagalog: mockDbTagalog
+    });
+
+    const presenterA = createMockSocket('presenter-old');
+    harness.connectSocket(presenterA);
+    connectHandler(presenterA);
+    const createA = findHandler(presenterA, 'create-session');
+    const createAckA = jest.fn();
+    createA({}, createAckA);
+    const sessionId = createAckA.mock.calls[0][0].sessionId;
+
+    // Simulate abrupt disconnect path where only disconnect handler runs.
+    harness.disconnectSocket(presenterA);
+    findHandler(presenterA, 'disconnect')();
+
+    const presenterB = createMockSocket('presenter-new');
+    harness.connectSocket(presenterB);
+    connectHandler(presenterB);
+    const joinB = findHandler(presenterB, 'join-session');
+    const joinAckB = jest.fn();
+    joinB({ sessionId, role: 'presenter' }, joinAckB);
+
+    expect(joinAckB).toHaveBeenCalledWith({ ok: true, sessionId });
   });
 });
