@@ -88,7 +88,10 @@ fastify.delete('/themes/:id', async (request, reply) => {
 const io = new Server(fastify.server, {
   cors: {
     origin: "*",
-  }
+  },
+  // Keep long-idle presentation sessions stable across network/proxy jitter.
+  pingInterval: 20000,
+  pingTimeout: 60000,
 });
 
 // ensure themes table exists
@@ -1128,7 +1131,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
-  const SESSION_GRACE_MS = 30000;
+  const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || 300000);
   const sessionState = new Map();
   const cleanupTimers = new Map();
 
