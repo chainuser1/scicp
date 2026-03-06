@@ -1127,6 +1127,46 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     return result;
 });
 
+// Verse of the Day — deterministic by UTC calendar date so all clients agree.
+// Uses the total verse count as a modulus so every date maps to a real verse.
+fastify.get('/verse/of-the-day', async (request, reply) => {
+  try {
+    const now = new Date();
+    // Day-of-year (1-based) as a simple, stable seed
+    const start = Date.UTC(now.getUTCFullYear(), 0, 0);
+    const dayOfYear = Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000);
+
+    const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
+    const total = countRow?.total || 41995; // LDS standard works verse count fallback
+
+    // Use a simple linear congruential step so sequential days feel spread out
+    // across the canon rather than just going verse-by-verse.
+    const LCG_A = 1664525;
+    const LCG_C = 1013904223;
+    const MOD = 2 ** 32;
+    const seed = ((LCG_A * dayOfYear + LCG_C) % MOD + MOD) % MOD;
+    const offset = (seed % total) + 1; // verse_id is 1-based
+
+    const verse = db.prepare(`
+      SELECT
+        book_title, chapter_number, verse_number,
+        scripture_text, verse_title, verse_id
+      FROM scriptures
+      WHERE verse_id = ?
+    `).get(offset);
+
+    if (!verse) {
+      reply.code(404);
+      return { error: 'not found' };
+    }
+    return { ...verse, date: now.toISOString().slice(0, 10) };
+  } catch (err) {
+    fastify.log.error('verse-of-the-day failed', err);
+    reply.code(500);
+    return { error: 'internal error' };
+  }
+});
+
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
