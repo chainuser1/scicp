@@ -1,5 +1,6 @@
 import React, { useState, useEffect} from 'react';
 import { socket } from '../socket';
+import Footer from '../components/Footer';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
@@ -1122,6 +1123,7 @@ const Presenter = () => {
         </section>
 
       </main>
+      <Footer />
     </div>
   );
 };
