@@ -18,6 +18,7 @@
 6. Add/confirm runtime env vars:
    - `NODE_ENV=production`
    - `REBUILD_FTS_ON_START=false`
+   - `SESSION_GRACE_MS=1800000` (keeps sessions for 30 minutes after disconnect)
 7. Deploy.
 
 ## Deploy With doctl (optional)
@@ -38,3 +39,4 @@ doctl apps update <APP_ID> --spec .do/app.yaml
 
 - The project ships SQLite databases from `resources/db`. Keep these files in the repo for deploys.
 - Set `REBUILD_FTS_ON_START=true` only when you intentionally want to rebuild the full FTS index at boot.
+- `SESSION_GRACE_MS` is in milliseconds; increase it if presenter/client may be idle or backgrounded for long periods.
