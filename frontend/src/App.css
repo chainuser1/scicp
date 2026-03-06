@@ -719,15 +719,17 @@ button,
 }
 
 .presenter-container--light {
-  --obsidian: #f6f4ee;
-  --surface: #ffffff;
-  --surface-2: #f5f1e8;
-  --surface-3: #eae3d4;
-  --text-primary: #1f1a12;
-  --text-secondary: #3a2f20;
-  --text-dim: #625645;
-  --gold-border: rgba(120, 88, 18, 0.42);
-  --gold-dim: rgba(120, 88, 18, 0.12);
+  --obsidian: #e9edf2;
+  --surface: #f3f6fa;
+  --surface-2: #e6ebf1;
+  --surface-3: #dce2ea;
+  --text-primary: #1f2937;
+  --text-secondary: #334155;
+  --text-dim: #64748b;
+  --gold: #9a8450;
+  --gold-light: #b59b63;
+  --gold-border: rgba(154, 132, 80, 0.28);
+  --gold-dim: rgba(154, 132, 80, 0.08);
 }
 
 .presenter-container--dark {
