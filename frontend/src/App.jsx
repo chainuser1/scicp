@@ -52,7 +52,7 @@ function Home() {
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
     const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) canonical.setAttribute('href', 'https://cap-teyko.live/');
+    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/');
   }, []);
 
   return (
