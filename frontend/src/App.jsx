@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Presenter from './pages/Presenter';
 import Client from './pages/Client';
@@ -46,6 +46,14 @@ function Home() {
       // ignore storage errors
     }
   };
+
+  useEffect(() => {
+    document.title = 'Scriptures in View | Real-Time Scripture Presentation';
+    const robotsMeta = document.querySelector('meta[name="robots"]');
+    if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) canonical.setAttribute('href', 'https://cap-teyko.live/');
+  }, []);
 
   return (
     <div className="home-page">

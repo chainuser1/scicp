@@ -195,6 +195,12 @@ const Presenter = () => {
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
 
+  useEffect(() => {
+    document.title = 'Presenter | Scriptures in View';
+    const robotsMeta = document.querySelector('meta[name="robots"]');
+    if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
+  }, []);
+
   const requestCreateSession = () => {
     setSessionMessage('Creating session...');
     socket.emit('create-session', {}, (response) => {
@@ -406,10 +412,13 @@ const Presenter = () => {
 
   const hasSegments = liveVerse?.segments?.length > 1;
   const totalPages  = Math.ceil(results.length / PAGE_SIZE);
+  const presenterThemeClass = currentTheme === themes.dark
+    ? 'presenter-container--dark'
+    : 'presenter-container--light';
 
   /* ── Render ── */
   return (
-    <div className="presenter-container">
+    <div className={`presenter-container ${presenterThemeClass}`}>
 
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
