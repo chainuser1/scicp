@@ -167,9 +167,6 @@ function initializeFts() {
   }
 }
 
-initializeFts();
-
-
 // Map of book abbreviations to full names (LDS scriptures)
 const BOOK_ABBREVIATIONS = {
   // Old Testament
@@ -1336,6 +1333,10 @@ const start = async () => {
     const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
     await fastify.listen({ port, host: '0.0.0.0' })
     console.log(`Server running on ${port}`)
+    // Initialize FTS in background so health checks can pass immediately.
+    setImmediate(() => {
+      initializeFts();
+    });
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
