@@ -5,16 +5,18 @@ const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3
 
 const themes = {
   light: {
-    background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Friedenskirche%2C%20Potsdam%20-%20replica%20of%20Thorvaldsen%27s%20Christus-7512.jpg')",
+    background_url: "url('https://www.churchofjesuschrist.org/imgs/0ec17f8ba62b51ed5cfbc746cb506d40c8e7392f/full/!640%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.1rem",
-    layout: "centered"
+    layout: "centered",
+    tone: "light"
   },
   dark: {
     background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Christus%20hand%20detail%20temple%20square.jpg')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
-    layout: "lower-third"
+    layout: "lower-third",
+    tone: "dark"
   }
 };
 
@@ -159,7 +161,7 @@ const Presenter = () => {
     {
       target: 'nav',
       title: 'Navigate Fast',
-      description: 'Use the top arrows for previous/next verse and segment controls while live.',
+      description: 'Use preview controls for previous/next verse and segment navigation while live.',
     },
   ];
   const [query, setQuery]                   = useState('');
@@ -524,42 +526,17 @@ const Presenter = () => {
           <span className="hdr-title">Scripture</span>
         </div>
 
-        {/* Live verse ref + inline nav */}
+        {/* Live verse summary */}
         <div className="hdr-center">
           {liveVerse ? (
-            <>
-              <div className={`hdr-nav${activeTourTarget === 'nav' ? ' tour-focus' : ''}`}>
-                {/* ←← prev verse */}
-                <button className="hdr-nav-btn hdr-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
-                  <IconChevronLeft /><IconChevronLeft />
-                </button>
-                {/* ◀ prev segment */}
-                <button className="hdr-nav-btn hdr-nav-btn--seg" onClick={() => navigateSegment('prev')}
-                  disabled={!hasSegments || currentSegment === 0} aria-label="Previous segment" title="Previous segment">
-                  <IconChevronLeft />
-                </button>
-
-                <div className="hdr-verse-info">
-                  <span className="hdr-verse-ref">
-                    {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
-                  </span>
-                  {hasSegments && (
-                    <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
-                  )}
-                </div>
-
-                {/* ▶ next segment */}
-                <button className="hdr-nav-btn hdr-nav-btn--seg" onClick={() => navigateSegment('next')}
-                  disabled={!hasSegments || currentSegment === liveVerse.segments.length - 1}
-                  aria-label="Next segment" title="Next segment">
-                  <IconChevronRight />
-                </button>
-                {/* →→ next verse */}
-                <button className="hdr-nav-btn hdr-nav-btn--verse" onClick={() => fetchAdjacent('next')} aria-label="Next verse" title="Next verse">
-                  <IconChevronRight /><IconChevronRight />
-                </button>
-              </div>
-            </>
+            <div className="hdr-verse-info">
+              <span className="hdr-verse-ref">
+                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+              </span>
+              {hasSegments && (
+                <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
+              )}
+            </div>
           ) : (
             <span className="hdr-no-verse">Tap 🔍 to find a verse</span>
           )}
@@ -820,6 +797,27 @@ const Presenter = () => {
             <div className="card-header">
               <span className="card-label">👁 Preview</span>
               <span className="card-hint">select text to highlight</span>
+            </div>
+            <div className={`preview-nav${activeTourTarget === 'nav' ? ' tour-focus' : ''}`}>
+              <button className="preview-nav-btn preview-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
+                <IconChevronLeft /><IconChevronLeft />
+              </button>
+              <button className="preview-nav-btn" onClick={() => navigateSegment('prev')}
+                disabled={!hasSegments || currentSegment === 0} aria-label="Previous segment" title="Previous segment">
+                <IconChevronLeft />
+              </button>
+              <div className="preview-nav-meta">
+                <span>{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</span>
+                {hasSegments && <span>{currentSegment + 1}/{liveVerse.segments.length}</span>}
+              </div>
+              <button className="preview-nav-btn" onClick={() => navigateSegment('next')}
+                disabled={!hasSegments || currentSegment === liveVerse.segments.length - 1}
+                aria-label="Next segment" title="Next segment">
+                <IconChevronRight />
+              </button>
+              <button className="preview-nav-btn preview-nav-btn--verse" onClick={() => fetchAdjacent('next')} aria-label="Next verse" title="Next verse">
+                <IconChevronRight /><IconChevronRight />
+              </button>
             </div>
             <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
               <div className="preview-title">
