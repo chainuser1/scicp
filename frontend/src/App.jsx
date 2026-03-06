@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import Presenter from './pages/Presenter';
 import Client from './pages/Client';
+import About from './pages/About';
+import Contact from './pages/Contact';
 import './App.css';
 
 /* ─── Cross / Emblem SVG ─── */
@@ -141,6 +143,8 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/presenter" element={<Presenter />} />
         <Route path="/client" element={<Client />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
       </Routes>
     </Router>
   );
