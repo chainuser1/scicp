@@ -302,7 +302,31 @@ function Client() {
   if (calculated < minFloor) calculated = minFloor;
   const modeScale = readabilityMode === 'strong' ? 1.18 : readabilityMode === 'soft' ? 1.0 : 1.1;
   const maxCap = viewport.w >= 2400 ? 8.5 : viewport.w >= 1920 ? 7.6 : viewport.w >= 901 ? 6.2 : viewport.w >= 641 ? 4.8 : 3.1;
-  const computedFontSize = `${Math.min(maxCap, calculated * modeScale)}rem`;
+  const baseScaled = Math.min(maxCap, calculated * modeScale);
+
+  // Intelligent calibration: keep consistent framing across text lengths and screen sizes.
+  const words = displayText.trim().split(/\s+/).filter(Boolean);
+  const avgWordLength = words.length ? words.join('').length / words.length : 0;
+  const charsPerLine = viewport.w >= 2400 ? 74
+    : viewport.w >= 1920 ? 66
+      : viewport.w >= 1400 ? 58
+        : viewport.w >= 901 ? 50
+          : viewport.w >= 641 ? 36
+            : 24;
+  const longWordMultiplier = avgWordLength > 6 ? 1.16 : 1;
+  const estimatedLines = Math.max(
+    2,
+    Math.ceil((length / charsPerLine) * longWordMultiplier) + (hasMoreSegments ? 1 : 0)
+  );
+  const lineHeight = dyslexiaMode ? 1.58 : 1.5;
+  const verticalReservePx = viewport.w <= 640 ? 170 : viewport.w <= 900 ? 190 : 230;
+  const lowerThirdPenaltyPx = verse.theme?.layout === 'lower-third' ? Math.max(90, Math.round(viewport.h * 0.14)) : 0;
+  const usableHeightPx = Math.max(220, viewport.h - verticalReservePx - lowerThirdPenaltyPx);
+  const fitRem = usableHeightPx / (estimatedLines * lineHeight * 16);
+
+  const calibratedFloor = viewport.w >= 2400 ? 2.6 : viewport.w >= 1920 ? 2.35 : viewport.w >= 901 ? 1.85 : viewport.w >= 641 ? 1.35 : 1.05;
+  const computedRem = Math.max(calibratedFloor, Math.min(baseScaled, fitRem * 0.98, maxCap));
+  const computedFontSize = `${computedRem}rem`;
 
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,
