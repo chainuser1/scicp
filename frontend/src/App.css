@@ -451,19 +451,19 @@ button,
 }
 
 .client-view.client-theme-light {
-  --client-accent-strong: rgba(209, 70, 105, 0.9);
-  --client-accent-soft: rgba(151, 45, 72, 0.84);
-  --client-accent-glow: rgba(202, 50, 86, 0.36);
-  --client-accent-line: rgba(122, 31, 52, 0.58);
-  --client-accent-dim: rgba(151, 45, 72, 0.62);
-  --client-highlight: #e84369;
-  --client-highlight-glow: rgba(32, 30, 30, 0.52);
+  --client-accent-strong: rgba(245, 227, 196, 0.96);
+  --client-accent-soft: rgba(228, 204, 168, 0.9);
+  --client-accent-glow: rgba(182, 139, 87, 0.42);
+  --client-accent-line: rgba(204, 161, 110, 0.76);
+  --client-accent-dim: rgba(218, 187, 147, 0.72);
+  --client-highlight: #f4d8b2;
+  --client-highlight-glow: rgba(244, 216, 178, 0.54);
 }
 
 .client-view.client-theme-light::before {
   background:
-    linear-gradient(to bottom, rgba(248, 243, 236, 0.18) 0%, rgba(8, 8, 10, 0.38) 100%),
-    radial-gradient(ellipse at center, transparent 24%, rgba(0, 0, 0, 0.54) 100%);
+    linear-gradient(to bottom, rgba(252, 247, 239, 0.2) 0%, rgba(8, 8, 10, 0.34) 100%),
+    radial-gradient(ellipse at center, transparent 24%, rgba(0, 0, 0, 0.5) 100%);
 }
 
 /* Vignette — darkens all four edges so text always pops regardless of bg */
@@ -547,30 +547,30 @@ button,
 }
 
 .client-view.client-theme-light .verse-backdrop {
-  background: rgba(14, 10, 12, 0.34);
+  background: rgba(23, 17, 12, 0.3);
   border-color: rgba(255, 255, 255, 0.12);
 }
 
 .client-view.client-theme-light.readability-strong .verse-backdrop {
-  background: rgba(12, 8, 10, 0.44);
+  background: rgba(18, 13, 10, 0.38);
 }
 
 .client-view.client-theme-light .verse-title-top-left,
 .client-view.client-theme-light .session-id-top-right {
-  color: rgba(236, 93, 129, 0.98);
+  color: var(--client-accent-strong);
   text-shadow:
-    0 1px 0 rgba(144, 136, 136, 0.45),
-    0 1px 2px rgba(0, 0, 0, 0.35);
+    0 1px 0 rgba(0, 0, 0, 0.78),
+    0 0 8px rgba(0, 0, 0, 0.24);
   letter-spacing: 0.15em;
 }
 
 .client-view.client-theme-light .verse-title-top-left {
-  border-bottom-color: rgba(194, 88, 115, 0.42);
+  border-bottom-color: var(--client-accent-glow);
 }
 
 .client-view.client-theme-light .session-id-top-right {
-  border-color: rgba(156, 56, 81, 0.38);
-  background: rgba(255, 250, 244, 0.22);
+  border-color: var(--client-accent-glow);
+  background: rgba(255, 250, 240, 0.15);
 }
 
 /* Progressive enhancement: blur only when browser supports it */
