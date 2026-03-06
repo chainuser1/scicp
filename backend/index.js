@@ -341,63 +341,55 @@ const DOCTRINE_ALIASES = {
 
   // ── Plan of Salvation ─────────────────────────────────────────────────────
   'plan of salvation': {
-    phrases: ['plan of salvation', 'plan of redemption', 'plan of happiness', 'great plan of happiness', 'great plan of the Eternal God'],
+    phrases: ['great plan of the Eternal God', 'great plan of happiness', 'plan of salvation', 'plan of redemption', 'plan of happiness'],
     terms:   ['salvation', 'redemption', 'immortality', 'eternal life', 'atonement', 'resurrection', 'exaltation'],
   },
   'plan of redemption': {
-    phrases: ['plan of redemption', 'plan of salvation', 'plan of happiness', 'plan prepared from the foundation of the world'],
+    phrases: ['plan prepared from the foundation of the world', 'plan of redemption', 'plan of salvation', 'plan of happiness'],
     terms:   ['redemption', 'salvation', 'eternal life', 'atonement', 'prepared', 'foundation'],
   },
   'plan of happiness': {
-    phrases: ['plan of happiness', 'plan of salvation', 'great plan of happiness'],
+    phrases: ['great plan of happiness', 'plan of happiness', 'plan of salvation'],
     terms:   ['happiness', 'salvation', 'eternal life', 'joy', 'redemption'],
   },
   'premortal life': {
-    phrases: ['before the world was', 'foundation of the world', 'pre-earth life', 'council in heaven', 'chosen before', 'foreordained'],
+    phrases: ['before the world was', 'chosen before', 'foundation of the world', 'pre-earth life', 'council in heaven', 'foreordained'],
     terms:   ['foreordained', 'chosen', 'foundation', 'spirits', 'council', 'heaven', 'premortal'],
   },
-  'preexistence': {
-    phrases: ['before the world was', 'foundation of the world', 'council in heaven',"choses before the foundation of the world", 'foreordained',""],
-    terms:   ['foreordained', 'spirits', 'chosen', 'foundation', 'premortal'],
+  'premortal_life': {
+    phrases: ['choses before the foundation of the world', 'before the world was', 'foundation of the world', 'pre-earth life', 'council in heaven', 'chosen before', 'foreordained'],
+    terms:   ['foreordained', 'chosen', 'foundation', 'spirits', 'council', 'heaven', 'premortal'],
   },
-  'war in heaven': {
-    phrases: ['war in heaven', 'cast out', 'third part of the stars', 
-      'rebellion in heaven',"third part of the host of heaven", 
-      'devil and his angels',"fought against the dragon",
-      "because of their agency",
-      "neither was their place found anymore in heaven",
-      "they were cast out",
-      "and he became Satan, yea, even the devil, the father of all lies, to deceive",
-    ],
+  'war_in_heaven': {
+    phrases: ['and he became Satan, yea, even the devil, the father of all lies, to deceive', 'neither was their place found anymore in heaven', 'third part of the host of heaven', 'third part of the stars', 'fought against the dragon', 'war in heaven', 'devil and his angels', 'cast out', 'because of their agency', 'they were cast out'],
     terms:   ['war', 'heaven', 'cast', 'rebel', 'devil', 'dragon', 'third', 'stars'],
   },
-  'spirit world': {
+  'spirit_world': {
     phrases: ['spirit world', 'world of spirits', 'paradise of God', 'spirit prison', 'prison house'],
     terms:   ['spirit', 'dead', 'prison', 'paradise', 'resurrection', 'disembodied'],
   },
-  'three kingdoms': {
-    phrases: ['celestial kingdom', 'terrestrial kingdom', 'telestial kingdom', 'degrees of glory', 'many mansions'],
-    terms:   ['celestial', 'terrestrial', 'telestial', 'glory', 'kingdom', 'mansion'],
+  'degrees_of_glory': {
+    phrases: ['celestial kingdom', 'terrestrial kingdom', 'telestial kingdom', 'degrees of glory', 'many mansions', 'glory of the sun', 'glory of the moon', 'glory of the stars'],
+    terms:   ['celestial', 'terrestrial', 'telestial', 'glory', 'kingdom', 'mansion', 'sun', 'moon', 'stars'],
   },
 
   // ── Atonement ─────────────────────────────────────────────────────────────
   'atonement': {
-    phrases: ['atonement of Christ', 'atonement of Jesus Christ', 'infinite atonement', 'atoning sacrifice', 'atoning blood', 'blood of Christ'],
-    terms:   ['atone', 'redeem', 'suffer', 'reconcile', 'ransom', 'sacrifice', 'expiate'],
+    phrases: ['suffered for our sins', 'he was wounded for our transgressions', 'he bore our griefs', 'by his stripes we are healed', 'he was broken for our iniquities', 'took upon him our sicknesses', 'carried our sorrows', 'bore our sins in his own body', 'atonement of Christ', 'atonement of Jesus Christ', 'infinite atonement', 'atoning sacrifice', 'atoning blood', 'blood of Christ', 'garden of Gethsemane', 'suffer in Gethsemane', 'blood from every pore', 'sweat as it were great drops', 'infinite atonement', 'infinite and eternal', 'atonement of Christ', 'eternal sacrifice'],
+    terms:   ['atone', 'redeem', 'suffer', 'reconcile', 'ransom', 'sacrifice', 'expiate', 'infinite', 'eternal', 'sins', 'all mankind', 'gethsemane', 'cup', 'bleed', 'pore', 'agony', 'garden', 'wound', 'transgression', 'grief', 'stripe', 'heal', 'bore', 'carried'],
   },
-  'infinite atonement': {
-    phrases: ['infinite atonement', 'infinite and eternal', 'atonement of Christ', 'eternal sacrifice'],
-    terms:   ['infinite', 'eternal', 'atone', 'suffer', 'sins', 'all mankind'],
+
+  // ── Abrahamic Covenant ────────────────────────────────────────────────────
+  'abrahamic_covenant': {
+    phrases: ['Abraham shall be a father of many nations', 'Abraham was a father of many nations', 'Abraham rejoiced to see my day, and he saw it and was glad', 'make thee exceeding fruitful, and I will make nations of thee, and kings shall come out of thee', 'circumcise the flesh of thy foreskin, and it shall be a token of the covenant', 'and the Lord God shall give to Abraham a land of plenty and of good', 'familes of the earth blessed through Abraham', 'seed as the stars of heaven', 'seed as the sand upon the seashore', 'blessings of Abraham', 'Abrahamic blessings', 'unto thy seed give I this land, promise land', 'inherit the land of Canaan', 'father of many nations', 'father of a multitude of nations', 'in thy seed shall all the nations of the earth be blessed', 'priesthood shall continue in thy seed forever', 'covenant of circumcision', 'sign of the covenant', 'everlasting covenant', 'covenant made with Abraham', 'covenant of the priesthood', 'Abrahamic covenant', 'eternal marriage', 'priesthood lineage', 'covenant of Abraham', 'seed of Abraham', 'covenant with Abraham', 'blessings of Abraham', 'as the stars of heaven'],
+    terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob', 'seed', 'blessing', 'nations', 'stars', 'sand', 'posterity', 'eternal', 'marriage', 'lineage'],
   },
-  'gethsemane': {
-    phrases: ['garden of Gethsemane', 'suffer in Gethsemane', 'blood from every pore', 'sweat as it were great drops'],
-    terms:   ['gethsemane', 'suffer', 'cup', 'bleed', 'pore', 'agony', 'garden'],
-  },
+
   'grace': {
     phrases: ['saved by grace', 'grace of God', 'grace of Christ', 'after all we can do'],
     terms:   ['grace', 'mercy', 'favour', 'unmerited', 'enable', 'divine help'],
   },
-  'grace vs works': {
+  'grace_vs_works': {
     phrases: ['saved by grace', 'after all we can do', 'faith without works', 'works of righteousness'],
     terms:   ['grace', 'works', 'faith', 'justified', 'saved', 'merit'],
   },
@@ -407,11 +399,11 @@ const DOCTRINE_ALIASES = {
   },
 
   // ── Christology ───────────────────────────────────────────────────────────
-  'jesus christ': {
+  'jesus_christ': {
     phrases: ['Jesus Christ', 'Son of God', 'Son of Man', 'Lamb of God', 'Messiah', 'Holy One of Israel', 'Redeemer of Israel', 'Lord and Savior'],
     terms:   ['Jesus', 'Christ', 'Savior', 'Redeemer', 'Messiah', 'Lord'],
   },
-  'second coming': {
+  'second_coming': {
     phrases: ['second coming', 'coming of the Son of Man', 'day of the Lord', 'great and dreadful day', 'coming in glory', 'at his coming'],
     terms:   ['second', 'coming', 'return', 'clouds', 'glory', 'parousia', 'millennium'],
   },
@@ -429,15 +421,15 @@ const DOCTRINE_ALIASES = {
     phrases: ['the Father and the Son', 'God the Father', 'Holy Ghost', 'three separate', 'Godhead', 'three personages'],
     terms:   ['father', 'son', 'holy ghost', 'godhead', 'personage', 'one'],
   },
-  'nature of god': {
+  'nature_of_god': {
     phrases: ['God is a God of truth', 'body of flesh and bones', 'eternal God', 'immortal God', 'perfections of God'],
     terms:   ['god', 'eternal', 'immortal', 'omniscient', 'omnipotent', 'flesh', 'bones', 'perfection'],
   },
-  'holy ghost': {
+  'holy_ghost': {
     phrases: ['Holy Ghost', 'Holy Spirit', 'gift of the Holy Ghost', 'Comforter', 'Spirit of God', 'Spirit of the Lord'],
     terms:   ['holy ghost', 'comforter', 'spirit', 'confirm', 'receive', 'witness', 'gift'],
   },
-  'first vision': {
+  'first_vision': {
     phrases: ['pillar of light', 'two personages', 'Father and the Son appeared', 'grove of trees'],
     terms:   ['vision', 'light', 'pillar', 'personage', 'grove', 'appeared', 'Joseph'],
   },
@@ -455,9 +447,9 @@ const DOCTRINE_ALIASES = {
     phrases: ['forgiveness of sins', 'sins are forgiven', 'I the Lord will forgive', 'remember no more', 'blot out transgressions'],
     terms:   ['forgive', 'pardon', 'remit', 'cleanse', 'blot', 'remember no more', 'merciful'],
   },
-  'born again': {
-    phrases: ['born again', 'born of God', 'born of the Spirit', 'new creature in Christ', 'spiritual rebirth', 'mighty change of heart'],
-    terms:   ['born', 'spirit', 'new', 'creature', 'change', 'heart', 'rebirth'],
+  'born_again': {
+    phrases: ['born again', 'born of God', 'born of the Spirit', 'new creature in Christ', 'spiritual rebirth', 'mighty change of heart', 'mighty change of heart', 'changed from their carnal', 'no more disposition to do evil', 'become new creatures in Christ'],
+    terms:   ['born', 'spirit', 'new', 'creature', 'change', 'heart', 'rebirth', 'mighty', 'carnal', 'disposition', 'evil', 'good'],
   },
   'doubt': {
     phrases: ['doubt not', 'fear not', 'O ye of little faith', 'wavering in faith'],
@@ -469,11 +461,11 @@ const DOCTRINE_ALIASES = {
     phrases: ['baptized in the name', 'baptism by immersion', 'born of water', 'enter by the gate', 'remission of sins by baptism'],
     terms:   ['baptize', 'immerse', 'water', 'spirit', 'gate', 'covenant', 'remission'],
   },
-  'baptism for the dead': {
+  'baptism_for_the_dead': {
     phrases: ['baptized for the dead', 'baptism for the dead', 'proxy ordinance', 'work for the dead', 'salvation for the dead'],
     terms:   ['baptized', 'dead', 'proxy', 'vicarious', 'salvation', 'temple'],
   },
-  'gift of holy ghost': {
+  'gift_of_holy_ghost': {
     phrases: ['gift of the Holy Ghost', 'receive the Holy Ghost', 'confirmed a member', 'laying on of hands for the gift'],
     terms:   ['holy ghost', 'gift', 'confirm', 'receive', 'laying', 'hands'],
   },
@@ -485,15 +477,15 @@ const DOCTRINE_ALIASES = {
     phrases: ['Melchizedek Priesthood', 'Aaronic Priesthood', 'holy priesthood', 'keys of the kingdom', 'authority of God', 'ordained to the priesthood'],
     terms:   ['priesthood', 'authority', 'ordain', 'keys', 'melchizedek', 'aaronic', 'hold'],
   },
-  'melchizedek priesthood': {
+  'melchizedek_priesthood': {
     phrases: ['Melchizedek Priesthood', 'higher priesthood', 'holy order of God', 'after the order of the Son of God'],
     terms:   ['melchizedek', 'higher', 'priesthood', 'order', 'authority', 'high priest'],
   },
-  'aaronic priesthood': {
+  'aaronic_priesthood': {
     phrases: ['Aaronic Priesthood', 'lesser priesthood', 'Levitical priesthood', 'preparatory priesthood'],
     terms:   ['aaronic', 'lesser', 'levitical', 'deacon', 'teacher', 'priest', 'preparatory'],
   },
-  'laying on of hands': {
+  'laying_on_of_hands': {
     phrases: ['laid their hands upon', 'laying on of hands', 'by the laying on', 'hands were laid'],
     terms:   ['hands', 'laid', 'ordained', 'blessed', 'healed', 'consecrated'],
   },
@@ -511,7 +503,7 @@ const DOCTRINE_ALIASES = {
   },
 
   // ── Eternal Life & Exaltation ─────────────────────────────────────────────
-  'eternal life': {
+  'eternal_life': {
     phrases: ['eternal life', 'life eternal', 'immortality and eternal life', 'inherit eternal life', 'the greatest of all the gifts of God'],
     terms:   ['eternal', 'life', 'immortality', 'exaltation', 'inherit', 'gift', 'God'],
   },
@@ -519,11 +511,11 @@ const DOCTRINE_ALIASES = {
     phrases: ['exalted in the celestial kingdom', 'joint heirs with Christ', 'heirs of God', 'thrones and dominions', 'eternal increase'],
     terms:   ['exalt', 'celestial', 'inherit', 'throne', 'dominion', 'heir', 'eternal', 'increase'],
   },
-  'eternal family': {
+  'eternal_family': {
     phrases: ['families are forever', 'sealed for eternity', 'eternal family', 'together forever', 'time and all eternity'],
     terms:   ['family', 'sealed', 'eternal', 'together', 'forever', 'eternity', 'children'],
   },
-  'life after death': {
+  'life_after_death': {
     phrases: ['resurrection of the dead', 'spirit world', 'life after death', 'immortality', 'we shall live again'],
     terms:   ['resurrect', 'spirit', 'world', 'eternal', 'death', 'live', 'immortal'],
   },
@@ -531,11 +523,7 @@ const DOCTRINE_ALIASES = {
     phrases: ['stand before God', 'bar of God', 'judgment bar', 'judged according to works', 'books were opened', 'day of judgment'],
     terms:   ['judgment', 'bar', 'God', 'stand', 'account', 'works', 'books', 'judged'],
   },
-  'degrees of glory': {
-    phrases: ['celestial kingdom', 'terrestrial kingdom', 'telestial kingdom', 'degrees of glory', 'glory of the sun', 'glory of the moon', 'glory of the stars'],
-    terms:   ['celestial', 'terrestrial', 'telestial', 'glory', 'kingdom', 'sun', 'moon', 'stars'],
-  },
-  'outer darkness': {
+  'outer_darkness': {
     phrases: ['outer darkness', 'sons of perdition', 'weeping and wailing', 'gnashing of teeth', 'perdition', 'second death'],
     terms:   ['outer', 'darkness', 'perdition', 'weeping', 'gnashing', 'sons', 'second death'],
   },
@@ -545,11 +533,7 @@ const DOCTRINE_ALIASES = {
     phrases: ['covenant with God', 'everlasting covenant', 'new covenant', 'covenant people', 'keep my covenant', 'enter into a covenant'],
     terms:   ['covenant', 'promise', 'oath', 'swear', 'bind', 'agree', 'testament', 'keep'],
   },
-  'abrahamic covenant': {
-    phrases: ['covenant of Abraham', 'seed of Abraham', 'covenant with Abraham', 'blessings of Abraham', 'as the stars of heaven'],
-    terms:   ['abraham', 'covenant', 'seed', 'blessing', 'nations', 'stars', 'sand', 'posterity'],
-  },
-  'gathering of israel': {
+  'gathering_of_israel': {
     phrases: ['gather Israel', 'remnant of Israel', 'house of Israel', 'return to the promised land', 'scattered Israel', 'ten tribes'],
     terms:   ['gather', 'israel', 'remnant', 'return', 'promised', 'land', 'scattered', 'tribes'],
   },
@@ -563,11 +547,11 @@ const DOCTRINE_ALIASES = {
     phrases: ['revelation from God', 'word of the Lord', 'thus saith the Lord', 'voice of the Lord', 'spirit of revelation', 'open vision'],
     terms:   ['revelation', 'prophet', 'vision', 'manifest', 'spirit', 'saith', 'Lord'],
   },
-  'still small voice': {
+  'still_small_voice': {
     phrases: ['still small voice', 'voice of the Spirit', 'Spirit whispered', 'spirit of the Lord came upon'],
     terms:   ['still', 'small', 'voice', 'spirit', 'whisper', 'quiet', 'gentle'],
   },
-  'spiritual gifts': {
+  'spiritual_gifts': {
     phrases: ['gifts of the Spirit', 'gift of prophecy', 'gift of tongues', 'gift of healing', 'speaking in tongues', 'discerning of spirits'],
     terms:   ['gift', 'spirit', 'prophecy', 'tongues', 'heal', 'discern', 'miracle'],
   },
@@ -611,7 +595,7 @@ const DOCTRINE_ALIASES = {
     phrases: ['opposition in all things', 'bitter and the sweet', 'good and evil', 'compound in one'],
     terms:   ['opposition', 'contrary', 'bitter', 'sweet', 'good', 'evil', 'compound'],
   },
-  'natural man': {
+  'natural_man': {
     phrases: ['natural man is an enemy to God', 'carnal mind', 'fallen man', 'put off the natural man', 'yield to the enticings'],
     terms:   ['natural', 'man', 'enemy', 'carnal', 'fallen', 'yield', 'enticings', 'saint'],
   },
@@ -623,7 +607,7 @@ const DOCTRINE_ALIASES = {
     phrases: ['endure to the end', 'in the midst of affliction', 'all these things shall give thee experience', 'refiner fire'],
     terms:   ['trial', 'tribulation', 'affliction', 'suffer', 'adversity', 'trouble', 'refine', 'endure'],
   },
-  'comfort in trials': {
+  'comfort_in_trials': {
     phrases: ['I will not leave you comfortless', 'peace I leave with you', 'I am with thee', 'be still and know', 'bear up your burdens'],
     terms:   ['comfort', 'peace', 'affliction', 'bear', 'burden', 'strengthen', 'consolation', 'still'],
   },
@@ -634,8 +618,8 @@ const DOCTRINE_ALIASES = {
     terms:   ['serve', 'minister', 'lift', 'poor', 'needy', 'hands', 'succor', 'strengthen'],
   },
   'consecration': {
-    phrases: ['consecrate thy performance', 'law of consecration', 'all things in common', 'have all things equal'],
-    terms:   ['consecrate', 'all', 'steward', 'poor', 'needy', 'equal', 'common'],
+    phrases: ['consecrate thy performance', 'dedicate to the Lord', 'consecrate to the Lord', 'law of consecration', 'all things in common', 'have all things equal'],
+    terms:   ['consecrate', 'dedicate', 'steward', 'all', 'law', 'performance', 'equal', 'common'],
   },
   'charity': {
     phrases: ['charity never faileth', 'pure love of Christ', 'charity is the pure love', 'clothe yourself with charity'],
@@ -655,17 +639,13 @@ const DOCTRINE_ALIASES = {
     phrases: ['restoration of all things', 'restored church', 'dispensation of the fullness of times', 'restitution of all things'],
     terms:   ['restoration', 'restore', 'dispensation', 'fullness', 'times', 'church', 'restitution'],
   },
-  'book of mormon': {
+  'book_of_mormon': {
     phrases: ['another testament of Jesus Christ', 'record of the Nephites', 'fulness of the gospel', 'stick of Joseph', 'gold plates'],
     terms:   ['nephite', 'lamanite', 'record', 'plates', 'gospel', 'fullness', 'testament'],
   },
-  'word of god': {
+  'word_of_god': {
     phrases: ['word of God', 'word of the Lord', 'living word', 'iron rod', 'hold fast to the rod'],
     terms:   ['word', 'god', 'scripture', 'commandment', 'truth', 'rod', 'iron'],
-  },
-  'iron rod': {
-    phrases: ['rod of iron', 'hold fast to the rod', 'word of God', 'strait and narrow path'],
-    terms:   ['rod', 'iron', 'hold', 'fast', 'word', 'god', 'strait', 'narrow'],
   },
   'liahona': {
     phrases: ['Liahona', 'ball of curious workmanship', 'director', 'faith and diligence'],
@@ -681,125 +661,49 @@ const DOCTRINE_ALIASES = {
   },
 
   // ── Specific LDS Doctrinal Phrases ────────────────────────────────────────
-  'by their fruits': {
+  'by_their_fruits': {
     phrases: ['by their fruits ye shall know them', 'good tree bringeth forth', 'corrupt tree'],
     terms:   ['fruits', 'know', 'tree', 'good', 'corrupt', 'bring', 'forth'],
   },
-  'iron rod': {
-    phrases: ['rod of iron', 'hold fast', 'word of God', 'strait and narrow'],
-    terms:   ['rod', 'iron', 'hold', 'word', 'god', 'narrow', 'path'],
+  'iron_rod': {
+    phrases: ['rod of iron', 'hold fast to the rod', 'word of God', 'strait and narrow path', 'hold fast', 'strait and narrow'],
+    terms:   ['rod', 'iron', 'hold', 'fast', 'word', 'god', 'strait', 'narrow', 'path'],
   },
-  'light of christ': {
+  'light_of_christ': {
     phrases: ['light of Christ', 'spirit of Christ', 'given to every man', 'true light', 'light and life'],
     terms:   ['light', 'Christ', 'spirit', 'every', 'man', 'conscience', 'truth'],
   },
-  'love of god': {
+  'love_of_god': {
     phrases: ['love of God', 'God so loved the world', 'charity is the love of God', 'he first loved us'],
     terms:   ['love', 'God', 'world', 'gave', 'son', 'charity', 'first'],
   },
-  'armor of god': {
+  'armor_of_god': {
     phrases: ['whole armor of God', 'breastplate of righteousness', 'shield of faith', 'sword of the Spirit', 'helmet of salvation'],
     terms:   ['armor', 'breastplate', 'shield', 'faith', 'sword', 'spirit', 'helmet', 'salvation'],
   },
-  'new jerusalem': {
+  'new_jerusalem': {
     phrases: ['New Jerusalem', 'city of Zion', 'holy city', 'come down from heaven', 'bride of the Lamb'],
     terms:   ['new', 'jerusalem', 'zion', 'city', 'holy', 'heaven', 'bride'],
   },
-  'abide in me': {
+  'abide_in_me': {
     phrases: ['abide in me', 'I am the vine', 'branch cannot bear fruit', 'abide in my love'],
     terms:   ['abide', 'vine', 'branch', 'fruit', 'love', 'remain', 'dwell'],
   },
-  'suffering of christ': {
-    phrases: ['suffered for our sins', 
-      'he was wounded for our transgressions', 
-      'he bore our griefs', 'by his stripes we are healed',
-      'he was broken for our iniquities',
-      'took upon him our sicknesses', 'carried our sorrows', 'bore our sins in his own body',
-
-    ],
-    terms:   ['suffer', 'wound', 'transgression', 'grief', 'stripe', 'heal', 'bore', 'carried'],
-  },
-  'prayer of faith': {
-    phrases: ['prayer of faith',
-       'pray with faith', 'ask in faith', 
-       'ask of God', 
-       'receive according to your faith',
-       'nothing wavering'],
+  'prayer_of_faith': {
+    phrases: ['prayer of faith', 'pray with faith', 'ask in faith', 'ask of God', 'receive according to your faith', 'nothing wavering'],
     terms:   ['prayer', 'faith', 'ask', 'waver', 'believe', 'receive', 'heal'],
   },
-  'power of god': {
-    phrases: ['power of God', 'arm of the Lord', 'by the power of God', 
-      'omnipotent God',
-      'mighty to save',
-      'strength of the Lord',
-      'mighty God',
-      'omnipotent arm',
-      'omnipotent power',
-      'matchless power of God',
-    ],
+  'power_of_god': {
+    phrases: ['power of God', 'arm of the Lord', 'by the power of God', 'omnipotent God', 'mighty to save', 'strength of the Lord', 'mighty God', 'omnipotent arm', 'omnipotent power', 'matchless power of God'],
     terms:   ['power', 'God', 'arm', 'Lord', 'omnipotent', 'mighty', 'strength'],
   },
-  'endure to the end': {
-    phrases: ['endure to the end', 'hold out faithful', 
-      'patient in tribulation', 
-      'endure tribulation',
-      'faithful unto the end',
-      'endure tribulation',
-      'trials and tribulations',
-      'trial of your faith',
-      'worketh patience',
-      'patience in thy affliction',
-      'run with endurance'],
+  'endure_to_the_end': {
+    phrases: ['endure to the end', 'hold out faithful', 'patient in tribulation', 'endure tribulation', 'faithful unto the end', 'trials and tribulations', 'trial of your faith', 'worketh patience', 'patience in thy affliction', 'run with endurance'],
     terms:   ['endure', 'end', 'faithful', 'patient', 'tribulation', 'run', 'persevere'],
-  },
-  'consecrate': {
-    phrases: ['consecrate thy performance', 
-      'dedicate to the Lord', 
-      'consecrate to the Lord',
-      'law of consecration',
-      'all things in common',
-      'have all things equal',
-
-    ],
-    terms:   ['consecrate', 'dedicate', 'steward', 'all', 'law', 'performance'],
-  },
-  'mighty change': {
-    phrases: ['mighty change of heart',
-       'changed from their carnal', 
-       'no more disposition to do evil',
-        'become new creatures in Christ',
-
-      ],
-    terms:   ['mighty', 'change', 'heart', 'carnal', 'disposition', 'evil', 'good'],
   },
   'steadfast': {
     phrases: ['steadfast and immovable', 'firm and steadfast in the faith', 'hold fast'],
     terms:   ['steadfast', 'immovable', 'firm', 'faith', 'hold', 'fast', 'constant'],
-  },
-
-  // abrahamic covenant
-  'abrahamic': {
-    phrases: [ 
-      'eternal marriage', 
-      'priesthood lineage', 
-      'familes of the earth blessed through Abraham',
-      'seed as the stars of heaven', 'seed as the sand upon the seashore',
-      'blessings of Abraham', 'Abrahamic blessings',
-      'unto thy seed give I this land, promise land', 'inherit the land of Canaan',
-      'father of many nations', 'father of a multitude of nations',
-      'Abraham rejoiced to see my day, and he saw it and was glad',
-      'Abraham was a father of many nations',
-      'in thy seed shall all the nations of the earth be blessed',
-      'priesthood shall continue in thy seed forever',
-      'and the Lord God shall give to Abraham a land of plenty and of good',
-      'circumcise the flesh of thy foreskin, and it shall be a token of the covenant',
-      'and the Lord God shall give to Abraham a land of plenty and of good',
-      'make thee exceeding fruitful, and I will make nations of thee, and kings shall come out of thee',
-      'Abraham shall be a father of many nations',
-      'covenant of circumcision', 'sign of the covenant', 'everlasting covenant',
-      'covenant made with Abraham', 'covenant of the priesthood', 'Abrahamic covenant',
-    ],
-    terms:   ['abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob'],
   },
 };
 
