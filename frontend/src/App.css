@@ -531,8 +531,11 @@ button,
   background: rgba(57, 57, 57, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: clamp(4px, 0.5vw, 10px);
-  max-height: min(78dvh, 900px);
-  overflow: hidden;
+  /* JS font-sizing guarantees all text fits before it reaches this container.
+     overflow: visible ensures a rounding mismatch shows text rather than clips it.
+     max-height matches the JS constant: min(82dvh, 960px) */
+  max-height: min(82dvh, 960px);
+  overflow: visible;
   box-shadow:
     0 1px 0 0 var(--client-accent-glow) inset,
     0 clamp(10px, 2.5vh, 28px) clamp(22px, 6vw, 70px) rgba(0, 0, 0, 0.56);
@@ -758,13 +761,14 @@ button,
   }
   .verse-backdrop {
     max-width: 95vw;
-    max-height: min(74dvh, 620px);
+    max-height: min(82dvh, 960px);
     padding: 0.82rem 0.9rem;
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.54);
+    overflow: visible;
   }
   .client-view p {
-    font-size: clamp(1.1rem, 4.8vw, 1.6rem) !important;
+    font-size: clamp(1.1rem, 4.8vw, 1.6rem);
     line-height: 1.43;
     letter-spacing: 0.01em;
   }
@@ -798,11 +802,12 @@ button,
 @media (min-width: 641px) and (max-width: 900px) {
   .verse-backdrop {
     max-width: 94vw;
-    max-height: min(76dvh, 740px);
+    max-height: min(82dvh, 960px);
     padding: clamp(1rem, 2.5vh, 2rem) clamp(1.25rem, 4vw, 2.5rem);
+    overflow: visible;
   }
   .client-view p {
-    font-size: clamp(1.45rem, 3.5vw, 3.05rem) !important;
+    font-size: clamp(1.45rem, 3.5vw, 3.05rem);
     line-height: 1.48;
   }
 }
@@ -811,7 +816,7 @@ button,
 @media (min-width: 901px) and (max-width: 1920px) {
   .client-view p {
     /* vw-based so text fills the screen proportionally at projection distance */
-    font-size: clamp(1.8rem, 2.6vw, 4.8rem) !important;
+    font-size: clamp(1.8rem, 2.6vw, 4.8rem);
   }
   .verse-backdrop {
     max-width: min(88vw, 1280px);
@@ -822,7 +827,7 @@ button,
 /* ── 4K TVs and large displays (≥2400px) ── */
 @media (min-width: 2400px) {
   .client-view p {
-    font-size: clamp(2rem, 2.5vw, 6rem) !important;
+    font-size: clamp(2rem, 2.5vw, 6rem);
     line-height: 1.7;
   }
   .verse-backdrop {
