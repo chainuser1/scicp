@@ -326,7 +326,11 @@ const Presenter = () => {
             setSessionInput(response.sessionId);
             setSessionMessage(`Session ${response.sessionId} ready`);
           } else {
-            requestCreateSession();
+            if (response?.message === 'Session not found') {
+              requestCreateSession();
+              return;
+            }
+            setSessionMessage(response?.message || 'Unable to rejoin previous session');
           }
         });
       } else {
