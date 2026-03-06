@@ -59,10 +59,11 @@ function Client() {
     currentSegment: 0,
     totalSegments: 0,
     theme: {
-      background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Friedenskirche%2C%20Potsdam%20-%20replica%20of%20Thorvaldsen%27s%20Christus-7512.jpg')",
+      background_url: "url('https://www.churchofjesuschrist.org/imgs/0ec17f8ba62b51ed5cfbc746cb506d40c8e7392f/full/!640%2C/0/default')",
       font_family: "'Cormorant Garamond', Georgia, serif",
       font_size: "4.1rem",
-      layout: "centered"
+      layout: "centered",
+      tone: "light"
     }
   });
   const [animating, setAnimating] = useState(false);
@@ -311,7 +312,7 @@ function Client() {
 
   return (
     <div
-      className={`client-view readability-${readabilityMode}${dyslexiaMode ? ' readability-dyslexia' : ''}${autoReducedMotion ? ' reduce-motion-auto' : ''} ${verse.theme?.layout || 'centered'} ${animating && !autoReducedMotion ? 'fade' : ''}`}
+      className={`client-view ${verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark'} readability-${readabilityMode}${dyslexiaMode ? ' readability-dyslexia' : ''}${autoReducedMotion ? ' reduce-motion-auto' : ''} ${verse.theme?.layout || 'centered'} ${animating && !autoReducedMotion ? 'fade' : ''}`}
       style={themeStyles}
     >
       {/* Verse reference — Cinzel label, re-animates on each verse change */}
