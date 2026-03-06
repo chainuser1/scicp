@@ -24,6 +24,12 @@ function Client() {
   // Key forces re-mount of label element → re-triggers arrival animation on verse change
   const [labelKey, setLabelKey] = useState(0);
 
+  useEffect(() => {
+    document.title = 'Client Display | Scriptures in View';
+    const robotsMeta = document.querySelector('meta[name="robots"]');
+    if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
+  }, []);
+
   const attemptJoin = (candidate) => {
     const normalized = normalizeSessionId(candidate);
     if (!normalized) {
