@@ -5,15 +5,15 @@ const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3
 
 const themes = {
   light: {
-    background_url: "url('https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')",
-    font_family: "serif",
-    font_size: "4rem",
+    background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Salt%20Lake%20Temple%20UT2.jpg')",
+    font_family: "'Cormorant Garamond', Georgia, serif",
+    font_size: "4.1rem",
     layout: "centered"
   },
   dark: {
-    background_url: "url('https://images.unsplash.com/photo-1488866022504-f2584929ca5f?q=80&w=2062&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')",
-    font_family: "sans-serif",
-    font_size: "5rem",
+    background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/SLC%20Temple%20east%20side%20night.jpg')",
+    font_family: "'Cormorant Garamond', Georgia, serif",
+    font_size: "4.8rem",
     layout: "lower-third"
   }
 };
