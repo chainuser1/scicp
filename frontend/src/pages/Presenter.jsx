@@ -100,6 +100,12 @@ const IconCheck = () => (
   </svg>
 );
 
+const IconMenu = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+  </svg>
+);
+
 /* ─── Reusable components ─── */
 
 const HdrBtn = ({ onClick, active, children, label, title }) => (
@@ -208,7 +214,9 @@ const Presenter = () => {
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
   const [verseOfDay, setVerseOfDay]         = useState(null);
+  const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -233,9 +241,18 @@ const Presenter = () => {
 
   useEffect(() => {
     fetch(`${API_URL}/verse/of-the-day`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data && data.verse_id) setVerseOfDay(data); })
-      .catch(() => {}); // silently ignore — idle state degrades gracefully
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(data => {
+        if (data && data.verse_id) setVerseOfDay(data);
+        else setVotdError(true);
+      })
+      .catch(err => {
+        console.error('[Presenter] verse-of-the-day fetch failed:', err);
+        setVotdError(true);
+      });
   }, []);
 
   const requestCreateSession = () => {
@@ -413,9 +430,9 @@ const Presenter = () => {
     };
   }, []);
 
-  /* ── Close drawer, theme popover, and session popover on outside tap ── */
+  /* ── Close drawer, theme popover, session popover, and mobile menu on outside tap ── */
   useEffect(() => {
-    if (!drawerOpen && !themePopover && !sessionPopover) return;
+    if (!drawerOpen && !themePopover && !sessionPopover && !mobileMenuOpen) return;
     const handler = e => {
       if (!e.target.closest('.search-drawer') && !e.target.closest('.hdr-btn') && !e.target.closest('.hdr-theme-wrap'))
         setDrawerOpen(false);
@@ -423,6 +440,8 @@ const Presenter = () => {
         setThemePopover(false);
       if (!e.target.closest('.hdr-session-wrap'))
         setSessionPopover(false);
+      if (!e.target.closest('.hdr-mobile-menu') && !e.target.closest('.hdr-hamburger'))
+        setMobileMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
     document.addEventListener('touchstart', handler, { passive: true });
@@ -430,7 +449,7 @@ const Presenter = () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('touchstart', handler);
     };
-  }, [drawerOpen, themePopover, sessionPopover]);
+  }, [drawerOpen, themePopover, sessionPopover, mobileMenuOpen]);
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
@@ -528,7 +547,7 @@ const Presenter = () => {
     const parts = text.split(new RegExp(`(${highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
     return parts.map((part, i) =>
       part.toLowerCase() === highlightedText.toLowerCase()
-        ? <span key={i} className="highlight-yellow">{part}</span>
+        ? <span key={i} className="highlight-yellow preview-highlight">{part}</span>
         : part
     );
   };
@@ -583,8 +602,8 @@ const Presenter = () => {
           )}
         </div>
 
-        {/* Right controls */}
-        <div className="hdr-right">
+        {/* Right controls — desktop (hidden on narrow screens via CSS) */}
+        <div className="hdr-right hdr-right--desktop">
           <HdrBtn onClick={openTour} label="Open walkthrough" title="Open walkthrough">
             <IconInfo />
           </HdrBtn>
@@ -643,7 +662,6 @@ const Presenter = () => {
                 {[
                   { label: '☀ Light', theme: themes.light },
                   { label: '☽ Dark',  theme: themes.dark  },
-                  // ...savedThemes.map(t => ({ label: t.name, theme: t.data }))
                 ].map(({ label, theme }) => (
                   <button
                     key={label}
@@ -668,29 +686,6 @@ const Presenter = () => {
                     setThemePopover(false);
                   }}>Apply</button>
                 </div>
-                {/*
-                <div className="popover-label" style={{ marginTop: '0.4rem' }}>Save theme</div>
-                <div className="popover-row">
-                  <input
-                    type="text"
-                    className="popover-input"
-                    placeholder="Name…"
-                    value={newThemeName}
-                    onChange={e => setNewThemeName(e.target.value)}
-                  />
-                  <button className="popover-apply" onClick={() => {
-                    if (!newThemeName) return;
-                    fetch(`${API_URL}/themes`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ name: newThemeName, data: currentTheme }),
-                    })
-                      .then(r => r.json())
-                      .then(t => { setSavedThemes(s => [...s, t]); setNewThemeName(''); })
-                      .catch(err => console.error('save theme failed', err));
-                  }}>Save</button>
-                </div>
-                */}
               </div>
             )}
           </div>
@@ -712,6 +707,123 @@ const Presenter = () => {
             <div className="live-badge">
               <span className="live-badge-dot" />
               <span>Live</span>
+            </div>
+          )}
+        </div>
+
+        {/* Right controls — mobile (narrow screens only, ≤540px) */}
+        <div className="hdr-right hdr-right--mobile">
+          {/* Search always visible */}
+          <div className={activeTourTarget === 'search' ? 'tour-focus' : ''}>
+            <HdrBtn onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }} active={drawerOpen && drawerTab === 'search'} label="Search scripture">
+              <IconSearch />
+            </HdrBtn>
+          </div>
+          {/* Compact live dot */}
+          {liveVerse && (
+            <div className="live-badge live-badge--compact">
+              <span className="live-badge-dot" />
+            </div>
+          )}
+          {/* Hamburger */}
+          <button
+            className={`hdr-btn hdr-hamburger${mobileMenuOpen ? ' hdr-btn--active' : ''}`}
+            onClick={() => setMobileMenuOpen(o => !o)}
+            aria-label="More options"
+            title="More options"
+          >
+            <IconMenu />
+          </button>
+
+          {/* Mobile dropdown panel */}
+          {mobileMenuOpen && (
+            <div className="hdr-mobile-menu">
+              {/* Session */}
+              <div className={`mobile-menu-section${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
+                <div className="mobile-menu-label">Session</div>
+                <div className="session-code-display">{sessionId || 'NOT READY'}</div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    value={sessionInput}
+                    onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
+                    placeholder="AB12CD"
+                    aria-label="Session code"
+                  />
+                  <button className="popover-apply" onClick={joinSession}>Join</button>
+                </div>
+                <div className="popover-row">
+                  <button className="theme-btn" onClick={requestCreateSession}>New Session</button>
+                  <button className="theme-btn" onClick={() => { copyClientLink(); setMobileMenuOpen(false); }}>Copy Link</button>
+                </div>
+                <div className="popover-row">
+                  <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }} disabled={!sessionId}>Leave Session</button>
+                </div>
+                <div className="session-message">{sessionMessage}</div>
+                <div className="session-message">Connection: {connectionState}</div>
+              </div>
+
+              <div className="mobile-menu-divider" />
+
+              {/* Language */}
+              <div className="mobile-menu-section">
+                <div className="mobile-menu-label">Language</div>
+                <div className="mobile-menu-row">
+                  {['en','tl','ceb'].map(lang => (
+                    <button
+                      key={lang}
+                      className={`theme-btn${currentLanguage === lang ? ' active' : ''}`}
+                      onClick={() => { handleLanguageChange({ target: { value: lang } }); setMobileMenuOpen(false); }}
+                    >{lang.toUpperCase()}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mobile-menu-divider" />
+
+              {/* Theme */}
+              <div className="mobile-menu-section">
+                <div className="mobile-menu-label">Theme</div>
+                <div className="mobile-menu-row">
+                  {[{ label: '☀ Light', theme: themes.light }, { label: '☽ Dark', theme: themes.dark }].map(({ label, theme }) => (
+                    <button
+                      key={label}
+                      className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
+                      onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
+                    >{label}</button>
+                  ))}
+                </div>
+                <div className="popover-row" style={{ marginTop: '0.4rem' }}>
+                  <input
+                    type="text"
+                    className="popover-input"
+                    placeholder="Custom bg URL…"
+                    value={bgUrlInput}
+                    onChange={e => setBgUrlInput(e.target.value)}
+                  />
+                  <button className="popover-apply" onClick={() => {
+                    if (!bgUrlInput) return;
+                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                    setBgUrlInput('');
+                    setMobileMenuOpen(false);
+                  }}>Apply</button>
+                </div>
+              </div>
+
+              <div className="mobile-menu-divider" />
+
+              {/* Misc */}
+              <div className="mobile-menu-section">
+                <div className="mobile-menu-row">
+                  <button className="theme-btn" onClick={() => { openDrawer('history'); setMobileMenuOpen(false); }}>
+                    <IconClock /> Recent
+                  </button>
+                  <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
+                    <IconInfo /> Help
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -841,8 +953,10 @@ const Presenter = () => {
                     </div>
                   </div>
                 </>
+              ) : votdError ? (
+                <p className="votd-loading">Could not load verse — check the server is running.</p>
               ) : (
-                <p className="votd-loading">Loading verse…</p>
+                <p className="votd-loading">Loading…</p>
               )}
             </section>
 
@@ -867,9 +981,9 @@ const Presenter = () => {
                   <button className="idle-copy-btn" onClick={async () => {
                     const link = `${window.location.origin}/client?session=${sessionId}`;
                     try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) { 
-                      // e = new Error('Clipboard API not available');
-                      console.error(e.message);
-                    }
+                      console.error('Clipboard write failed', e);
+                      setSessionMessage('Clipboard unavailable - copy URL from address bar');
+                     }
                   }}>
                     <IconLink /> {votdCopied ? 'Copied!' : 'Copy Client Link'}
                   </button>
