@@ -10,9 +10,9 @@ function Client() {
     currentSegment: 0,
     totalSegments: 0,
     theme: {
-      background_url: "url('https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D')",
-      font_family: "serif",
-      font_size: "4rem",
+      background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Salt%20Lake%20Temple%20UT2.jpg')",
+      font_family: "'Cormorant Garamond', Georgia, serif",
+      font_size: "4.1rem",
       layout: "centered"
     }
   });
