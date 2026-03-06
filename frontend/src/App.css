@@ -719,15 +719,15 @@ button,
 }
 
 .presenter-container--light {
-  --obsidian: #ece6d8;
-  --surface: #f7f2e8;
-  --surface-2: #efe7d8;
-  --surface-3: #e6dcc9;
-  --text-primary: #2f291d;
-  --text-secondary: #4a4030;
-  --text-dim: #7f745f;
-  --gold-border: rgba(156, 120, 26, 0.35);
-  --gold-dim: rgba(156, 120, 26, 0.1);
+  --obsidian: #f6f4ee;
+  --surface: #ffffff;
+  --surface-2: #f5f1e8;
+  --surface-3: #eae3d4;
+  --text-primary: #1f1a12;
+  --text-secondary: #3a2f20;
+  --text-dim: #625645;
+  --gold-border: rgba(120, 88, 18, 0.42);
+  --gold-dim: rgba(120, 88, 18, 0.12);
 }
 
 .presenter-container--dark {
