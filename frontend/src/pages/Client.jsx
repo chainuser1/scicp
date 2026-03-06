@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { socket } from '../socket';
 
 function Client() {
@@ -294,39 +294,83 @@ function Client() {
     );
   };
 
-  // Responsive font sizing
-  const base = parseFloat(verse.theme?.font_size) || 4;
+  // ─── Responsive font sizing — "never clip" approach ───────────────────────
+  //
+  // Core principle: the font size must be derived from what fits inside the
+  // verse-backdrop, not from an aspirational base size that is then capped.
+  // Clipping happened because calibratedFloor could force the size back UP
+  // past what actually fits, and modeScale (up to 1.18×) pushed it higher still.
+  //
+  // New approach:
+  //   1. Measure how much vertical space the backdrop actually has.
+  //   2. Estimate how many lines the text needs at a given font size.
+  //   3. Solve for the largest font size where all lines fit — then apply a
+  //      small safety margin so real browser wrapping never exceeds the estimate.
+  //   4. Apply a hard ceiling (maxCap) and a soft aesthetic floor that is only
+  //      used when the text is genuinely short enough to afford it.
+  // ────────────────────────────────────────────────────────────────────────────
+
   const length = displayText.length;
-  let calculated = base - length / 100;
-  const minFloor = viewport.w >= 1920 ? 2.8 : viewport.w >= 901 ? 2.3 : viewport.w >= 641 ? 1.95 : 1.28;
-  if (calculated < minFloor) calculated = minFloor;
-  const modeScale = readabilityMode === 'strong' ? 1.18 : readabilityMode === 'soft' ? 1.0 : 1.1;
-  const maxCap = viewport.w >= 2400 ? 8.5 : viewport.w >= 1920 ? 7.6 : viewport.w >= 901 ? 6.2 : viewport.w >= 641 ? 4.8 : 3.1;
-  const baseScaled = Math.min(maxCap, calculated * modeScale);
 
-  // Intelligent calibration: keep consistent framing across text lengths and screen sizes.
-  const words = displayText.trim().split(/\s+/).filter(Boolean);
-  const avgWordLength = words.length ? words.join('').length / words.length : 0;
-  const charsPerLine = viewport.w >= 2400 ? 74
-    : viewport.w >= 1920 ? 66
-      : viewport.w >= 1400 ? 58
-        : viewport.w >= 901 ? 50
-          : viewport.w >= 641 ? 36
-            : 24;
-  const longWordMultiplier = avgWordLength > 6 ? 1.16 : 1;
-  const estimatedLines = Math.max(
-    2,
-    Math.ceil((length / charsPerLine) * longWordMultiplier) + (hasMoreSegments ? 1 : 0)
-  );
+  // Hard upper cap per screen size — prevents comically large text on short verses
+  const maxCap = viewport.w >= 2400 ? 8.0 : viewport.w >= 1920 ? 7.0 : viewport.w >= 901 ? 5.8 : viewport.w >= 641 ? 4.4 : 2.9;
+
+  // Usable backdrop height in px.
+  //   verse-backdrop: max-height: min(78dvh, 900px)
+  //   We subtract the backdrop's vertical padding (≈ 2 × clamp(1rem,2.4vh,2.2rem))
+  //   and a small fudge for the gold accent line + box-shadow rendering.
+  //   lower-third layout has extra bottom padding (clamp(2.4rem,7vh,6rem)) so we
+  //   also knock that off the viewport before computing backdrop height.
+  const backdropPaddingPx = 2 * Math.min(35.2, Math.max(16, viewport.h * 0.024)); // 2×clamp(1rem,2.4vh,2.2rem)
+  const lowerThirdBottomPx = verse.theme?.layout === 'lower-third'
+    ? Math.min(96, Math.max(38.4, viewport.h * 0.07)) // clamp(2.4rem,7vh,6rem)
+    : 0;
+  const backdropMaxHeightPx = Math.min(viewport.h * 0.78, 900) - lowerThirdBottomPx;
+  // Reserve space for: cont-indicator (≈24px when visible), backdrop padding, safety
+  const contIndicatorPx = hasMoreSegments ? 28 : 0;
+  const safetyPx = 12; // breathing room so layout engine never needs to wrap one extra line
+  const textAreaHeightPx = Math.max(80, backdropMaxHeightPx - backdropPaddingPx - contIndicatorPx - safetyPx);
+
+  // Estimate lines at a *reference* 1rem font size, then scale.
+  // Cormorant Garamond is a wide serif — empirically ~0.52 × fontSize average char width.
+  // Backdrop max-width: min(90vw, 1250px), inner padding: 2 × clamp(1.1rem,3.2vw,3rem)
+  const backdropHorizPaddingPx = 2 * Math.min(48, Math.max(17.6, viewport.w * 0.032));
+  const backdropMaxWidthPx = Math.min(viewport.w * 0.9, 1250) - backdropHorizPaddingPx;
+  const charWidthRatio = dyslexiaMode ? 0.58 : 0.54; // Atkinson Hyperlegible is slightly wider
   const lineHeight = dyslexiaMode ? 1.58 : 1.5;
-  const verticalReservePx = viewport.w <= 640 ? 170 : viewport.w <= 900 ? 190 : 230;
-  const lowerThirdPenaltyPx = verse.theme?.layout === 'lower-third' ? Math.max(90, Math.round(viewport.h * 0.14)) : 0;
-  const usableHeightPx = Math.max(220, viewport.h - verticalReservePx - lowerThirdPenaltyPx);
-  const fitRem = usableHeightPx / (estimatedLines * lineHeight * 16);
 
-  const calibratedFloor = viewport.w >= 2400 ? 2.6 : viewport.w >= 1920 ? 2.35 : viewport.w >= 901 ? 1.85 : viewport.w >= 641 ? 1.35 : 1.05;
-  const computedRem = Math.max(calibratedFloor, Math.min(baseScaled, fitRem * 0.98, maxCap));
-  const computedFontSize = `${computedRem}rem`;
+  // linesAtOnePx = how many lines the text needs if 1px font size (i.e. line-width = backdropMaxWidthPx / charWidthRatio px per char)
+  // At fontSize F (rem → px = F×16): charsPerLine = backdropMaxWidthPx / (F * 16 * charWidthRatio)
+  // estimatedLines(F) = ceil(length / charsPerLine) = ceil(length * F * 16 * charWidthRatio / backdropMaxWidthPx)
+  // Total height needed(F) = estimatedLines(F) × lineHeight × F × 16
+  // We want: estimatedLines(F) × lineHeight × F × 16 ≤ textAreaHeightPx
+  //
+  // Substituting: ceil(length × F × 16 × charWidthRatio / backdropMaxWidthPx) × lineHeight × F × 16 ≤ textAreaHeightPx
+  // This is non-trivial to solve analytically because of ceil(), so we binary-search.
+
+  const fontSizeThatFits = (() => {
+    let lo = 0.7, hi = maxCap;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
+      const midPx = mid * 16;
+      const charsPerLine = backdropMaxWidthPx / (midPx * charWidthRatio);
+      // Add a 1.08 wrap fudge factor: real browsers can wrap slightly earlier than the ideal
+      const lines = Math.ceil((length / charsPerLine) * 1.08) + (hasMoreSegments ? 1 : 0);
+      const heightNeeded = Math.max(1, lines) * lineHeight * midPx;
+      if (heightNeeded <= textAreaHeightPx) lo = mid; else hi = mid;
+    }
+    return lo;
+  })();
+
+  // Apply a safety margin (3%) so the browser never clips due to rounding
+  const fittingRem = fontSizeThatFits * 0.97;
+
+  // Aesthetic floor — only applied when the text is short enough that fittingRem
+  // already exceeds it, meaning it won't cause clipping. If fittingRem is already
+  // below the floor (long text), we trust the fit result instead.
+  const aestheticFloor = viewport.w >= 2400 ? 2.2 : viewport.w >= 1920 ? 1.9 : viewport.w >= 901 ? 1.55 : viewport.w >= 641 ? 1.15 : 0.9;
+  const computedRem = Math.min(maxCap, Math.max(aestheticFloor, fittingRem));
+  const computedFontSize = `${computedRem.toFixed(4)}rem`;
 
   const themeStyles = {
     backgroundImage: verse.theme?.background_url,

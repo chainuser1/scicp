@@ -83,6 +83,23 @@ const IconInfo = () => (
   </svg>
 );
 
+const IconBolt = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </svg>
+);
+const IconLink = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>
+);
+const IconCheck = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+);
+
 /* ─── Reusable components ─── */
 
 const HdrBtn = ({ onClick, active, children, label, title }) => (
@@ -137,6 +154,13 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
   );
 };
 
+/* ─── Quick-topic chips shown in the idle state ─── */
+const QUICK_TOPICS = [
+  'faith', 'atonement', 'prayer', 'hope', 'charity',
+  'repentance', 'grace', 'service', 'covenant', 'eternal life',
+  'holy ghost', 'resurrection', 'obedience', 'trials', 'gratitude',
+];
+
 /* ─── Main component ─── */
 const Presenter = () => {
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
@@ -183,6 +207,8 @@ const Presenter = () => {
   const [sessionInput, setSessionInput]     = useState('');
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
+  const [verseOfDay, setVerseOfDay]         = useState(null);
+  const [votdCopied, setVotdCopied]         = useState(false);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -203,6 +229,13 @@ const Presenter = () => {
     document.title = 'Presenter | Scriptures in View';
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/verse/of-the-day`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data && data.verse_id) setVerseOfDay(data); })
+      .catch(() => {}); // silently ignore — idle state degrades gracefully
   }, []);
 
   const requestCreateSession = () => {
@@ -507,6 +540,14 @@ const Presenter = () => {
 
   const hasSegments = liveVerse?.segments?.length > 1;
   const totalPages  = Math.ceil(results.length / PAGE_SIZE);
+  const isIdle      = !staged && !liveVerse;
+
+  const launchTopic = (topic) => {
+    setQuery(topic);
+    emitWithSession('search', { query: topic });
+    setDrawerTab('search');
+    setDrawerOpen(true);
+  };
   const presenterThemeClass = currentTheme === themes.dark
     ? 'presenter-container--dark'
     : 'presenter-container--light';
@@ -773,6 +814,114 @@ const Presenter = () => {
           ════════════════════════════════════════ */}
       <main className="main-panel">
 
+        {/* ══ IDLE WELCOME STATE ══════════════════════════════════
+            Shown only when nothing is staged or live yet.
+            ═══════════════════════════════════════════════════════ */}
+        {isIdle && (
+          <div className="idle-state">
+
+            {/* ── Verse of the Day ───────────────────────────── */}
+            <section className="card idle-votd">
+              <div className="card-header">
+                <span className="card-label">✦ Verse of the Day</span>
+                <span className="card-hint">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+              </div>
+              {verseOfDay ? (
+                <>
+                  <p className="votd-text">"{verseOfDay.scripture_text}"</p>
+                  <div className="votd-footer">
+                    <span className="votd-ref">— {verseOfDay.book_title} {verseOfDay.chapter_number}:{verseOfDay.verse_number}</span>
+                    <div className="votd-actions">
+                      <button className="votd-btn" title="Stage this verse" onClick={() => {
+                        setStaged({ ...verseOfDay, theme: currentTheme });
+                      }}>Stage</button>
+                      <button className="votd-btn votd-btn--live" title="Go live with this verse" onClick={() => {
+                        goLiveDirectly({ ...verseOfDay, theme: currentTheme });
+                      }}>● Go Live</button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="votd-loading">Loading verse…</p>
+              )}
+            </section>
+
+            {/* ── Two-column row: Session status + Ready checklist ── */}
+            <div className="idle-grid">
+
+              {/* Session card */}
+              <section className="card idle-session">
+                <div className="card-header">
+                  <span className="card-label">⬡ Session</span>
+                  <span className={`idle-conn-dot idle-conn-dot--${connectionState}`} title={connectionState} />
+                </div>
+                <div className="idle-session-id">
+                  {sessionId || '—'}
+                </div>
+                <p className="idle-session-hint">
+                  {sessionId
+                    ? 'Share this code or copy the client link for audience devices'
+                    : sessionMessage}
+                </p>
+                {sessionId && (
+                  <button className="idle-copy-btn" onClick={async () => {
+                    const link = `${window.location.origin}/client?session=${sessionId}`;
+                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch {}
+                  }}>
+                    <IconLink /> {votdCopied ? 'Copied!' : 'Copy Client Link'}
+                  </button>
+                )}
+              </section>
+
+              {/* Ready checklist card */}
+              <section className="card idle-checklist">
+                <div className="card-header">
+                  <span className="card-label">◈ Ready Check</span>
+                </div>
+                <ul className="idle-checks">
+                  <li className={`idle-check ${connectionState === 'connected' ? 'idle-check--ok' : 'idle-check--wait'}`}>
+                    <span className="idle-check-icon">{connectionState === 'connected' ? <IconCheck /> : '○'}</span>
+                    <span>Server connected</span>
+                  </li>
+                  <li className={`idle-check ${sessionId ? 'idle-check--ok' : 'idle-check--wait'}`}>
+                    <span className="idle-check-icon">{sessionId ? <IconCheck /> : '○'}</span>
+                    <span>Session active</span>
+                  </li>
+                  <li className="idle-check idle-check--tip">
+                    <span className="idle-check-icon"><IconBolt /></span>
+                    <span>Search a verse to stage it</span>
+                  </li>
+                  <li className="idle-check idle-check--tip">
+                    <span className="idle-check-icon"><IconBolt /></span>
+                    <span>Hit ● Go Live to project</span>
+                  </li>
+                </ul>
+              </section>
+
+            </div>
+
+            {/* ── Quick Topics ───────────────────────────────── */}
+            <section className="card idle-topics">
+              <div className="card-header">
+                <span className="card-label">⚡ Quick Topics</span>
+                <span className="card-hint">tap to search instantly</span>
+              </div>
+              <div className="idle-topic-chips">
+                {QUICK_TOPICS.map(topic => (
+                  <button
+                    key={topic}
+                    className="idle-chip"
+                    onClick={() => launchTopic(topic)}
+                  >
+                    {topic}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+          </div>
+        )}
+
         {/* ── Staged verse card ── */}
         {staged && (
           <section className="card card--staged">
@@ -839,11 +988,6 @@ const Presenter = () => {
           <div className="theme-buttons">
             <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
             <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
-            {/*
-            {savedThemes.map(t => (
-              <button key={t.id} className={`theme-btn saved${currentTheme === t.data ? ' active' : ''}`} onClick={() => handleThemeChange(t.data)}>{t.name}</button>
-            ))}
-            */}
           </div>
           <div className="theme-inputs">
             <div className="theme-control-group">
@@ -857,25 +1001,6 @@ const Presenter = () => {
                 }}>Apply</button>
               </div>
             </div>
-            {/*
-            <div className="theme-control-group">
-              <label htmlFor="theme-name">Save Current Theme</label>
-              <div className="input-group">
-                <input id="theme-name" type="text" placeholder="e.g., Christmas 2025" value={newThemeName} onChange={e => setNewThemeName(e.target.value)} />
-                <button className="control-button" onClick={() => {
-                  if (!newThemeName) return;
-                  fetch(`${API_URL}/themes`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: newThemeName, data: currentTheme }),
-                  })
-                    .then(r => r.json())
-                    .then(t => { setSavedThemes(s => [...s, t]); setNewThemeName(''); })
-                    .catch(err => console.error('save theme failed', err));
-                }}>Save</button>
-              </div>
-            </div>
-            */}
           </div>
         </section>
 
