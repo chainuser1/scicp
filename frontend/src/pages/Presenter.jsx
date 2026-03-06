@@ -866,7 +866,10 @@ const Presenter = () => {
                 {sessionId && (
                   <button className="idle-copy-btn" onClick={async () => {
                     const link = `${window.location.origin}/client?session=${sessionId}`;
-                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch {}
+                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) { 
+                      // e = new Error('Clipboard API not available');
+                      console.error(e.message);
+                    }
                   }}>
                     <IconLink /> {votdCopied ? 'Copied!' : 'Copy Client Link'}
                   </button>
