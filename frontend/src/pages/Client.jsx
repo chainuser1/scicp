@@ -67,22 +67,13 @@ function Client() {
     }
   });
   const [animating, setAnimating] = useState(false);
+  const [entering, setEntering] = useState(false);
   const [highlightedText, setHighlightedText] = useState('');
   const [sessionInput, setSessionInput] = useState(normalizeSessionId(urlSession));
   const [joinedSession, setJoinedSession] = useState('');
   const [sessionMessage, setSessionMessage] = useState(urlSession ? 'Joining session...' : 'Enter session code');
   const [connectionState, setConnectionState] = useState('connecting');
-  // Use visualViewport when available — it tracks the *actual* visible area
-  // after browser chrome (address bar, keyboard, system UI) is accounted for.
-  // Falls back to window.inner* on browsers that don't support it.
-  const getVp = () => {
-    const vv = window.visualViewport;
-    return {
-      w: vv ? vv.width  : window.innerWidth,
-      h: vv ? vv.height : window.innerHeight,
-    };
-  };
-  const [viewport, setViewport] = useState(getVp);
+  const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   const [readabilityMode, setReadabilityMode] = useState('balanced');
   const [dyslexiaMode, setDyslexiaMode] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -101,25 +92,11 @@ function Client() {
   }, [sessionInput]);
 
   useEffect(() => {
-    // Listen on both window resize AND visualViewport resize/scroll.
-    // visualViewport fires when: browser address bar shows/hides, soft keyboard
-    // appears/disappears, browser zoom changes, or the window is resized.
-    // All of these change the actual available rendering area.
-    const update = () => setViewport(getVp());
-    window.addEventListener('resize', update, { passive: true });
-    window.addEventListener('orientationchange', update, { passive: true });
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', update);
-      window.visualViewport.addEventListener('scroll', update);
-    }
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('orientationchange', update);
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', update);
-        window.visualViewport.removeEventListener('scroll', update);
-      }
+    const handleResize = () => {
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
     };
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   useEffect(() => {
@@ -153,19 +130,24 @@ function Client() {
   useEffect(() => {
     const handleVerse = (data) => {
       setAnimating(true);
+      setEntering(false);
       setTimeout(() => {
         setVerse(data);
         setLabelKey((k) => k + 1);
         setAnimating(false);
-      }, 600);
+        // Tiny delay so the DOM has painted the new content before we trigger entrance
+        requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
+      }, 520);
     };
 
     const handleTheme = (theme) => {
       setAnimating(true);
+      setEntering(false);
       setTimeout(() => {
         setVerse((v) => ({ ...v, theme }));
         setAnimating(false);
-      }, 600);
+        requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
+      }, 520);
     };
 
     const handleHighlight = (text) => {
@@ -318,92 +300,81 @@ function Client() {
     );
   };
 
-  // ─── Responsive font sizing — "never clip" approach v2 ──────────────────────
+  // ─── Responsive font sizing — "never clip" approach ───────────────────────
   //
-  // Design contract:
-  //   • ALL text is always fully visible — no overflow, no clipping, ever.
-  //   • Recalibrates on every viewport change including browser chrome
-  //     appearing/disappearing (handled by visualViewport listener above).
-  //   • Font changes are subtle and continuous — no jarring jumps.
-  //   • The aesthetic floor is strictly bounded: it can NEVER produce a size
-  //     larger than fittingRem. If the text is long, the fit wins.
+  // Core principle: the font size must be derived from what fits inside the
+  // verse-backdrop, not from an aspirational base size that is then capped.
+  // Clipping happened because calibratedFloor could force the size back UP
+  // past what actually fits, and modeScale (up to 1.18×) pushed it higher still.
   //
-  // Geometry we must respect (all values must match App.css exactly):
-  //   verse-backdrop max-height : min(82dvh, 960px)   ← CSS value
-  //   verse-backdrop padding    : clamp(1rem, 2.4vh, 2.2rem) top + bottom
-  //   verse-backdrop max-width  : min(90vw, 1250px)
-  //   verse-backdrop horiz pad  : clamp(1.1rem, 3.2vw, 3rem) left + right
-  //   lower-third bottom offset : clamp(2.4rem, 7vh, 6rem)
-  //   cont-indicator height     : ~28px when visible
+  // New approach:
+  //   1. Measure how much vertical space the backdrop actually has.
+  //   2. Estimate how many lines the text needs at a given font size.
+  //   3. Solve for the largest font size where all lines fit — then apply a
+  //      small safety margin so real browser wrapping never exceeds the estimate.
+  //   4. Apply a hard ceiling (maxCap) and a soft aesthetic floor that is only
+  //      used when the text is genuinely short enough to afford it.
   // ────────────────────────────────────────────────────────────────────────────
 
   const length = displayText.length;
-  const vw = viewport.w;
-  const vh = viewport.h;
 
-  // Hard upper cap — prevents absurdly large text on a single short word
-  const maxCap = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
+  // Hard upper cap per screen size — prevents comically large text on short verses
+  const maxCap = viewport.w >= 2400 ? 8.0 : viewport.w >= 1920 ? 7.0 : viewport.w >= 901 ? 5.8 : viewport.w >= 641 ? 4.4 : 2.9;
 
-  // ── Step 1: Compute available TEXT area height in px ──────────────────────
-  // Start from the backdrop's CSS max-height constraint
-  const backdropMaxH = Math.min(vh * 0.82, 960);
-
-  // Subtract backdrop vertical padding: 2 × clamp(1rem, 2.4vh, 2.2rem)
-  const backdropVPad = 2 * Math.min(35.2, Math.max(16, vh * 0.024));
-
-  // lower-third layout reserves extra space at the bottom
-  const lowerThirdPad = verse.theme?.layout === 'lower-third'
-    ? Math.min(96, Math.max(38.4, vh * 0.07))
+  // Usable backdrop height in px.
+  //   verse-backdrop: max-height: min(78dvh, 900px)
+  //   We subtract the backdrop's vertical padding (≈ 2 × clamp(1rem,2.4vh,2.2rem))
+  //   and a small fudge for the gold accent line + box-shadow rendering.
+  //   lower-third layout has extra bottom padding (clamp(2.4rem,7vh,6rem)) so we
+  //   also knock that off the viewport before computing backdrop height.
+  const backdropPaddingPx = 2 * Math.min(35.2, Math.max(16, viewport.h * 0.024)); // 2×clamp(1rem,2.4vh,2.2rem)
+  const lowerThirdBottomPx = verse.theme?.layout === 'lower-third'
+    ? Math.min(96, Math.max(38.4, viewport.h * 0.07)) // clamp(2.4rem,7vh,6rem)
     : 0;
+  const backdropMaxHeightPx = Math.min(viewport.h * 0.78, 900) - lowerThirdBottomPx;
+  // Reserve space for: cont-indicator (≈24px when visible), backdrop padding, safety
+  const contIndicatorPx = hasMoreSegments ? 28 : 0;
+  const safetyPx = 12; // breathing room so layout engine never needs to wrap one extra line
+  const textAreaHeightPx = Math.max(80, backdropMaxHeightPx - backdropPaddingPx - contIndicatorPx - safetyPx);
 
-  // cont-indicator row height when visible
-  const contH = hasMoreSegments ? 30 : 0;
+  // Estimate lines at a *reference* 1rem font size, then scale.
+  // Cormorant Garamond is a wide serif — empirically ~0.52 × fontSize average char width.
+  // Backdrop max-width: min(90vw, 1250px), inner padding: 2 × clamp(1.1rem,3.2vw,3rem)
+  const backdropHorizPaddingPx = 2 * Math.min(48, Math.max(17.6, viewport.w * 0.032));
+  const backdropMaxWidthPx = Math.min(viewport.w * 0.9, 1250) - backdropHorizPaddingPx;
+  const charWidthRatio = dyslexiaMode ? 0.58 : 0.54; // Atkinson Hyperlegible is slightly wider
+  const lineHeight = dyslexiaMode ? 1.58 : 1.5;
 
-  // Extra safety buffer — absorbs rounding errors, sub-pixel borders, and the
-  // gold accent line (1px). We use 18px instead of 12px for a more resilient margin.
-  const safetyBuffer = 18;
-
-  const textAreaH = Math.max(60, backdropMaxH - backdropVPad - lowerThirdPad - contH - safetyBuffer);
-
-  // ── Step 2: Compute available TEXT area width in px ───────────────────────
-  const backdropW = Math.min(vw * 0.9, vw >= 901 ? 1280 : 1250);
-  const backdropHPad = 2 * Math.min(48, Math.max(17.6, vw * 0.032));
-  const textAreaW = Math.max(120, backdropW - backdropHPad);
-
-  // ── Step 3: Binary-search for the largest font size that fits ─────────────
-  // Character width ratio for Cormorant Garamond (proportional serif).
-  // We use 0.56 (slightly more conservative than the 0.54 used previously)
-  // to account for wider characters like W, M, and punctuation clusters.
-  const charW = dyslexiaMode ? 0.60 : 0.56;
-  const lh    = dyslexiaMode ? 1.58 : 1.5;
-
-  // Wrap fudge: real browsers wrap ~12% earlier than ideal due to word boundaries,
-  // kerning, and sub-pixel rounding. 1.12 is more conservative than the old 1.08.
-  const WRAP_FUDGE = 1.12;
+  // linesAtOnePx = how many lines the text needs if 1px font size (i.e. line-width = backdropMaxWidthPx / charWidthRatio px per char)
+  // At fontSize F (rem → px = F×16): charsPerLine = backdropMaxWidthPx / (F * 16 * charWidthRatio)
+  // estimatedLines(F) = ceil(length / charsPerLine) = ceil(length * F * 16 * charWidthRatio / backdropMaxWidthPx)
+  // Total height needed(F) = estimatedLines(F) × lineHeight × F × 16
+  // We want: estimatedLines(F) × lineHeight × F × 16 ≤ textAreaHeightPx
+  //
+  // Substituting: ceil(length × F × 16 × charWidthRatio / backdropMaxWidthPx) × lineHeight × F × 16 ≤ textAreaHeightPx
+  // This is non-trivial to solve analytically because of ceil(), so we binary-search.
 
   const fontSizeThatFits = (() => {
-    let lo = 0.6, hi = maxCap;
-    for (let i = 0; i < 32; i++) {        // 32 iterations → precision < 0.0001rem
-      const mid   = (lo + hi) / 2;
+    let lo = 0.7, hi = maxCap;
+    for (let i = 0; i < 28; i++) {
+      const mid = (lo + hi) / 2;
       const midPx = mid * 16;
-      const charsPerLine = textAreaW / (midPx * charW);
-      const lines = Math.ceil((length / charsPerLine) * WRAP_FUDGE) + (hasMoreSegments ? 1 : 0);
-      const heightNeeded = Math.max(1, lines) * lh * midPx;
-      if (heightNeeded <= textAreaH) lo = mid; else hi = mid;
+      const charsPerLine = backdropMaxWidthPx / (midPx * charWidthRatio);
+      // Add a 1.08 wrap fudge factor: real browsers can wrap slightly earlier than the ideal
+      const lines = Math.ceil((length / charsPerLine) * 1.08) + (hasMoreSegments ? 1 : 0);
+      const heightNeeded = Math.max(1, lines) * lineHeight * midPx;
+      if (heightNeeded <= textAreaHeightPx) lo = mid; else hi = mid;
     }
     return lo;
   })();
 
-  // ── Step 4: Apply safety margin then bounded aesthetic floor ──────────────
-  // 4% safety margin (up from 3%) — extra protection at boundary conditions
-  // like orientation change mid-render or browser chrome animating in.
-  const fittingRem = fontSizeThatFits * 0.96;
+  // Apply a safety margin (3%) so the browser never clips due to rounding
+  const fittingRem = fontSizeThatFits * 0.97;
 
-  // The floor is capped at fittingRem so long text can NEVER be pushed up.
-  // Short text gets a gentle boost toward comfortable reading sizes.
-  const rawFloor = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.85;
-  const aestheticFloor = Math.min(rawFloor, fittingRem);
-
+  // Aesthetic floor — only applied when the text is short enough that fittingRem
+  // already exceeds it, meaning it won't cause clipping. If fittingRem is already
+  // below the floor (long text), we trust the fit result instead.
+  const aestheticFloor = viewport.w >= 2400 ? 2.2 : viewport.w >= 1920 ? 1.9 : viewport.w >= 901 ? 1.55 : viewport.w >= 641 ? 1.15 : 0.9;
   const computedRem = Math.min(maxCap, Math.max(aestheticFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(4)}rem`;
 
@@ -415,30 +386,30 @@ function Client() {
 
   return (
     <div
-      className={`client-view ${verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark'} readability-${readabilityMode}${dyslexiaMode ? ' readability-dyslexia' : ''}${autoReducedMotion ? ' reduce-motion-auto' : ''} ${verse.theme?.layout || 'centered'} ${animating && !autoReducedMotion ? 'fade' : ''}`}
+      className={`client-view ${verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark'} readability-${readabilityMode}${dyslexiaMode ? ' readability-dyslexia' : ''}${autoReducedMotion ? ' reduce-motion-auto' : ''} ${verse.theme?.layout || 'centered'}${animating && !autoReducedMotion ? ' verse-exit' : ''}${entering && !autoReducedMotion ? ' verse-enter' : ''}`}
       style={themeStyles}
     >
-      {/* Verse reference — Cinzel label, re-animates on each verse change */}
-      {verse.book_title && verse.chapter_number && verse.verse_number && (
-        <span key={labelKey} className="verse-title-top-left">
-          {verse.book_title} {verse.chapter_number}:{verse.verse_number}
-        </span>
-      )}
-      {joinedSession && (
-        <span className="session-id-top-right">
-          Session {joinedSession}
-        </span>
-      )}
-
       <div className="verse-content">
-        {/* Frosted backdrop wraps the scripture text */}
         <div className="verse-backdrop">
           <p>{renderHighlightedText()}</p>
+          {/* [design] Verse reference as a ruled caption — typeset below the word,
+              as it appears in every printed scripture. Right-aligned, composed,
+              never floating over the background. */}
+          {verse.book_title && verse.chapter_number && verse.verse_number && (
+            <div key={labelKey} className="verse-caption">
+              {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
+            </div>
+          )}
           {hasMoreSegments && (
-            <div className="cont-indicator">continues ›</div>
+            <div className="cont-indicator">›</div>
           )}
         </div>
       </div>
+
+      {/* Session watermark — fixed bottom-right, opacity 0.4, operator-only */}
+      {joinedSession && (
+        <span className="session-watermark">{joinedSession}</span>
+      )}
     </div>
   );
 }
