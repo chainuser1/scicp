@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 
 export default function Footer() {
   return (
-    <footer className="home-footer">
+    <footer className="home-footer" style={{padding: '0.75rem 0'}}>
       <div className="home-footer-brand">
         <svg className="home-footer-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <circle cx="16" cy="16" r="15" stroke="#c9a84c" strokeWidth="0.8" />
@@ -13,8 +13,8 @@ export default function Footer() {
         <span className="home-footer-name">Scripture Projector</span>
       </div>
 
-      <nav className="home-footer-links">
-        <ul>
+      <nav className="home-footer-links" style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.3rem', fontSize: '0.68rem'}}>
+        <ul style={{display: 'flex', flexWrap: 'wrap', gap: '0.3rem', margin: 0, padding: 0, listStyle: 'none'}}>
           <li><Link to="/">Home</Link></li>
           <li><Link to="/presenter">Chapel Control</Link></li>
           <li><Link to="/client">Sacred Display</Link></li>
@@ -25,7 +25,7 @@ export default function Footer() {
         </ul>
       </nav>
 
-      <div className="home-footer-credit">
+      <div className="home-footer-credit" style={{marginTop: '0.5rem', fontSize: '0.68rem'}}>
         <span>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by Dagami Ward Dev Team.</span>
       </div>
     </footer>
