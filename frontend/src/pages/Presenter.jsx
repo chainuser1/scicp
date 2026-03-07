@@ -6,14 +6,14 @@ const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3
 
 const themes = {
   light: {
-    background_url: "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')",
+    background_url: "url('https://dg.imgix.net/why-memorize-scripture-en/landscape/why-memorize-scripture-9c50cf27ce0decfef9f72808328627ac.jpg?ts=1530629306&ixlib=rails-4.3.1&auto=format%2Ccompress&fit=min&w=700&h=394&dpr=2&ch=Width%2CDPR')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.1rem",
     layout: "centered",
     tone: "light"
   },
   dark: {
-    background_url: "url('https://commons.wikimedia.org/wiki/Special:FilePath/Christus%20hand%20detail%20temple%20square.jpg')",
+    background_url: "url('https://www.churchofjesuschrist.org/imgs/12e3b576ad7921a3bc2e36a70150958981e383c1/full/1280%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
     layout: "lower-third",
