@@ -795,6 +795,9 @@ button,
 /* Caption aligns left in lower-third to match the left-bar anchor */
 .client-view.lower-third .verse-caption {
   text-align: left;
+  /* Slightly smaller in lower-third since the bar is already an anchor,
+     but still comfortably readable at distance */
+  font-size: clamp(0.72rem, 1.05vw, 1.1rem);
 }
 
 /* ─── Verse content wrapper ─── */
@@ -915,26 +918,42 @@ button,
 }
 
 /* ─── Verse reference caption ─── */
+/*
+ * Design intent: the reference ("Romans 1:2") must be readable from the
+ * back row without competing with the scripture text. Key decisions:
+ *
+ *  • Size bumped to clamp(0.78rem, 1.15vw, 1.2rem) — roughly 40% larger
+ *    than before so it registers at distance without a conscious effort.
+ *  • opacity raised to 1 (from 0.92) — no dimming on something this important.
+ *  • text-align: center — after reading the verse the eye naturally rests
+ *    in the middle; a right-tucked reference is easy to miss entirely.
+ *  • Separator line made slightly more prominent: 1.5px, stronger alpha.
+ *  • letter-spacing tightened slightly (0.18em) so the characters don't
+ *    feel stretched thin at the bigger size.
+ *  • A second warm text-shadow layer gives extra pop on busy backgrounds.
+ */
 .verse-caption {
   width: 100%;
-  margin-top: clamp(0.55rem, 1.4vh, 1.1rem);
-  padding-top: clamp(0.28rem, 0.6vh, 0.52rem);
-  border-top: 1px solid var(--client-accent-line);
-  text-align: right;
+  margin-top: clamp(0.6rem, 1.5vh, 1.2rem);
+  padding-top: clamp(0.32rem, 0.7vh, 0.6rem);
+  border-top: 1.5px solid var(--client-accent-line);
+  text-align: center;
   font-family: 'Cinzel', serif;
-  font-size: clamp(0.56rem, 0.82vw, 0.9rem);
+  font-size: clamp(0.78rem, 1.15vw, 1.2rem);
   font-weight: 600;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--client-accent-strong);
-  text-shadow: var(--client-caption-text-shadow);
+  text-shadow:
+    var(--client-caption-text-shadow),
+    0 0 28px var(--client-accent-glow);
   opacity: 0;
-  animation: caption-arrive 0.65s 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: caption-arrive 0.7s 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 @keyframes caption-arrive {
   from { opacity: 0; transform: translateY(5px); }
-  to   { opacity: 0.92; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ─── Session watermark ─── */
@@ -1016,7 +1035,7 @@ button,
 }
 .client-view.reduce-motion-auto .verse-caption {
   animation: none !important;
-  opacity: 0.92 !important;
+  opacity: 1 !important;
   transform: none !important;
 }
 .client-view.reduce-motion-auto .highlight-yellow {
@@ -1082,10 +1101,10 @@ button,
     letter-spacing: 0.01em;
   }
   .verse-caption {
-    font-size: clamp(0.44rem, 1.6vw, 0.58rem);
-    letter-spacing: 0.14em;
-    margin-top: 0.38rem;
-    padding-top: 0.22rem;
+    font-size: clamp(0.6rem, 2.2vw, 0.78rem);
+    letter-spacing: 0.12em;
+    margin-top: 0.42rem;
+    padding-top: 0.26rem;
   }
   .session-watermark {
     font-size: clamp(0.3rem, 1.05vw, 0.44rem);
@@ -1119,10 +1138,10 @@ button,
   .client-view p { line-height: 1.7; }
   .verse-backdrop { max-width: min(78vw, 1600px); padding: 4rem 6rem; }
   .verse-caption {
-    font-size: clamp(0.85rem, 1vw, 1.3rem);
-    letter-spacing: 0.26em;
-    margin-top: 1.4rem;
-    padding-top: 0.9rem;
+    font-size: clamp(1.05rem, 1.2vw, 1.6rem);
+    letter-spacing: 0.22em;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
   }
   .session-watermark { font-size: clamp(0.52rem, 0.62vw, 0.82rem); bottom: 2rem; right: 3rem; }
   .cont-indicator { font-size: clamp(0.8rem, 0.92vw, 1.15rem); }
@@ -1156,6 +1175,13 @@ button,
 .presenter-container > footer {
   margin-top: auto;
   width: 100%;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-top: 1px solid var(--gold-border);
+  padding: 0.65rem 0;
+  text-align: center;
 }
 
 .presenter-container--light {

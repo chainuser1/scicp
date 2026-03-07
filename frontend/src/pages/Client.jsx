@@ -257,31 +257,35 @@ function Client() {
   useEffect(() => {
     const handleVerse = (data) => {
       setHighlightedText('');
-      setAnimating(true);
       setEntering(false);
+      setAnimating(true);
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
+      // Wait for exit transition to fully complete (480ms matches CSS exit duration)
+      // before swapping content, so the audience never sees a mid-fade text change.
       setTimeout(() => {
         setVerse(data);
         setIsIdle(false);
         setLabelKey((k) => k + 1);
         setAnimating(false);
+        // Two rAF frames ensure the DOM has committed the new text before
+        // the enter animation class is applied — prevents a single-frame flash.
         const doEnter = () =>
           requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
         if (fontsReady) doEnter();
         else waitForFonts().then(doEnter);
-      }, 520);
+      }, 480);
     };
 
     const handleTheme = (theme) => {
-      setAnimating(true);
       setEntering(false);
+      setAnimating(true);
       if (theme.background_url) crossfadeBackground(theme.background_url);
       setTimeout(() => {
         setVerse((v) => ({ ...v, theme }));
         setAnimating(false);
         requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
-      }, 520);
+      }, 480);
     };
 
     const handleHighlight = ({ text }) => setHighlightedText(text || '');
@@ -590,11 +594,11 @@ function Client() {
       )}
 
       {!isIdle && (
-        <div className="verse-content">
+        <div className="verse-content" key={labelKey}>
           <div className="verse-backdrop">
             <p>{renderHighlightedText()}</p>
             {verse.book_title && verse.chapter_number && verse.verse_number && (
-              <div key={labelKey} className="verse-caption">
+              <div className="verse-caption">
                 {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
               </div>
             )}
