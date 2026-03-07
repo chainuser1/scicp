@@ -1,6 +1,5 @@
 import React, { useState, useEffect} from 'react';
 import { socket } from '../socket';
-import Footer from '../components/Footer';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
@@ -1279,7 +1278,20 @@ const Presenter = () => {
         </section>
 
       </main>
-      <Footer />
+      <footer className="presenter-footer">
+        <nav className="presenter-footer-links">
+          <a href="/">Home</a>
+          <a href="/presenter">Chapel Control</a>
+          <a href="/client">Sacred Display</a>
+          <a href="/about">About</a>
+          <a href="/contact">Contact</a>
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Service</a>
+        </nav>
+        <div className="presenter-footer-credit">
+          © {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by Dagami Ward Dev Team.
+        </div>
+      </footer>
 
       {/* QR Scanner Modal — rendered at root level so it overlays everything */}
       {scannerOpen && (
