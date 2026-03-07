@@ -168,6 +168,122 @@ const QUICK_TOPICS = [
   'holy ghost', 'resurrection', 'obedience', 'trials', 'gratitude',
 ];
 
+const IconQr = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+    <rect x="3" y="14" width="7" height="7" rx="1"/>
+    <path d="M14 14h2v2h-2z"/><path d="M18 14h3"/><path d="M14 18h2"/><path d="M18 18h3"/><path d="M20 20v1"/>
+  </svg>
+);
+
+// ─── QR Scanner Modal ─────────────────────────────────────────────────────────
+// Uses the device camera + jsQR (npm) to decode a QR code from the TV screen.
+// Falls back gracefully if camera permission is denied or jsQR is not installed.
+const QrScannerModal = ({ onCode, onClose }) => {
+  const videoRef   = React.useRef(null);
+  const canvasRef  = React.useRef(null);
+  const rafRef     = React.useRef(null);
+  const streamRef  = React.useRef(null);
+  const [error, setError]   = React.useState('');
+  const [status, setStatus] = React.useState('Starting camera…');
+
+  React.useEffect(() => {
+    let active = true;
+
+    const stop = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    };
+
+    const scan = async () => {
+      // Dynamically import jsQR — add "jsqr": "^1.4.0" to frontend/package.json
+      let jsQR;
+      try {
+        const mod = await import('jsqr');
+        jsQR = mod.default || mod;
+      } catch (_e) {
+        if (active) setError('QR scanner not available. Install jsqr: npm install jsqr');
+        return;
+      }
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+      } catch (_e) {
+        if (active) setError('Camera access denied. Please allow camera permission and try again.');
+        return;
+      }
+
+      if (!active) { stream.getTracks().forEach(t => t.stop()); return; }
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+        setStatus('Point at the QR code on the TV…');
+      }
+
+      const tick = () => {
+        if (!active) return;
+        const video  = videoRef.current;
+        const canvas = canvasRef.current;
+        if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+          canvas.width  = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0);
+          const img  = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (code?.data) {
+            // Extract session code from full URL or accept bare code
+            const match = code.data.match(/[?&]session=([A-Z0-9]{4,24})/i);
+            const extracted = match ? match[1].toUpperCase() : code.data.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+            if (extracted.length >= 4) {
+              stop();
+              if (active) onCode(extracted);
+              return;
+            }
+          }
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    scan();
+    return () => { active = false; stop(); };
+  }, [onCode]);
+
+  return (
+    <div className="qr-scanner-backdrop" onClick={onClose}>
+      <div className="qr-scanner-modal" onClick={e => e.stopPropagation()}>
+        <div className="qr-scanner-header">
+          <span className="qr-scanner-title">Scan TV QR Code</span>
+          <button className="qr-scanner-close" onClick={onClose} aria-label="Close scanner">✕</button>
+        </div>
+
+        <div className="qr-scanner-viewport">
+          {error ? (
+            <div className="qr-scanner-error">{error}</div>
+          ) : (
+            <>
+              <video ref={videoRef} className="qr-scanner-video" playsInline muted />
+              <canvas ref={canvasRef} className="qr-scanner-canvas" />
+              {/* Targeting reticle */}
+              <div className="qr-scanner-reticle" aria-hidden="true">
+                <span /><span /><span /><span />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="qr-scanner-status">{error || status}</div>
+      </div>
+    </div>
+  );
+};
+
 /* ─── Main component ─── */
 const Presenter = () => {
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
@@ -217,6 +333,7 @@ const Presenter = () => {
   const [sessionId, setSessionId]           = useState('');
   const [sessionInput, setSessionInput]     = useState('');
   const [tvSessionInput, setTvSessionInput] = useState('');
+  const [scannerOpen, setScannerOpen]       = useState(false);
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
   // Phase 1: viewer count from server so presenter knows how many TVs are live
@@ -353,6 +470,28 @@ const Presenter = () => {
     });
   };
 
+  // Called by QrScannerModal when a valid code is decoded from the camera feed
+  const handleScannedCode = (code) => {
+    setScannerOpen(false);
+    const normalized = normalizeSessionId(code);
+    setTvSessionInput(normalized);
+    // Auto-join immediately — no extra button press needed
+    setSessionMessage('Joining TV session…');
+    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
+      if (response?.ok && response.sessionId) {
+        setSessionId(response.sessionId);
+        setSessionInput(response.sessionId);
+        setTvSessionInput('');
+        setSessionMessage(`Session ${response.sessionId} ready`);
+        setSessionPopover(false);
+        setMobileMenuOpen(false);
+        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
+      } else {
+        setSessionMessage(response?.message || 'TV session not found — check the code');
+      }
+    });
+  };
+
   const leaveSession = () => {
     socket.emit('leave-session', {}, (response) => {
       if (response?.ok) {
@@ -417,10 +556,7 @@ const Presenter = () => {
             setSessionId(response.sessionId);
             setSessionInput(response.sessionId);
             setSessionMessage(`Session ${response.sessionId} ready`);
-            try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { 
-              // ignore storage errors
-              console.log(_e.message);
-            }
+            try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
           } else {
             // Fall through to stored session or new session
             resumeOrCreateSession();
@@ -720,13 +856,24 @@ const Presenter = () => {
                 </div>
                 {/* ── TV / Client-initiated session ───────────────────────
                     The TV (Client) generates its own code. The Presenter
-                    types or scans that code here to join the TV's room.    */}
+                    can scan the QR with their device camera, or type the
+                    code manually.                                          */}
                 <div className="popover-divider" style={{ margin: '0.6rem 0 0.4rem' }} />
                 <div className="popover-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                   <span>📺</span> Join TV Session
                 </div>
                 <div className="session-tv-hint">
-                  Enter the code shown on the TV display, or scan its QR code and paste the code here.
+                  Scan the QR code on the TV screen, or type the session code shown below it.
+                </div>
+                <div className="popover-row">
+                  <button
+                    className="popover-apply qr-scan-btn"
+                    onClick={() => { setScannerOpen(true); setSessionPopover(false); }}
+                    title="Scan QR code from TV"
+                    aria-label="Scan QR code"
+                  >
+                    <IconQr /> Scan QR
+                  </button>
                 </div>
                 <div className="popover-row">
                   <input
@@ -735,10 +882,10 @@ const Presenter = () => {
                     value={tvSessionInput}
                     onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
                     onKeyDown={e => e.key === 'Enter' && joinTvSession()}
-                    placeholder="TV code…"
+                    placeholder="or type TV code…"
                     aria-label="TV session code"
                   />
-                  <button className="popover-apply" onClick={joinTvSession}>Join TV</button>
+                  <button className="popover-apply" onClick={joinTvSession}>Join</button>
                 </div>
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
@@ -868,7 +1015,18 @@ const Presenter = () => {
                   <span>📺</span> Join TV Session
                 </div>
                 <div className="session-tv-hint">
-                  Type the code shown on the TV or paste from QR scan.
+                  Scan the QR code on the TV screen, or type the code shown below it.
+                </div>
+                <div className="popover-row">
+                  <button
+                    className="popover-apply qr-scan-btn"
+                    style={{ width: '100%' }}
+                    onClick={() => { setScannerOpen(true); setMobileMenuOpen(false); }}
+                    title="Scan QR code from TV"
+                    aria-label="Scan QR code"
+                  >
+                    <IconQr /> Scan QR Code
+                  </button>
                 </div>
                 <div className="popover-row">
                   <input
@@ -877,10 +1035,10 @@ const Presenter = () => {
                     value={tvSessionInput}
                     onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
                     onKeyDown={e => e.key === 'Enter' && joinTvSession()}
-                    placeholder="TV code…"
+                    placeholder="or type TV code…"
                     aria-label="TV session code"
                   />
-                  <button className="popover-apply" onClick={joinTvSession}>Join TV</button>
+                  <button className="popover-apply" onClick={joinTvSession}>Join</button>
                 </div>
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
@@ -1118,9 +1276,7 @@ const Presenter = () => {
                       try {
                         await navigator.share({ title: 'Scriptures in View — Client', url: link });
                         setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); return;
-                      } catch (_e) { 
-                        console.error('Share failed', _e);
-                      }
+                      } catch (_e) { /* user cancelled share — fall through to clipboard */ }
                     }
                     try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) {
                       console.error('Clipboard write failed', e);
@@ -1265,6 +1421,14 @@ const Presenter = () => {
 
       </main>
       <Footer />
+
+      {/* QR Scanner Modal — rendered at root level so it overlays everything */}
+      {scannerOpen && (
+        <QrScannerModal
+          onCode={handleScannedCode}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
     </div>
   );
 };
