@@ -172,11 +172,14 @@ button,
     width: 100%;
     text-align: center;
     padding: 0.2rem 0;
+    flex-wrap: wrap;
+    justify-content: center
   }
 
   .home-footer-credit {
-    font-size: 0.55rem;
+    font-size: 0.68rem;
     flex-direction: column;
+    margin-top: 0.5rem;
     gap: 0.1rem;
   }
 }
@@ -345,9 +348,9 @@ button,
 }
 
 .home-footer-credit {
-  font-size: 0.62rem; /* Reduced from 0.7rem */
+  font-size: 0.68rem ;
   line-height: 1.1;
-  margin-top: 0.1rem;
+  margin-top: 0.5rem;
   color: var(--text-dim);
 }
 
@@ -358,12 +361,23 @@ button,
 /* Mobile optimization */
 @media (max-width: 640px) {
   .home-footer-links {
-    gap: 0.3rem;
-    font-size: 0.65rem;
+    gap: 0.25rem;
+    font-size: 0.62rem;
   }
   
   .home-footer-credit {
     font-size: 0.58rem;
+  }
+}
+
+@media (max-width: 480px) { 
+  .home-footer-links {
+    gap: 0.25rem;
+    font-size: 0.5rem;
+  }
+
+  .home-footer-credit {
+    font-size: 0.5rem;
   }
 }
 
