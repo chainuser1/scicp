@@ -124,31 +124,36 @@ function Client() {
   // ─── TV / QR mode state ───────────────────────────────────────────────────
   const [clientSessionId, setClientSessionId]   = useState('');
   const [showQrMode, setShowQrMode]             = useState(!urlSession);
+  // presenterJoined: true only when a *Presenter* has joined our session.
+  // Separate from clientSessionId so the QR screen stays visible while we
+  // own the session but no presenter has connected yet.
+  const [presenterJoined, setPresenterJoined]   = useState(false);
   const [qrDataUrl, setQrDataUrl]               = useState('');
-  const [qrError, setQrError]                   = useState(false);     // npm pkg unavailable
-  const [presenterJoining, setPresenterJoining] = useState(false);     // transition overlay
-  const [publicOrigin, setPublicOrigin]         = useState('');        // from /config endpoint
-  const [sessionExpired, setSessionExpired]     = useState(false);     // auto-regeneration flag
+  const [qrError, setQrError]                   = useState(false);
+  const [presenterJoining, setPresenterJoining] = useState(false);
+  const [publicOrigin, setPublicOrigin]         = useState('');
+  const [sessionExpired, setSessionExpired]     = useState(false);
 
-  const joinedSessionRef = useRef('');
-  const sessionInputRef  = useRef(urlSession);
+  const joinedSessionRef   = useRef('');
+  const sessionInputRef    = useRef(urlSession);
+  const showQrModeRef      = useRef(!urlSession);
+  // Ref mirror of clientSessionId for use inside socket handler closures
+  const clientSessionIdRef = useRef('');
 
-  useEffect(() => { joinedSessionRef.current = joinedSession; }, [joinedSession]);
-  useEffect(() => { sessionInputRef.current = sessionInput; },  [sessionInput]);
+  useEffect(() => { joinedSessionRef.current   = joinedSession;    }, [joinedSession]);
+  useEffect(() => { sessionInputRef.current    = sessionInput;     }, [sessionInput]);
+  useEffect(() => { showQrModeRef.current      = showQrMode;       }, [showQrMode]);
+  useEffect(() => { clientSessionIdRef.current = clientSessionId;  }, [clientSessionId]);
 
   // ─── sessionStorage helpers ───────────────────────────────────────────────
   const getStoredTvSession = () => {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
   };
   const storeTvSession = (id) => {
-    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { 
-      console.warn('Unable to store TV session ID persistently:', _e.message);
-    }
+    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { /* storage unavailable */ }
   };
   const clearStoredTvSession = () => {
-    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { 
-      console.warn('Unable to clear stored TV session ID:', _e.message);
-    }
+    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
   };
 
   // ─── Phase 2: Fetch canonical public origin from /config ─────────────────
@@ -190,6 +195,7 @@ function Client() {
     socket.emit('create-client-session', { preferredSessionId: preferred }, (res) => {
       if (res?.ok && res.sessionId) {
         setClientSessionId(res.sessionId);
+        clientSessionIdRef.current = res.sessionId;
         storeTvSession(res.sessionId);
         setSessionExpired(false);
       }
@@ -303,8 +309,17 @@ function Client() {
     const handleHighlight = ({ text }) => setHighlightedText(text || '');
 
     const handleSessionJoined = ({ sessionId, verse: v, theme: t }) => {
+      // If we're in QR/TV mode and this echo is for our own client session
+      // being created, just record the session ID — do NOT set joinedSession
+      // yet, because that would hide the QR screen before a presenter arrives.
+      if (showQrModeRef.current && sessionId === clientSessionIdRef.current) {
+        // Our own create-client-session echo — QR screen stays visible.
+        return;
+      }
+
       setJoinedSession(sessionId);
       joinedSessionRef.current = sessionId;
+
       if (v) {
         setVerse(v);
         setIsIdle(false);
@@ -314,14 +329,18 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
-      // Phase 2: "Presenter connected" graceful transition before QR exits
-      if (showQrMode) {
+
+      // In QR/TV mode a session-joined at this point means the Presenter
+      // has joined our room — show the transition overlay then exit QR screen.
+      if (showQrModeRef.current) {
+        setPresenterJoined(true);
         setPresenterJoining(true);
         setTimeout(() => {
           setPresenterJoining(false);
           setShowQrMode(false);
         }, 1800);
       }
+
       requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
     };
 
@@ -416,7 +435,11 @@ function Client() {
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
   // ─── QR / TV Mode screen ──────────────────────────────────────────────────
-  if (!joinedSession && showQrMode) {
+  // Visible as soon as the Client loads (no URL session) until a Presenter
+  // joins.  presenterJoined gates the exit — not joinedSession — because the
+  // Client sets joinedSession for its own room creation echo, which would
+  // otherwise hide the QR before any Presenter arrived.
+  if (showQrMode && !presenterJoined) {
     const origin = publicOrigin || window.location.origin;
     const presenterUrl = clientSessionId ? `${origin}/presenter?session=${clientSessionId}` : '';
 
@@ -523,7 +546,7 @@ function Client() {
   }
 
   // ─── Classic join screen (URL param provided or user switched manually) ───
-  if (!joinedSession) {
+  if (!joinedSession && !showQrMode) {
     return (
       <div className="home-page" style={{ alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
         <div className="card card--theme" style={{ width: '100%', maxWidth: '540px' }}>
