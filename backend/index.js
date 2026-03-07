@@ -31,6 +31,17 @@ fastify.get('/health', async () => {
   return { status: 'ok' };
 });
 
+// ── /config — returns the canonical public origin so Client can build a correct
+//    QR code even when running behind a reverse proxy or Cloudflare Tunnel.
+//    Set PUBLIC_ORIGIN=https://your-domain.com in the environment; falls back
+//    to the request's Host header, which is usually correct on a LAN.
+fastify.get('/config', async (request) => {
+  const publicOrigin =
+    process.env.PUBLIC_ORIGIN ||
+    `${request.protocol}://${request.hostname}`;
+  return { publicOrigin };
+});
+
 // theme management endpoints
 fastify.get('/themes', async (request, reply) => {
   const rows = db.prepare('SELECT id, name, data FROM themes').all();
@@ -85,13 +96,39 @@ fastify.delete('/themes/:id', async (request, reply) => {
   }
 });
 
+// ─── Service timing constants ─────────────────────────────────────────────────
+// These are tuned for a church / worship-service environment where:
+//   • WiFi in chapel buildings is often congested and unreliable
+//   • Sessions last 1–3 hours with long silent stretches (prayers, music)
+//   • A dropped socket during a sacrament prayer must not kill the session
+//   • The operator cannot be expected to notice and intervene quickly
+const SERVICE_CONFIG = {
+  // How long Socket.IO waits between heartbeat pings (ms).
+  // 25 s gives headroom over mobile 4G keep-alive timers (~30 s).
+  PING_INTERVAL_MS: 25_000,
+
+  // How long without a pong before the socket is considered dead (ms).
+  // 90 s tolerates a brief building WiFi hiccup or phone screen-lock.
+  PING_TIMEOUT_MS: 90_000,
+
+  // How long after the last socket leaves a session before its state is
+  // garbage-collected (ms).  30 min covers a typical sacrament meeting
+  // intermission or a presenter whose laptop went to sleep.
+  SESSION_GRACE_MS: 30 * 60 * 1000,
+
+  // How long the server waits for a client-session reconnect specifically.
+  // TV browsers can take 2–3 min to recover from a power-save disconnect.
+  CLIENT_SESSION_GRACE_MS: 5 * 60 * 1000,
+
+  // Maximum number of concurrent named sessions (prevents memory exhaustion
+  // if the server is left running across multiple weeks of service).
+  MAX_SESSIONS: 50,
+};
+
 const io = new Server(fastify.server, {
-  cors: {
-    origin: "*",
-  },
-  // Keep long-idle presentation sessions stable across network/proxy jitter.
-  pingInterval: 20000,
-  pingTimeout: 60000,
+  cors: { origin: '*' },
+  pingInterval: SERVICE_CONFIG.PING_INTERVAL_MS,
+  pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
 });
 
 // ensure themes table exists
@@ -1214,9 +1251,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
-  const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || 300000);
+  // Use the service config defined at module level; allow env override for testing.
+  const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || SERVICE_CONFIG.SESSION_GRACE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
+  // Track viewer counts per session so the Presenter can see "N displays connected"
+  const sessionViewerCounts = new Map();
 
   function normalizeSessionId(value) {
     if (!value) return '';
@@ -1237,6 +1277,11 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   }
 
   function generateSessionId() {
+    // Guard against unbounded session accumulation (e.g. server left running for weeks)
+    if (sessionState.size >= SERVICE_CONFIG.MAX_SESSIONS) {
+      fastify.log.warn(`MAX_SESSIONS (${SERVICE_CONFIG.MAX_SESSIONS}) reached — refusing new session`);
+      return null;
+    }
     for (let i = 0; i < 16; i += 1) {
       let generated = '';
       for (let j = 0; j < SESSION_CODE_LENGTH; j += 1) {
@@ -1248,6 +1293,24 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
     }
     return `${SESSION_CODE_CHARS[Math.floor(Math.random() * SESSION_CODE_CHARS.length)]}${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  }
+
+  // ── Viewer count tracking ────────────────────────────────────────────────
+  function incrementViewerCount(sessionId) {
+    const n = (sessionViewerCounts.get(sessionId) || 0) + 1;
+    sessionViewerCounts.set(sessionId, n);
+    broadcastViewerCount(sessionId, n);
+  }
+
+  function decrementViewerCount(sessionId) {
+    const n = Math.max(0, (sessionViewerCounts.get(sessionId) || 1) - 1);
+    sessionViewerCounts.set(sessionId, n);
+    broadcastViewerCount(sessionId, n);
+  }
+
+  function broadcastViewerCount(sessionId, count) {
+    if (!sessionId || sessionId === DEFAULT_SESSION_ID) return;
+    io.to(sessionId).emit('viewer-count', { sessionId, count });
   }
 
   function emitToSession(sessionId, event, payload) {
@@ -1363,6 +1426,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         const state = getSessionState(normalized);
         clearStalePresenterLock(state);
         if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
+          // Phase 1: alert the current presenter that a takeover was attempted
+          io.to(state.presenterSocketId).emit('presenter-takeover-attempt', {
+            message: 'Another device attempted to join your session as presenter',
+          });
           return { error: 'Another presenter is active in this session' };
         }
       }
@@ -1370,6 +1437,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         socket.leave(activeSessionId);
         if (activeRole === 'presenter') {
           releasePresenterLock(previousSessionId, socket.id);
+        } else {
+          // Viewer leaving previous session
+          decrementViewerCount(previousSessionId);
         }
         scheduleCleanup(previousSessionId);
       }
@@ -1380,11 +1450,19 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const state = getSessionState(activeSessionId);
       if (role === 'presenter') {
         state.presenterSocketId = socket.id;
+      } else {
+        // Count viewers (non-presenters) for the health panel
+        incrementViewerCount(activeSessionId);
       }
       socket.emit('session-joined', { sessionId: activeSessionId });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
       if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
+      // Send current viewer count to the joining socket immediately
+      socket.emit('viewer-count', {
+        sessionId: activeSessionId,
+        count: sessionViewerCounts.get(activeSessionId) || 0,
+      });
       return { sessionId: activeSessionId };
     };
 
@@ -1395,6 +1473,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const previousSessionId = activeSessionId;
       if (activeRole === 'presenter') {
         releasePresenterLock(previousSessionId, socket.id);
+      } else {
+        decrementViewerCount(previousSessionId);
       }
       socket.leave(previousSessionId);
       activeSessionId = DEFAULT_SESSION_ID;
@@ -1407,6 +1487,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('create-session', (payload, callback) => {
       const sessionId = generateSessionId();
+      if (!sessionId) {
+        const error = { message: 'Server session limit reached — please try again later' };
+        socket.emit('session-error', error);
+        if (typeof callback === 'function') callback({ ok: false, ...error });
+        return;
+      }
       const role = payload && payload.role === 'presenter' ? 'presenter' : 'presenter';
       const joined = joinSession(sessionId, role);
       if (joined && joined.error) {
@@ -1417,6 +1503,51 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
       socket.emit('session-created', { sessionId: joined.sessionId });
       if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId });
+    });
+
+    // ── TV/Client-initiated sessions ──────────────────────────────────────────
+    // The Client display (e.g. a TV) calls this to create a named session that
+    // the Presenter then joins by scanning the QR code or typing the short code.
+    //
+    // Phase 2 addition: accepts an optional `preferredSessionId` so a TV that
+    // has reloaded (browser crash, power-save) can request its previous code
+    // back.  If that session still exists in state, the TV silently rejoins it
+    // without changing the QR code — the Presenter never notices the hiccup.
+    socket.on('create-client-session', (payload, callback) => {
+      const preferred = normalizeSessionId(payload && payload.preferredSessionId);
+      let sessionId;
+
+      if (preferred && sessionExists(preferred)) {
+        // The TV's previous session is still alive — rejoin it seamlessly
+        sessionId = preferred;
+        fastify.log.info(`TV rejoining existing client session ${sessionId}`);
+      } else {
+        // Create a fresh session room
+        sessionId = generateSessionId();
+        if (!sessionId) {
+          const error = { message: 'Server session limit reached' };
+          socket.emit('session-error', error);
+          if (typeof callback === 'function') callback({ ok: false, ...error });
+          return;
+        }
+      }
+
+      // Leave any previous session cleanly
+      if (activeSessionId && activeSessionId !== DEFAULT_SESSION_ID && activeSessionId !== sessionId) {
+        socket.leave(activeSessionId);
+        decrementViewerCount(activeSessionId);
+        scheduleCleanup(activeSessionId);
+      }
+
+      activeSessionId = sessionId;
+      activeRole = 'viewer';
+      socket.join(sessionId);
+      cancelCleanup(sessionId);
+      getSessionState(sessionId); // ensure state map entry exists
+      incrementViewerCount(sessionId);
+
+      socket.emit('client-session-created', { sessionId });
+      if (typeof callback === 'function') callback({ ok: true, sessionId });
     });
 
     socket.on('join-session', (payload, callback) => {
@@ -1570,11 +1701,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         socket.rooms.forEach((roomId) => {
           if (roomId !== socket.id) {
             releasePresenterLock(roomId, socket.id);
+            if (activeRole !== 'presenter') decrementViewerCount(roomId);
             scheduleCleanup(roomId, { disconnecting: true });
           }
         });
       } else {
         releasePresenterLock(activeSessionId, socket.id);
+        if (activeRole !== 'presenter') decrementViewerCount(activeSessionId);
         scheduleCleanup(activeSessionId, { disconnecting: true });
       }
     });

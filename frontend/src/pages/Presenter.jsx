@@ -173,6 +173,10 @@ const Presenter = () => {
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
   const PRESENTER_LAST_SESSION_KEY = 'scicp.presenter_last_session_v1';
   const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+  // Support scanning the Client's QR code: ?session=XXXX in the Presenter URL
+  const urlSessionParam = (() => {
+    try { return new URLSearchParams(window.location.search).get('session') || ''; } catch { return ''; }
+  })();
   const presenterTourSteps = [
     {
       target: 'session',
@@ -212,8 +216,13 @@ const Presenter = () => {
   const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
   const [sessionInput, setSessionInput]     = useState('');
+  const [tvSessionInput, setTvSessionInput] = useState('');
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
+  // Phase 1: viewer count from server so presenter knows how many TVs are live
+  const [viewerCount, setViewerCount]       = useState(0);
+  // Phase 1: show alert when a second device tried to take the presenter role
+  const [takeoverAlert, setTakeoverAlert]   = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
@@ -301,12 +310,47 @@ const Presenter = () => {
   const copyClientLink = async () => {
     if (!sessionId) return;
     const clientLink = `${window.location.origin}/client?session=${sessionId}`;
+    // Phase 4: navigator.share() is more reliable on mobile Safari than clipboard API
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Scriptures in View — Client', url: clientLink });
+        setSessionMessage(`Shared client link for ${sessionId}`);
+        return;
+      } catch {
+        // User cancelled share — fall through to clipboard
+      }
+    }
     try {
       await navigator.clipboard.writeText(clientLink);
       setSessionMessage(`Copied client link for ${sessionId}`);
     } catch {
-      setSessionMessage('Clipboard unavailable - copy URL from address bar');
+      setSessionMessage('Clipboard unavailable — copy URL from address bar');
     }
+  };
+
+  // Join a Client-initiated (TV) session: presenter types/scans the code the TV shows
+  const joinTvSession = () => {
+    const normalized = normalizeSessionId(tvSessionInput);
+    if (!normalized) {
+      setSessionMessage('Enter the TV session code');
+      return;
+    }
+    setSessionMessage('Joining TV session...');
+    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
+      if (response?.ok && response.sessionId) {
+        setSessionId(response.sessionId);
+        setSessionInput(response.sessionId);
+        setTvSessionInput('');
+        setSessionMessage(`Session ${response.sessionId} ready`);
+        setSessionPopover(false);
+        setMobileMenuOpen(false);
+        try {
+          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
+        } catch { /* ignore */ }
+      } else {
+        setSessionMessage(response?.message || 'TV session not found — check the code');
+      }
+    });
   };
 
   const leaveSession = () => {
@@ -365,12 +409,30 @@ const Presenter = () => {
     };
     const handleConnect = () => {
       setConnectionState('connected');
+      // Priority 1: URL session param (from scanning Client QR code)
+      const urlParam = normalizeSessionId(urlSessionParam);
+      if (urlParam) {
+        socket.emit('join-session', { sessionId: urlParam, role: 'presenter' }, (response) => {
+          if (response?.ok && response.sessionId) {
+            setSessionId(response.sessionId);
+            setSessionInput(response.sessionId);
+            setSessionMessage(`Session ${response.sessionId} ready`);
+            try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { 
+              // ignore storage errors
+              console.log(_e.message);
+            }
+          } else {
+            // Fall through to stored session or new session
+            resumeOrCreateSession();
+          }
+        });
+        return;
+      }
+      resumeOrCreateSession();
+    };
+    const resumeOrCreateSession = () => {
       const current = (() => {
-        try {
-          return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || '';
-        } catch {
-          return '';
-        }
+        try { return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || ''; } catch { return ''; }
       })();
       if (current) {
         socket.emit('join-session', { sessionId: current, role: 'presenter' }, (response) => {
@@ -410,6 +472,13 @@ const Presenter = () => {
     socket.on('disconnect', handleDisconnect);
     socket.on('reconnect_attempt', handleReconnectAttempt);
     socket.on('connect_error', handleConnectError);
+    // Phase 1: viewer count — shows "N displays connected" in session health panel
+    socket.on('viewer-count', ({ count }) => setViewerCount(count));
+    // Phase 1: another device tried to steal the presenter role — alert without interrupting
+    socket.on('presenter-takeover-attempt', () => {
+      setTakeoverAlert(true);
+      setTimeout(() => setTakeoverAlert(false), 6000);
+    });
     if (socket.connected) {
       handleConnect();
     }
@@ -428,8 +497,10 @@ const Presenter = () => {
       socket.off('disconnect', handleDisconnect);
       socket.off('reconnect_attempt', handleReconnectAttempt);
       socket.off('connect_error', handleConnectError);
+      socket.off('viewer-count');
+      socket.off('presenter-takeover-attempt');
     };
-  }, []);
+  }, [urlSessionParam]);
 
   /* ── Close drawer, theme popover, session popover, and mobile menu on outside tap ── */
   useEffect(() => {
@@ -576,6 +647,14 @@ const Presenter = () => {
   return (
     <div className={`presenter-container ${presenterThemeClass}`}>
 
+      {/* Phase 1: Presenter takeover alert — unobtrusive amber banner */}
+      {takeoverAlert && (
+        <div className="presenter-takeover-alert" role="alert" aria-live="assertive">
+          ⚠ Another device attempted to join as presenter — your session is protected.
+          <button className="presenter-takeover-dismiss" onClick={() => setTakeoverAlert(false)}>✕</button>
+        </div>
+      )}
+
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
           ════════════════════════════════════════ */}
@@ -638,6 +717,28 @@ const Presenter = () => {
                 </div>
                 <div className="popover-row">
                   <button className="theme-btn" onClick={leaveSession} disabled={!sessionId}>Leave Session</button>
+                </div>
+                {/* ── TV / Client-initiated session ───────────────────────
+                    The TV (Client) generates its own code. The Presenter
+                    types or scans that code here to join the TV's room.    */}
+                <div className="popover-divider" style={{ margin: '0.6rem 0 0.4rem' }} />
+                <div className="popover-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>📺</span> Join TV Session
+                </div>
+                <div className="session-tv-hint">
+                  Enter the code shown on the TV display, or scan its QR code and paste the code here.
+                </div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    value={tvSessionInput}
+                    onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
+                    onKeyDown={e => e.key === 'Enter' && joinTvSession()}
+                    placeholder="TV code…"
+                    aria-label="TV session code"
+                  />
+                  <button className="popover-apply" onClick={joinTvSession}>Join TV</button>
                 </div>
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
@@ -760,6 +861,26 @@ const Presenter = () => {
                 </div>
                 <div className="popover-row">
                   <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }} disabled={!sessionId}>Leave Session</button>
+                </div>
+                {/* TV session join */}
+                <div className="popover-divider" style={{ margin: '0.6rem 0 0.4rem' }} />
+                <div className="mobile-menu-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>📺</span> Join TV Session
+                </div>
+                <div className="session-tv-hint">
+                  Type the code shown on the TV or paste from QR scan.
+                </div>
+                <div className="popover-row">
+                  <input
+                    type="text"
+                    className="popover-input"
+                    value={tvSessionInput}
+                    onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
+                    onKeyDown={e => e.key === 'Enter' && joinTvSession()}
+                    placeholder="TV code…"
+                    aria-label="TV session code"
+                  />
+                  <button className="popover-apply" onClick={joinTvSession}>Join TV</button>
                 </div>
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
@@ -973,6 +1094,17 @@ const Presenter = () => {
                 <div className="idle-session-id">
                   {sessionId || '—'}
                 </div>
+                {/* Phase 1: viewer count — the presenter knows if the TV is actually connected */}
+                {sessionId && (
+                  <div className="idle-viewer-count">
+                    <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
+                    {viewerCount === 0
+                      ? 'No displays connected'
+                      : viewerCount === 1
+                        ? '1 display connected'
+                        : `${viewerCount} displays connected`}
+                  </div>
+                )}
                 <p className="idle-session-hint">
                   {sessionId
                     ? 'Share this code or copy the client link for audience devices'
@@ -981,12 +1113,21 @@ const Presenter = () => {
                 {sessionId && (
                   <button className="idle-copy-btn" onClick={async () => {
                     const link = `${window.location.origin}/client?session=${sessionId}`;
-                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) { 
+                    // Phase 4: navigator.share() first, clipboard fallback
+                    if (navigator.share) {
+                      try {
+                        await navigator.share({ title: 'Scriptures in View — Client', url: link });
+                        setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); return;
+                      } catch (_e) { 
+                        console.error('Share failed', _e);
+                      }
+                    }
+                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) {
                       console.error('Clipboard write failed', e);
                       setSessionMessage('Clipboard unavailable - copy URL from address bar');
-                     }
+                    }
                   }}>
-                    <IconLink /> {votdCopied ? 'Copied!' : 'Copy Client Link'}
+                    <IconLink /> {votdCopied ? 'Shared!' : 'Share Client Link'}
                   </button>
                 )}
               </section>
