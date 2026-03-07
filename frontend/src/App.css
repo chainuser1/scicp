@@ -3206,3 +3206,759 @@ button, [role="button"] {
   .staged-text, .preview-text { color: black; }
   .preview-box { max-height: none; overflow: visible; }
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   CLIENT QR / TV MODE  — shown on the Client (TV display) before a
+   Presenter joins. Sacred-luxury aesthetic matching the rest of the UI.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.client-qr-screen {
+  background: var(--obsidian);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.client-qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 2rem 1.75rem;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 0 60px rgba(201, 168, 76, 0.08), 0 4px 40px rgba(0,0,0,0.6);
+  text-align: center;
+}
+
+/* Header */
+.client-qr-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.6rem;
+}
+
+.client-qr-cross {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 0.2rem;
+}
+.client-qr-cross .idle-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 100%;
+  background: var(--gold);
+  opacity: 0.7;
+}
+.client-qr-cross .idle-cross-h {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  height: 2px;
+  width: 100%;
+  background: var(--gold);
+  opacity: 0.7;
+}
+
+.client-qr-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--gold-light);
+  letter-spacing: 0.08em;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.client-qr-subtitle {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+/* Body */
+.client-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.client-qr-box {
+  width: 220px;
+  height: 220px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f0ece0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 6px var(--gold-border), 0 8px 32px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+}
+
+.client-qr-image {
+  width: 220px;
+  height: 220px;
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* Loading spinner while QR generates */
+.client-qr-placeholder {
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0ece0;
+}
+
+.client-qr-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--gold-border);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: qr-spin 0.9s linear infinite;
+}
+
+@keyframes qr-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Session code display */
+.client-qr-code-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.client-qr-code-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.client-qr-code-value {
+  font-family: 'Cinzel', 'Courier New', monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--gold-light);
+  letter-spacing: 0.18em;
+  line-height: 1;
+}
+
+/* Instruction text */
+.client-qr-instruction {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 340px;
+}
+
+/* Divider */
+.client-qr-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.client-qr-divider::before,
+.client-qr-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gold-border);
+  opacity: 0.4;
+}
+
+/* Manual code entry */
+.client-qr-manual {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 340px;
+}
+
+.client-qr-input {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: 'Cinzel', monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  padding: 0.55rem 0.75rem;
+  outline: none;
+  transition: border-color var(--transition);
+  text-transform: uppercase;
+}
+
+.client-qr-input:focus {
+  border-color: var(--gold);
+}
+
+.client-qr-join-btn {
+  background: var(--gold);
+  color: var(--obsidian);
+  border: none;
+  border-radius: var(--radius);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+  transition: background var(--transition), opacity var(--transition);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.client-qr-join-btn:hover {
+  background: var(--gold-light);
+}
+
+.client-qr-status {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* Footer / connection status */
+.client-qr-footer {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(201, 168, 76, 0.12);
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.client-qr-conn {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+.client-qr-conn--connected   { color: #4caf7d; }
+.client-qr-conn--connecting  { color: var(--text-dim); }
+.client-qr-conn--disconnected,
+.client-qr-conn--error       { color: var(--accent-red); }
+.client-qr-conn--reconnecting { color: var(--gold); }
+
+/* ── TV session hint text in Presenter popovers ───────────────────────────── */
+.session-tv-hint {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 0.1rem 0 0.5rem;
+}
+
+/* ── Responsive: larger code on big TVs ──────────────────────────────────── */
+@media (min-width: 1280px) {
+  .client-qr-card {
+    max-width: 560px;
+    padding: 3.5rem 3rem 2.5rem;
+  }
+  .client-qr-title   { font-size: 1.7rem; }
+  .client-qr-box     { width: 280px; height: 280px; }
+  .client-qr-image   { width: 280px; height: 280px; }
+  .client-qr-placeholder { width: 280px; height: 280px; }
+  .client-qr-code-value { font-size: 2.6rem; letter-spacing: 0.22em; }
+  .client-qr-instruction { font-size: 0.9rem; }
+}
+
+@media (min-width: 1920px) {
+  .client-qr-card        { max-width: 680px; padding: 4.5rem 4rem 3rem; }
+  .client-qr-title       { font-size: 2.1rem; }
+  .client-qr-box         { width: 340px; height: 340px; }
+  .client-qr-image       { width: 340px; height: 340px; }
+  .client-qr-placeholder { width: 340px; height: 340px; }
+  .client-qr-code-value  { font-size: 3.2rem; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 1 — RESILIENCE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Client reconnect banner (Phase 1) ───────────────────────────────────────
+   Shown ONLY when the display has already joined a session and then loses
+   connection.  Large enough for an operator at the back of the chapel to see,
+   but positioned at the bottom so it doesn't obscure the scripture text.      */
+.client-reconnect-banner {
+  position: fixed;
+  bottom: 2.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(10, 10, 15, 0.92);
+  border: 1px solid var(--gold-border);
+  border-radius: 99px;
+  padding: 0.55rem 1.2rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  color: var(--gold-light);
+  letter-spacing: 0.04em;
+  z-index: 9000;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  white-space: nowrap;
+}
+
+.client-reconnect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: reconnect-pulse 1.1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes reconnect-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ── Presenter takeover alert (Phase 1) ──────────────────────────────────────
+   Amber banner at the very top — noticeable but not disruptive.               */
+.presenter-takeover-alert {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  background: rgba(192, 57, 43, 0.92);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  padding: 0.6rem 3rem 0.6rem 1.2rem;
+  text-align: center;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 16px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.presenter-takeover-dismiss {
+  position: absolute;
+  right: 1rem;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.8);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.2rem;
+}
+.presenter-takeover-dismiss:hover { color: #fff; }
+
+/* ── Viewer count in idle session card (Phase 1) ─────────────────────────── */
+.idle-viewer-count {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0.15rem 0 0.5rem;
+}
+
+.idle-viewer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.idle-viewer-dot--live {
+  background: #4caf7d;
+  box-shadow: 0 0 6px rgba(76, 175, 125, 0.5);
+  animation: viewer-dot-pulse 2s ease-in-out infinite;
+}
+
+@keyframes viewer-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 2 — QR SCREEN STABILITY & POLISH
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Full screen QR card ─────────────────────────────────────────────────── */
+.client-qr-screen {
+  background: var(--obsidian);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.client-qr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 2rem 1.75rem;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 0 60px rgba(201, 168, 76, 0.08), 0 4px 40px rgba(0,0,0,0.6);
+  text-align: center;
+}
+
+.client-qr-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.6rem;
+}
+
+.client-qr-cross {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 0.2rem;
+}
+.client-qr-cross .idle-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 100%;
+  background: var(--gold);
+  opacity: 0.7;
+}
+.client-qr-cross .idle-cross-h {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  height: 2px;
+  width: 100%;
+  background: var(--gold);
+  opacity: 0.7;
+}
+
+.client-qr-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--gold-light);
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+
+.client-qr-subtitle {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.client-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.client-qr-box {
+  width: 220px;
+  height: 220px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f0ece0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 6px var(--gold-border), 0 8px 32px rgba(0,0,0,0.5);
+  flex-shrink: 0;
+}
+
+.client-qr-image {
+  width: 220px;
+  height: 220px;
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* Phase 2: Raw URL fallback when npm package not available */
+.client-qr-url-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: #f0ece0;
+  width: 100%;
+  height: 100%;
+  justify-content: center;
+}
+
+.client-qr-url-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.62rem;
+  color: var(--obsidian);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.client-qr-url-text {
+  font-family: 'Courier New', monospace;
+  font-size: 0.58rem;
+  color: var(--obsidian);
+  word-break: break-all;
+  text-align: center;
+  user-select: text;
+  -webkit-user-select: text;
+  line-height: 1.4;
+}
+
+.client-qr-placeholder {
+  width: 220px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0ece0;
+}
+
+.client-qr-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(201, 168, 76, 0.3);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: qr-spin 0.9s linear infinite;
+}
+
+@keyframes qr-spin {
+  to { transform: rotate(360deg); }
+}
+
+.client-qr-code-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.client-qr-code-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.client-qr-code-value {
+  font-family: 'Cinzel', 'Courier New', monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--gold-light);
+  letter-spacing: 0.22em;
+  line-height: 1;
+}
+
+.client-qr-instruction {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 340px;
+}
+
+.client-qr-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.client-qr-divider::before,
+.client-qr-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--gold-border);
+  opacity: 0.4;
+}
+
+.client-qr-manual {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 340px;
+}
+
+.client-qr-input {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: 'Cinzel', monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  padding: 0.55rem 0.75rem;
+  outline: none;
+  transition: border-color var(--transition);
+  text-transform: uppercase;
+}
+.client-qr-input:focus { border-color: var(--gold); }
+
+.client-qr-join-btn {
+  background: var(--gold);
+  color: var(--obsidian);
+  border: none;
+  border-radius: var(--radius);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+  transition: background var(--transition);
+  white-space: nowrap;
+}
+.client-qr-join-btn:hover { background: var(--gold-light); }
+
+.client-qr-status {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.client-qr-footer {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(201, 168, 76, 0.12);
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.client-qr-conn {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+.client-qr-conn--connected    { color: #4caf7d; }
+.client-qr-conn--connecting   { color: var(--text-dim); }
+.client-qr-conn--disconnected,
+.client-qr-conn--error        { color: var(--accent-red); }
+.client-qr-conn--reconnecting { color: var(--gold); }
+
+/* Phase 2: "Presenter connected" transition overlay */
+.client-qr-joining-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: rgba(10, 10, 15, 0.88);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  animation: joining-fade-in 0.3s ease forwards;
+}
+
+@keyframes joining-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.client-qr-joining-check {
+  font-size: 4rem;
+  color: #4caf7d;
+  line-height: 1;
+  animation: joining-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes joining-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+.client-qr-joining-text {
+  font-family: 'Cinzel', serif;
+  font-size: 1.4rem;
+  color: var(--gold-light);
+  letter-spacing: 0.1em;
+}
+
+/* ── Presenter TV session hint ────────────────────────────────────────────── */
+.session-tv-hint {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 0.1rem 0 0.5rem;
+}
+
+/* ── Responsive: larger code on big TVs ────────────────────────────────────  */
+@media (min-width: 1280px) {
+  .client-qr-card       { max-width: 560px; padding: 3.5rem 3rem 2.5rem; }
+  .client-qr-title      { font-size: 1.7rem; }
+  .client-qr-box        { width: 280px; height: 280px; }
+  .client-qr-image      { width: 280px; height: 280px; }
+  .client-qr-placeholder { width: 280px; height: 280px; }
+  .client-qr-code-value { font-size: 2.6rem; }
+  .client-qr-instruction { font-size: 0.9rem; }
+}
+
+@media (min-width: 1920px) {
+  .client-qr-card        { max-width: 680px; padding: 4.5rem 4rem 3rem; }
+  .client-qr-title       { font-size: 2.1rem; }
+  .client-qr-box         { width: 340px; height: 340px; }
+  .client-qr-image       { width: 340px; height: 340px; }
+  .client-qr-placeholder { width: 340px; height: 340px; }
+  .client-qr-code-value  { font-size: 3.2rem; }
+}
