@@ -296,8 +296,8 @@ const Presenter = () => {
   const presenterTourSteps = [
     {
       target: 'session',
-      title: 'Session First',
-      description: 'Create or join a session from this menu, then share the client link.',
+      title: 'Connect to TV',
+      description: 'Scan the QR code on the TV screen, or type the code shown below it.',
     },
     {
       target: 'search',
@@ -331,7 +331,6 @@ const Presenter = () => {
   const [themePopover, setThemePopover]     = useState(false);
   const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
-  const [sessionInput, setSessionInput]     = useState('');
   const [tvSessionInput, setTvSessionInput] = useState('');
   const [scannerOpen, setScannerOpen]       = useState(false);
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
@@ -382,88 +381,23 @@ const Presenter = () => {
       });
   }, []);
 
-  const requestCreateSession = () => {
-    setSessionMessage('Creating session...');
-    socket.emit('create-session', { role: 'presenter' }, (response) => {
-      if (response?.ok && response.sessionId) {
-        setSessionId(response.sessionId);
-        setSessionInput(response.sessionId);
-        setSessionMessage(`Session ${response.sessionId} ready`);
-        try {
-          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
-        } catch {
-          // ignore storage errors
-        }
-      } else {
-        setSessionMessage('Failed to create session');
-      }
-    });
-  };
-
-  const joinSession = () => {
-    const normalized = normalizeSessionId(sessionInput);
+  // ── The one and only way to connect: join the session the TV created ──────
+  // Presenter types or scans the code shown on the TV/projector screen.
+  const joinTvSession = (codeOverride) => {
+    const normalized = normalizeSessionId(codeOverride || tvSessionInput);
     if (!normalized) {
-      setSessionMessage('Enter a valid session code');
+      setSessionMessage('Enter the code shown on the TV screen');
       return;
     }
-    setSessionMessage('Joining session...');
+    setSessionMessage('Connecting…');
     socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
       if (response?.ok && response.sessionId) {
         setSessionId(response.sessionId);
-        setSessionInput(response.sessionId);
-        setSessionMessage(`Session ${response.sessionId} ready`);
-        setSessionPopover(false);
-        try {
-          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
-        } catch {
-          // ignore storage errors
-        }
-      } else {
-        setSessionMessage(response?.message || 'Unable to join session');
-      }
-    });
-  };
-
-  const copyClientLink = async () => {
-    if (!sessionId) return;
-    const clientLink = `${window.location.origin}/client?session=${sessionId}`;
-    // Phase 4: navigator.share() is more reliable on mobile Safari than clipboard API
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'Scriptures in View — Client', url: clientLink });
-        setSessionMessage(`Shared client link for ${sessionId}`);
-        return;
-      } catch {
-        // User cancelled share — fall through to clipboard
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(clientLink);
-      setSessionMessage(`Copied client link for ${sessionId}`);
-    } catch {
-      setSessionMessage('Clipboard unavailable — copy URL from address bar');
-    }
-  };
-
-  // Join a Client-initiated (TV) session: presenter types/scans the code the TV shows
-  const joinTvSession = () => {
-    const normalized = normalizeSessionId(tvSessionInput);
-    if (!normalized) {
-      setSessionMessage('Enter the TV session code');
-      return;
-    }
-    setSessionMessage('Joining TV session...');
-    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
-      if (response?.ok && response.sessionId) {
-        setSessionId(response.sessionId);
-        setSessionInput(response.sessionId);
         setTvSessionInput('');
-        setSessionMessage(`Session ${response.sessionId} ready`);
+        setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
         setMobileMenuOpen(false);
-        try {
-          window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
-        } catch { /* ignore */ }
+        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
       } else {
         setSessionMessage(response?.message || 'TV session not found — check the code');
       }
@@ -473,23 +407,7 @@ const Presenter = () => {
   // Called by QrScannerModal when a valid code is decoded from the camera feed
   const handleScannedCode = (code) => {
     setScannerOpen(false);
-    const normalized = normalizeSessionId(code);
-    setTvSessionInput(normalized);
-    // Auto-join immediately — no extra button press needed
-    setSessionMessage('Joining TV session…');
-    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
-      if (response?.ok && response.sessionId) {
-        setSessionId(response.sessionId);
-        setSessionInput(response.sessionId);
-        setTvSessionInput('');
-        setSessionMessage(`Session ${response.sessionId} ready`);
-        setSessionPopover(false);
-        setMobileMenuOpen(false);
-        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
-      } else {
-        setSessionMessage(response?.message || 'TV session not found — check the code');
-      }
-    });
+    joinTvSession(normalizeSessionId(code));
   };
 
   const leaveSession = () => {
@@ -548,45 +466,31 @@ const Presenter = () => {
     };
     const handleConnect = () => {
       setConnectionState('connected');
-      // Priority 1: URL session param (from scanning Client QR code)
+      // Priority 1: URL session param — phone scanned the TV QR, auto-join
       const urlParam = normalizeSessionId(urlSessionParam);
       if (urlParam) {
-        socket.emit('join-session', { sessionId: urlParam, role: 'presenter' }, (response) => {
+        joinTvSession(urlParam);
+        return;
+      }
+      // Priority 2: rejoin last known session (e.g. after page refresh mid-service)
+      const lastSession = (() => {
+        try { return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || ''; } catch { return ''; }
+      })();
+      if (lastSession) {
+        socket.emit('join-session', { sessionId: lastSession, role: 'presenter' }, (response) => {
           if (response?.ok && response.sessionId) {
             setSessionId(response.sessionId);
-            setSessionInput(response.sessionId);
-            setSessionMessage(`Session ${response.sessionId} ready`);
-            try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
+            setSessionMessage(`Reconnected — session ${response.sessionId}`);
           } else {
-            // Fall through to stored session or new session
-            resumeOrCreateSession();
+            // Last session is gone — clear it and wait for the presenter to scan/type
+            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch (_e) { /* ignore */ }
+            setSessionMessage('Scan the QR code on the TV screen, or type the session code');
           }
         });
         return;
       }
-      resumeOrCreateSession();
-    };
-    const resumeOrCreateSession = () => {
-      const current = (() => {
-        try { return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || ''; } catch { return ''; }
-      })();
-      if (current) {
-        socket.emit('join-session', { sessionId: current, role: 'presenter' }, (response) => {
-          if (response?.ok && response.sessionId) {
-            setSessionId(response.sessionId);
-            setSessionInput(response.sessionId);
-            setSessionMessage(`Session ${response.sessionId} ready`);
-          } else {
-            if (response?.message === 'Session not found') {
-              requestCreateSession();
-              return;
-            }
-            setSessionMessage(response?.message || 'Unable to rejoin previous session');
-          }
-        });
-      } else {
-        requestCreateSession();
-      }
+      // No prior session — just wait for the presenter to scan or type
+      setSessionMessage('Scan the QR code on the TV screen, or type the session code');
     };
     const handleDisconnect = () => {
       setConnectionState('disconnected');
@@ -834,47 +738,28 @@ const Presenter = () => {
             </HdrBtn>
             {sessionPopover && (
               <div className="hdr-session-popover">
-                <div className="popover-label">Session</div>
-                <div className="session-code-display">{sessionId || 'NOT READY'}</div>
-                <div className="popover-row">
-                  <input
-                    type="text"
-                    className="popover-input"
-                    value={sessionInput}
-                    onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
-                    placeholder="AB12CD"
-                    aria-label="Session code"
-                  />
-                  <button className="popover-apply" onClick={joinSession}>Join</button>
+                <div className="popover-label">
+                  {sessionId ? `Session ${sessionId}` : 'Connect to TV'}
                 </div>
-                <div className="popover-row">
-                  <button className="theme-btn" onClick={requestCreateSession}>New Session</button>
-                  <button className="theme-btn" onClick={copyClientLink}>Copy Link</button>
-                </div>
-                <div className="popover-row">
-                  <button className="theme-btn" onClick={leaveSession} disabled={!sessionId}>Leave Session</button>
-                </div>
-                {/* ── TV / Client-initiated session ───────────────────────
-                    The TV (Client) generates its own code. The Presenter
-                    can scan the QR with their device camera, or type the
-                    code manually.                                          */}
-                <div className="popover-divider" style={{ margin: '0.6rem 0 0.4rem' }} />
-                <div className="popover-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span>📺</span> Join TV Session
-                </div>
-                <div className="session-tv-hint">
-                  Scan the QR code on the TV screen, or type the session code shown below it.
-                </div>
+                {sessionId && (
+                  <div className="idle-viewer-count" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+                    <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
+                    {viewerCount === 0 ? 'TV not connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                  </div>
+                )}
+                {/* Scan QR — primary action */}
                 <div className="popover-row">
                   <button
                     className="popover-apply qr-scan-btn"
+                    style={{ width: '100%' }}
                     onClick={() => { setScannerOpen(true); setSessionPopover(false); }}
-                    title="Scan QR code from TV"
-                    aria-label="Scan QR code"
+                    aria-label="Scan QR code on TV"
                   >
-                    <IconQr /> Scan QR
+                    <IconQr /> Scan TV QR Code
                   </button>
                 </div>
+                {/* Manual code entry — fallback */}
+                <div className="session-tv-hint">or type the code shown on the TV screen</div>
                 <div className="popover-row">
                   <input
                     type="text"
@@ -882,11 +767,16 @@ const Presenter = () => {
                     value={tvSessionInput}
                     onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
                     onKeyDown={e => e.key === 'Enter' && joinTvSession()}
-                    placeholder="or type TV code…"
+                    placeholder="AB12CD"
                     aria-label="TV session code"
                   />
-                  <button className="popover-apply" onClick={joinTvSession}>Join</button>
+                  <button className="popover-apply" onClick={() => joinTvSession()}>Join</button>
                 </div>
+                {sessionId && (
+                  <div className="popover-row">
+                    <button className="theme-btn" style={{ width: '100%' }} onClick={leaveSession}>Leave Session</button>
+                  </div>
+                )}
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
               </div>
@@ -989,45 +879,26 @@ const Presenter = () => {
             <div className="hdr-mobile-menu">
               {/* Session */}
               <div className={`mobile-menu-section${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
-                <div className="mobile-menu-label">Session</div>
-                <div className="session-code-display">{sessionId || 'NOT READY'}</div>
-                <div className="popover-row">
-                  <input
-                    type="text"
-                    className="popover-input"
-                    value={sessionInput}
-                    onChange={e => setSessionInput(normalizeSessionId(e.target.value))}
-                    placeholder="AB12CD"
-                    aria-label="Session code"
-                  />
-                  <button className="popover-apply" onClick={joinSession}>Join</button>
+                <div className="mobile-menu-label">
+                  {sessionId ? `Session ${sessionId}` : 'Connect to TV'}
                 </div>
-                <div className="popover-row">
-                  <button className="theme-btn" onClick={requestCreateSession}>New Session</button>
-                  <button className="theme-btn" onClick={() => { copyClientLink(); setMobileMenuOpen(false); }}>Copy Link</button>
-                </div>
-                <div className="popover-row">
-                  <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }} disabled={!sessionId}>Leave Session</button>
-                </div>
-                {/* TV session join */}
-                <div className="popover-divider" style={{ margin: '0.6rem 0 0.4rem' }} />
-                <div className="mobile-menu-label" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span>📺</span> Join TV Session
-                </div>
-                <div className="session-tv-hint">
-                  Scan the QR code on the TV screen, or type the code shown below it.
-                </div>
+                {sessionId && (
+                  <div className="idle-viewer-count" style={{ marginBottom: '0.5rem' }}>
+                    <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
+                    {viewerCount === 0 ? 'TV not connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                  </div>
+                )}
                 <div className="popover-row">
                   <button
                     className="popover-apply qr-scan-btn"
                     style={{ width: '100%' }}
                     onClick={() => { setScannerOpen(true); setMobileMenuOpen(false); }}
-                    title="Scan QR code from TV"
-                    aria-label="Scan QR code"
+                    aria-label="Scan QR code on TV"
                   >
-                    <IconQr /> Scan QR Code
+                    <IconQr /> Scan TV QR Code
                   </button>
                 </div>
+                <div className="session-tv-hint">or type the code shown on the TV screen</div>
                 <div className="popover-row">
                   <input
                     type="text"
@@ -1035,11 +906,16 @@ const Presenter = () => {
                     value={tvSessionInput}
                     onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
                     onKeyDown={e => e.key === 'Enter' && joinTvSession()}
-                    placeholder="or type TV code…"
+                    placeholder="AB12CD"
                     aria-label="TV session code"
                   />
-                  <button className="popover-apply" onClick={joinTvSession}>Join</button>
+                  <button className="popover-apply" onClick={() => joinTvSession()}>Join</button>
                 </div>
+                {sessionId && (
+                  <div className="popover-row">
+                    <button className="theme-btn" style={{ width: '100%' }} onClick={() => { leaveSession(); setMobileMenuOpen(false); }}>Leave Session</button>
+                  </div>
+                )}
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
               </div>
@@ -1249,42 +1125,25 @@ const Presenter = () => {
                   <span className="card-label">⬡ Session</span>
                   <span className={`idle-conn-dot idle-conn-dot--${connectionState}`} title={connectionState} />
                 </div>
-                <div className="idle-session-id">
-                  {sessionId || '—'}
-                </div>
-                {/* Phase 1: viewer count — the presenter knows if the TV is actually connected */}
-                {sessionId && (
-                  <div className="idle-viewer-count">
-                    <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
-                    {viewerCount === 0
-                      ? 'No displays connected'
-                      : viewerCount === 1
-                        ? '1 display connected'
-                        : `${viewerCount} displays connected`}
-                  </div>
-                )}
-                <p className="idle-session-hint">
-                  {sessionId
-                    ? 'Share this code or copy the client link for audience devices'
-                    : sessionMessage}
-                </p>
-                {sessionId && (
-                  <button className="idle-copy-btn" onClick={async () => {
-                    const link = `${window.location.origin}/client?session=${sessionId}`;
-                    // Phase 4: navigator.share() first, clipboard fallback
-                    if (navigator.share) {
-                      try {
-                        await navigator.share({ title: 'Scriptures in View — Client', url: link });
-                        setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); return;
-                      } catch (_e) { /* user cancelled share — fall through to clipboard */ }
-                    }
-                    try { await navigator.clipboard.writeText(link); setVotdCopied(true); setTimeout(() => setVotdCopied(false), 2000); } catch (e) {
-                      console.error('Clipboard write failed', e);
-                      setSessionMessage('Clipboard unavailable - copy URL from address bar');
-                    }
-                  }}>
-                    <IconLink /> {votdCopied ? 'Shared!' : 'Share Client Link'}
-                  </button>
+                {sessionId ? (
+                  <>
+                    <div className="idle-session-id">{sessionId}</div>
+                    <div className="idle-viewer-count">
+                      <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
+                      {viewerCount === 0 ? 'TV display not connected' : viewerCount === 1 ? '1 TV display connected' : `${viewerCount} TV displays connected`}
+                    </div>
+                    <p className="idle-session-hint">Connected to the TV session</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="idle-session-hint">{sessionMessage}</p>
+                    <button
+                      className="idle-copy-btn"
+                      onClick={() => { setScannerOpen(true); }}
+                    >
+                      <IconQr /> Scan TV QR Code
+                    </button>
+                  </>
                 )}
               </section>
 
