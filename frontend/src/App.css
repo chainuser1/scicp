@@ -30,6 +30,20 @@
   box-sizing: border-box;
 }
 
+/* ── Viewport height anchor ──────────────────────────────────────────────
+   Without these, 100dvh on a child is calculated against the browser's
+   default scrollable document height on Android/Chrome — not the actual
+   visible viewport. The presenter page then overflows and the footer
+   floats mid-page instead of pinning to the bottom.
+   ─────────────────────────────────────────────────────────────────────── */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+
 /* ── Global touch & interaction baseline ──────────────────────────────────
    Applied universally so no component has to remember to add these.
    ────────────────────────────────────────────────────────────────────── */
@@ -795,8 +809,6 @@ button,
 /* Caption aligns left in lower-third to match the left-bar anchor */
 .client-view.lower-third .verse-caption {
   text-align: left;
-  /* Slightly smaller in lower-third since the bar is already an anchor,
-     but still comfortably readable at distance */
   font-size: clamp(0.72rem, 1.05vw, 1.1rem);
 }
 
@@ -918,20 +930,6 @@ button,
 }
 
 /* ─── Verse reference caption ─── */
-/*
- * Design intent: the reference ("Romans 1:2") must be readable from the
- * back row without competing with the scripture text. Key decisions:
- *
- *  • Size bumped to clamp(0.78rem, 1.15vw, 1.2rem) — roughly 40% larger
- *    than before so it registers at distance without a conscious effort.
- *  • opacity raised to 1 (from 0.92) — no dimming on something this important.
- *  • text-align: center — after reading the verse the eye naturally rests
- *    in the middle; a right-tucked reference is easy to miss entirely.
- *  • Separator line made slightly more prominent: 1.5px, stronger alpha.
- *  • letter-spacing tightened slightly (0.18em) so the characters don't
- *    feel stretched thin at the bigger size.
- *  • A second warm text-shadow layer gives extra pop on busy backgrounds.
- */
 .verse-caption {
   width: 100%;
   margin-top: clamp(0.6rem, 1.5vh, 1.2rem);
@@ -987,42 +985,33 @@ button,
 }
 
 /* ─── Verse transitions ─── */
+
+/* EXIT: 480ms matches JS setTimeout so text swaps at exact opacity 0 */
 .client-view.verse-exit .verse-content {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-6px);
   transition:
-    opacity 0.9s cubic-bezier(0.23, 0.44, 0.38, 1.0),
-    transform 0.9s cubic-bezier(0.23, 0.44, 0.38, 1.0);
+    opacity  0.48s cubic-bezier(0.4, 0, 0.6, 1),
+    transform 0.48s cubic-bezier(0.4, 0, 0.6, 1);
 }
 
+/* ENTER: blooms from true opacity 0 — no pop, no flash */
 .client-view.verse-enter .verse-content {
-  animation: verse-descend 1.1s cubic-bezier(0.23, 0.44, 0.38, 1.0) both;
+  animation: verse-rise 0.7s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-@keyframes verse-descend {
-  from { 
-    opacity: 0.82; 
-    transform: translateY(8px); 
-  }
-  to   { 
-    opacity: 1; 
-    transform: translateY(0); 
-  }
+@keyframes verse-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .client-view.verse-enter .verse-backdrop {
-  animation: backdrop-settle 1.0s cubic-bezier(0.23, 0.44, 0.38, 1.0) both;
+  animation: backdrop-bloom 0.75s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-@keyframes backdrop-settle {
-  from { 
-    opacity: 0.92; 
-    transform: scale(0.998); 
-  }
-  to   { 
-    opacity: 1;   
-    transform: scale(1); 
-  }
+@keyframes backdrop-bloom {
+  from { opacity: 0; transform: scale(0.997); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* Reduced motion */
@@ -1162,21 +1151,26 @@ button,
   background: var(--obsidian);
   font-family: 'Inter', sans-serif;
   color: var(--text-primary);
-  overflow: hidden;
+  /* overflow: clip clips the gold crown-line pseudo-element without
+     breaking sticky/flex layout the way overflow: hidden does */
+  overflow: clip;
   position: relative;
 }
 
 .presenter-container > main {
-  flex: 1 0 auto;
+  /* flex: 1 1 0 + min-height: 0 lets main shrink properly so the
+     footer always gets its guaranteed space at the very bottom */
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
 .presenter-container > footer {
-  margin-top: auto;
+  /* flex-shrink: 0 — footer never gets squeezed out.
+     No sticky needed: the container is already locked to viewport height. */
+  flex-shrink: 0;
   width: 100%;
-  position: sticky;
-  bottom: 0;
   z-index: 10;
   background: var(--surface);
   border-top: 1px solid var(--gold-border);
