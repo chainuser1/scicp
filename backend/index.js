@@ -1451,18 +1451,22 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (role === 'presenter') {
         state.presenterSocketId = socket.id;
       } else {
-        // Count viewers (non-presenters) for the health panel
         incrementViewerCount(activeSessionId);
       }
+      // Tell the joining socket it's in the session
       socket.emit('session-joined', { sessionId: activeSessionId });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
       if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
-      // Send current viewer count to the joining socket immediately
       socket.emit('viewer-count', {
         sessionId: activeSessionId,
         count: sessionViewerCounts.get(activeSessionId) || 0,
       });
+      // If a Presenter just joined, tell everyone else in the room (i.e. the
+      // Client/TV) so it can close the QR screen and enter display mode.
+      if (role === 'presenter') {
+        socket.to(activeSessionId).emit('presenter-joined', { sessionId: activeSessionId });
+      }
       return { sessionId: activeSessionId };
     };
 

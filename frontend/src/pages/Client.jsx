@@ -162,6 +162,7 @@ function Client() {
   // connected yet, createClientSession will also be called from handleConnect.
   useEffect(() => {
     if (urlSession || !showQrMode) return;
+    console.log('[SIV DEBUG] Mount effect — calling createClientSession');
     createClientSession();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — run once on mount only
@@ -200,7 +201,9 @@ function Client() {
   // ─── Issue create-client-session (stable ref — safe to call on reconnect) ─
   const createClientSession = useCallback(() => {
     const preferred = getStoredTvSession();
+    console.log('[SIV DEBUG] createClientSession called', { preferred, socketConnected: socket.connected });
     socket.emit('create-client-session', { preferredSessionId: preferred }, (res) => {
+      console.log('[SIV DEBUG] create-client-session callback', res);
       if (res?.ok && res.sessionId) {
         setClientSessionId(res.sessionId);
         clientSessionIdRef.current = res.sessionId;
@@ -317,17 +320,11 @@ function Client() {
     const handleHighlight = ({ text }) => setHighlightedText(text || '');
 
     const handleSessionJoined = ({ sessionId, verse: v, theme: t }) => {
-      // If we're in QR/TV mode and this echo is for our own client session
-      // being created, just record the session ID — do NOT set joinedSession
-      // yet, because that would hide the QR screen before a presenter arrives.
-      if (showQrModeRef.current && sessionId === clientSessionIdRef.current) {
-        // Our own create-client-session echo — QR screen stays visible.
-        return;
-      }
-
+      console.log('[SIV DEBUG] session-joined fired', { sessionId, clientSessionIdRef: clientSessionIdRef.current, showQrModeRef: showQrModeRef.current });
+      // This fires for our own join (viewer joining our own room).
+      // We just record the session — the QR stays open until presenter-joined.
       setJoinedSession(sessionId);
       joinedSessionRef.current = sessionId;
-
       if (v) {
         setVerse(v);
         setIsIdle(false);
@@ -337,9 +334,13 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
+      requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
+    };
 
-      // In QR/TV mode a session-joined at this point means the Presenter
-      // has joined our room — show the transition overlay then exit QR screen.
+    // Server broadcasts this specifically when a Presenter joins the room.
+    // This is the definitive signal to close the QR screen on the TV.
+    const handlePresenterJoined = ({ sessionId }) => {
+      console.log('[SIV DEBUG] presenter-joined fired', { sessionId, showQrModeRef: showQrModeRef.current });
       if (showQrModeRef.current) {
         setPresenterJoined(true);
         setPresenterJoining(true);
@@ -348,7 +349,6 @@ function Client() {
           setShowQrMode(false);
         }, 1800);
       }
-
       requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
     };
 
@@ -365,6 +365,7 @@ function Client() {
 
     // Phase 1: reconnect handler — always re-join the active session
     const handleConnect = () => {
+      console.log('[SIV DEBUG] socket connect', { joinedSessionRef: joinedSessionRef.current, showQrModeRef: showQrModeRef.current, clientSessionIdRef: clientSessionIdRef.current });
       setConnectionState('connected');
       const current = joinedSessionRef.current;
       if (current) {
@@ -391,6 +392,7 @@ function Client() {
     socket.on('update-theme',      handleTheme);
     socket.on('highlight-text',    handleHighlight);
     socket.on('session-joined',    handleSessionJoined);
+    socket.on('presenter-joined',  handlePresenterJoined);
     socket.on('session-error',     handleSessionError);
     socket.on('connect',           handleConnect);
     socket.on('disconnect',        handleDisconnect);
@@ -404,6 +406,7 @@ function Client() {
       socket.off('update-theme',      handleTheme);
       socket.off('highlight-text',    handleHighlight);
       socket.off('session-joined',    handleSessionJoined);
+      socket.off('presenter-joined',  handlePresenterJoined);
       socket.off('session-error',     handleSessionError);
       socket.off('connect',           handleConnect);
       socket.off('disconnect',        handleDisconnect);
@@ -446,10 +449,7 @@ function Client() {
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
   // ─── QR / TV Mode screen ──────────────────────────────────────────────────
-  // Visible as soon as the Client loads (no URL session) until a Presenter
-  // joins.  presenterJoined gates the exit — not joinedSession — because the
-  // Client sets joinedSession for its own room creation echo, which would
-  // otherwise hide the QR before any Presenter arrived.
+  console.log('[SIV DEBUG] render', { showQrMode, presenterJoined, joinedSession, clientSessionId });
   if (showQrMode && !presenterJoined) {
     const origin = publicOrigin || window.location.origin;
     const presenterUrl = clientSessionId ? `${origin}/presenter?session=${clientSessionId}` : '';
