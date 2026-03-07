@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 
+// ─── Shared util (Phase 3) ────────────────────────────────────────────────────
+// TODO: extract to src/utils/session.js and import from there everywhere.
+const normalizeSessionId = (v) =>
+  String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+
 // ─── Font loading sentinel ────────────────────────────────────────────────────
-// Resolves once Cormorant Garamond + Cinzel are both ready.
-// Falls back to a 2.5s deadline so the display never hangs.
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
   return Promise.all([
@@ -11,6 +14,27 @@ const waitForFonts = () => {
     document.fonts.load('1em "Cinzel"'),
   ]).catch(() => {});
 };
+
+// ─── QR generation (Phase 2) — uses npm `qrcode`, zero CDN dependency ────────
+// Falls back gracefully to a raw-URL display if the package is not installed.
+const generateQrDataUrl = async (text) => {
+  try {
+    const QRCode = await import('qrcode').catch(() => null);
+    if (!QRCode) return null;
+    return await QRCode.toDataURL(text, {
+      width: 280,
+      margin: 2,
+      color: { dark: '#0a0a0f', light: '#f0ece0' },
+      errorCorrectionLevel: 'H',
+    });
+  } catch {
+    return null;
+  }
+};
+
+// ─── sessionStorage key for TV session persistence (Phase 2) ─────────────────
+// Survives a browser crash / power-save disconnect so the QR code stays stable.
+const TV_SESSION_KEY = 'siv.tv_session_id';
 
 function Client() {
   // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -52,15 +76,14 @@ function Client() {
     return order[Math.min(order.length - 1, (idx === -1 ? 1 : idx) + steps)];
   };
 
-  const normalizeSessionId = (v) =>
-    String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-
-  // ─── State ───────────────────────────────────────────────────────────────────
-  const [urlSession] = useState(
-    () => new URLSearchParams(window.location.search).get('session') || ''
+  // ─── One-time URL param read — useRef not useState (Phase 3 fix) ──────────
+  // useRef means reconnection events can never accidentally clobber the value.
+  const urlSessionRef = useRef(
+    normalizeSessionId(new URLSearchParams(window.location.search).get('session') || '')
   );
+  const urlSession = urlSessionRef.current;
 
-  // isIdle: true until the first real verse arrives
+  // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
 
   const DEFAULT_BG = "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
@@ -79,19 +102,18 @@ function Client() {
     },
   });
 
-  // Background crossfade: bgUrl = incoming, prevBgUrl = outgoing
   const [bgUrl, setBgUrl]         = useState(DEFAULT_BG);
   const [prevBgUrl, setPrevBgUrl] = useState('');
   const [bgFading, setBgFading]   = useState(false);
   const bgFadeTimer               = useRef(null);
 
-  const [animating, setAnimating]   = useState(false);
-  const [entering, setEntering]     = useState(false);
+  const [animating, setAnimating]         = useState(false);
+  const [entering, setEntering]           = useState(false);
   const [highlightedText, setHighlightedText] = useState('');
-  const [sessionInput, setSessionInput]       = useState(normalizeSessionId(urlSession));
-  const [joinedSession, setJoinedSession]     = useState('');
-  const [sessionMessage, setSessionMessage]   = useState(
-    urlSession ? 'Joining session...' : 'Enter session code'
+  const [sessionInput, setSessionInput]   = useState(urlSession);
+  const [joinedSession, setJoinedSession] = useState('');
+  const [sessionMessage, setSessionMessage] = useState(
+    urlSession ? 'Joining session…' : 'Enter session code'
   );
   const [connectionState, setConnectionState] = useState('connecting');
   const [fontsReady, setFontsReady]           = useState(false);
@@ -99,12 +121,45 @@ function Client() {
   const [readabilityMode, setReadabilityMode] = useState('balanced');
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
-  const joinedSessionRef = useRef('');
-  const sessionInputRef  = useRef(normalizeSessionId(urlSession));
+  // ─── TV / QR mode state ───────────────────────────────────────────────────
+  const [clientSessionId, setClientSessionId]   = useState('');
+  const [showQrMode, setShowQrMode]             = useState(!urlSession);
+  const [qrDataUrl, setQrDataUrl]               = useState('');
+  const [qrError, setQrError]                   = useState(false);     // npm pkg unavailable
+  const [presenterJoining, setPresenterJoining] = useState(false);     // transition overlay
+  const [publicOrigin, setPublicOrigin]         = useState('');        // from /config endpoint
+  const [sessionExpired, setSessionExpired]     = useState(false);     // auto-regeneration flag
 
-  // ─── Refs sync ───────────────────────────────────────────────────────────────
+  const joinedSessionRef = useRef('');
+  const sessionInputRef  = useRef(urlSession);
+
   useEffect(() => { joinedSessionRef.current = joinedSession; }, [joinedSession]);
   useEffect(() => { sessionInputRef.current = sessionInput; },  [sessionInput]);
+
+  // ─── sessionStorage helpers ───────────────────────────────────────────────
+  const getStoredTvSession = () => {
+    try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
+  };
+  const storeTvSession = (id) => {
+    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { 
+      console.warn('Unable to store TV session ID persistently:', _e.message);
+    }
+  };
+  const clearStoredTvSession = () => {
+    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { 
+      console.warn('Unable to clear stored TV session ID:', _e.message);
+    }
+  };
+
+  // ─── Phase 2: Fetch canonical public origin from /config ─────────────────
+  // Resolves correctly even behind a reverse proxy or Cloudflare Tunnel.
+  useEffect(() => {
+    if (!showQrMode) return;
+    fetch('/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.publicOrigin) setPublicOrigin(d.publicOrigin); })
+      .catch(() => {}); // non-fatal — falls back to window.location.origin
+  }, [showQrMode]);
 
   // ─── Font loading ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -115,6 +170,30 @@ function Client() {
       clearTimeout(deadline);
     });
     return () => { cancelled = true; clearTimeout(deadline); };
+  }, []);
+
+  // ─── Phase 2: QR code generation — npm qrcode, no CDN ────────────────────
+  useEffect(() => {
+    if (!clientSessionId) return;
+    setQrDataUrl('');
+    setQrError(false);
+    const origin = publicOrigin || window.location.origin;
+    generateQrDataUrl(`${origin}/presenter?session=${clientSessionId}`).then((url) => {
+      if (url) setQrDataUrl(url);
+      else setQrError(true);
+    });
+  }, [clientSessionId, publicOrigin]);
+
+  // ─── Issue create-client-session (stable ref — safe to call on reconnect) ─
+  const createClientSession = useCallback(() => {
+    const preferred = getStoredTvSession();
+    socket.emit('create-client-session', { preferredSessionId: preferred }, (res) => {
+      if (res?.ok && res.sessionId) {
+        setClientSessionId(res.sessionId);
+        storeTvSession(res.sessionId);
+        setSessionExpired(false);
+      }
+    });
   }, []);
 
   // ─── Viewport listeners ───────────────────────────────────────────────────
@@ -168,9 +247,7 @@ function Client() {
   }, []);
 
   // ─── Background crossfade ─────────────────────────────────────────────────
-  // The outgoing image is preserved as prevBgUrl and fades out over 1.4s
-  // while the new image fades in underneath. Runs independently of text timing.
-  const crossfadeBackground = (newUrl) => {
+  const crossfadeBackground = useCallback((newUrl) => {
     if (!newUrl || newUrl === bgUrl) return;
     clearTimeout(bgFadeTimer.current);
     setPrevBgUrl(bgUrl);
@@ -180,13 +257,13 @@ function Client() {
       setPrevBgUrl('');
       setBgFading(false);
     }, 1400);
-  };
+  }, [bgUrl]);
 
-  // ─── Session join ─────────────────────────────────────────────────────────
+  // ─── Session join (manual / URL mode) ────────────────────────────────────
   const attemptJoin = (candidate) => {
     const norm = normalizeSessionId(candidate);
     if (!norm) { setSessionMessage('Enter a valid session code'); return; }
-    setSessionMessage('Joining session...');
+    setSessionMessage('Joining session…');
     socket.emit('join-session', { sessionId: norm, role: 'viewer' }, (res) => {
       if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session');
     });
@@ -195,16 +272,11 @@ function Client() {
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
     const handleVerse = (data) => {
-      // [FIX #7] Clear highlight at the very start of exit — before new verse
-      // mounts — so the old word's glow never bleeds into the exit animation.
       setHighlightedText('');
       setAnimating(true);
       setEntering(false);
-
-      // Background crossfades on its own 1.4s timeline
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
-
       setTimeout(() => {
         setVerse(data);
         setIsIdle(false);
@@ -212,7 +284,6 @@ function Client() {
         setAnimating(false);
         const doEnter = () =>
           requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
-        // On the very first verse, wait for fonts before animating in
         if (fontsReady) doEnter();
         else waitForFonts().then(doEnter);
       }, 520);
@@ -243,15 +314,48 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
+      // Phase 2: "Presenter connected" graceful transition before QR exits
+      if (showQrMode) {
+        setPresenterJoining(true);
+        setTimeout(() => {
+          setPresenterJoining(false);
+          setShowQrMode(false);
+        }, 1800);
+      }
       requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
     };
 
-    const handleSessionError  = ({ message }) =>
-      setSessionMessage(message || 'Session error');
-    const handleConnect       = () => setConnectionState('connected');
-    const handleDisconnect    = () => setConnectionState('disconnected');
-    const handleReconnect     = () => setConnectionState('reconnecting');
-    const handleConnectError  = () => setConnectionState('error');
+    // Phase 2: session expired server-side — auto-regenerate QR silently
+    const handleSessionError = ({ message }) => {
+      if (showQrMode && message && message.toLowerCase().includes('not found')) {
+        setSessionExpired(true);
+        clearStoredTvSession();
+        createClientSession();
+      } else {
+        setSessionMessage(message || 'Session error');
+      }
+    };
+
+    // Phase 1: reconnect handler — always re-join the active session
+    const handleConnect = () => {
+      setConnectionState('connected');
+      const current = joinedSessionRef.current;
+      if (current) {
+        // Already in a live session — silently rejoin so display resumes
+        socket.emit('join-session', { sessionId: current, role: 'viewer' }, () => {});
+      } else if (urlSession) {
+        socket.emit('join-session', { sessionId: urlSession, role: 'viewer' }, (res) => {
+          if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session');
+        });
+      } else if (showQrMode) {
+        // TV mode — request preferred session back so QR code doesn't change
+        createClientSession();
+      }
+    };
+
+    const handleDisconnect   = () => setConnectionState('disconnected');
+    const handleReconnect    = () => setConnectionState('reconnecting');
+    const handleConnectError = () => setConnectionState('error');
 
     socket.on('update-verse',      handleVerse);
     socket.on('update-theme',      handleTheme);
@@ -263,13 +367,6 @@ function Client() {
     socket.on('reconnect_attempt', handleReconnect);
     socket.on('connect_error',     handleConnectError);
 
-    if (urlSession) {
-      socket.emit(
-        'join-session',
-        { sessionId: normalizeSessionId(urlSession), role: 'viewer' },
-        (res) => { if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session'); }
-      );
-    }
     if (socket.connected) handleConnect();
 
     return () => {
@@ -284,7 +381,7 @@ function Client() {
       socket.off('connect_error',     handleConnectError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlSession, fontsReady]);
+  }, [fontsReady, showQrMode, crossfadeBackground, createClientSession]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
   const displayText = verse.segments?.length > 0
@@ -309,7 +406,6 @@ function Client() {
       if (displayText.length > 420) pressure += 1;
       if (pressure > 0) mode = pushReadabilityMode(mode, pressure >= 2 ? 2 : 1);
       setReadabilityMode(mode);
-
       const words   = displayText.trim().split(/\s+/).filter(Boolean);
       const avgWord = words.length ? words.join('').length / words.length : 0;
       setDyslexiaMode(viewport.w <= 1024 && (displayText.length > 260 || avgWord >= 5.6));
@@ -319,7 +415,114 @@ function Client() {
     return () => { active = false; };
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
-  // ─── Join screen ──────────────────────────────────────────────────────────
+  // ─── QR / TV Mode screen ──────────────────────────────────────────────────
+  if (!joinedSession && showQrMode) {
+    const origin = publicOrigin || window.location.origin;
+    const presenterUrl = clientSessionId ? `${origin}/presenter?session=${clientSessionId}` : '';
+
+    return (
+      <div className="home-page client-qr-screen">
+
+        {/* Phase 2: "Presenter connected" graceful transition overlay */}
+        {presenterJoining && (
+          <div className="client-qr-joining-overlay" aria-live="assertive">
+            <div className="client-qr-joining-check">✓</div>
+            <div className="client-qr-joining-text">Presenter connected</div>
+          </div>
+        )}
+
+        <div className="client-qr-card">
+          <div className="client-qr-header">
+            <div className="client-qr-cross" aria-hidden="true">
+              <div className="idle-cross-v" />
+              <div className="idle-cross-h" />
+            </div>
+            <h1 className="client-qr-title">Scriptures in View</h1>
+            <p className="client-qr-subtitle">
+              {sessionExpired ? 'Session refreshed — new code ready' : 'Ready for Presenter'}
+            </p>
+          </div>
+
+          <div className="client-qr-body">
+
+            {/* QR code — or raw URL fallback if npm package not installed */}
+            <div className="client-qr-box">
+              {qrDataUrl ? (
+                <img
+                  src={qrDataUrl}
+                  alt={`QR code for session ${clientSessionId}`}
+                  className="client-qr-image"
+                  draggable={false}
+                />
+              ) : qrError && presenterUrl ? (
+                <div className="client-qr-url-fallback">
+                  <span className="client-qr-url-label">Open on Presenter device:</span>
+                  <span className="client-qr-url-text" role="textbox" aria-readonly="true">
+                    {presenterUrl}
+                  </span>
+                </div>
+              ) : (
+                <div className="client-qr-placeholder" aria-label="Generating QR code">
+                  <div className="client-qr-spinner" />
+                </div>
+              )}
+            </div>
+
+            {/* Large session code — readable from across a room */}
+            {clientSessionId && (
+              <div className="client-qr-code-row">
+                <span className="client-qr-code-label">Session Code</span>
+                <span
+                  className="client-qr-code-value"
+                  aria-label={`Session code: ${clientSessionId.split('').join(' ')}`}
+                >
+                  {clientSessionId}
+                </span>
+              </div>
+            )}
+
+            <p className="client-qr-instruction">
+              Scan the QR code or enter the code above in the Presenter app to connect.
+            </p>
+
+            <div className="client-qr-divider">
+              <span>or join a presenter's session manually</span>
+            </div>
+
+            {/* Original manual-entry mechanism — fully preserved */}
+            <div className="client-qr-manual">
+              <input
+                type="text"
+                className="client-qr-input"
+                placeholder="Presenter code…"
+                value={sessionInput}
+                onChange={(e) => setSessionInput(normalizeSessionId(e.target.value))}
+                onKeyDown={(e) => e.key === 'Enter' && attemptJoin(sessionInput)}
+              />
+              <button className="client-qr-join-btn" onClick={() => attemptJoin(sessionInput)}>
+                Join
+              </button>
+            </div>
+            {sessionMessage && sessionMessage !== 'Enter session code' && (
+              <div className="client-qr-status">{sessionMessage}</div>
+            )}
+          </div>
+
+          <div className="client-qr-footer">
+            <span className={`client-qr-conn client-qr-conn--${connectionState}`}>
+              {connectionState === 'connected'
+                ? '● Connected'
+                : connectionState === 'connecting'
+                  ? '○ Connecting…'
+                  : '⚠ Reconnecting…'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Classic join screen (URL param provided or user switched manually) ───
   if (!joinedSession) {
     return (
       <div className="home-page" style={{ alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
@@ -337,6 +540,7 @@ function Client() {
                   placeholder="AB12CD"
                   value={sessionInput}
                   onChange={(e) => setSessionInput(normalizeSessionId(e.target.value))}
+                  onKeyDown={(e) => e.key === 'Enter' && attemptJoin(sessionInput)}
                 />
                 <button className="control-button" onClick={() => attemptJoin(sessionInput)}>
                   Join
@@ -345,6 +549,12 @@ function Client() {
             </div>
             <div style={{ color: '#a09880', fontSize: '0.85rem' }}>{sessionMessage}</div>
             <div style={{ color: '#7f745f', fontSize: '0.75rem' }}>Connection: {connectionState}</div>
+            <button
+              style={{ marginTop: '0.75rem', background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
+              onClick={() => setShowQrMode(true)}
+            >
+              Show QR code instead (TV mode)
+            </button>
           </div>
         </div>
       </div>
@@ -375,9 +585,9 @@ function Client() {
   const { w: vw, h: vh, rem: PX_PER_REM } = viewport;
   const length = displayText.length;
 
-  const maxCap       = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
-  const backdropMaxH = Math.min(vh * 0.82, 960);
-  const backdropVPad = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
+  const maxCap        = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
+  const backdropMaxH  = Math.min(vh * 0.82, 960);
+  const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = layout === 'lower-third'
     ? Math.min(6 * PX_PER_REM, Math.max(2.4 * PX_PER_REM, vh * 0.07)) : 0;
   const captionH = (verse.book_title && verse.chapter_number && verse.verse_number)
@@ -408,9 +618,9 @@ function Client() {
     return lo;
   })();
 
-  const fittingRem  = fontSizeThatFits * 0.95;
-  const rawFloor    = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
-  const computedRem = Math.min(maxCap, Math.max(Math.min(rawFloor, fittingRem), fittingRem));
+  const fittingRem       = fontSizeThatFits * 0.95;
+  const rawFloor         = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
+  const computedRem      = Math.min(maxCap, Math.max(Math.min(rawFloor, fittingRem), fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
   // ─── CSS class composition ────────────────────────────────────────────────
@@ -432,25 +642,11 @@ function Client() {
   return (
     <div className={viewClass} style={{ fontSize: computedFontSize }}>
 
-      {/* ── Background layers for crossfade ──────────────────────────────────
-          .client-bg-prev fades out, .client-bg-current fades in.
-          Both sit at z-index 0 behind vignette overlays (::before/::after).  */}
-      <div
-        className="client-bg-current"
-        style={{ backgroundImage: bgUrl }}
-        aria-hidden="true"
-      />
+      <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
       {bgFading && prevBgUrl && (
-        <div
-          className="client-bg-prev"
-          style={{ backgroundImage: prevBgUrl }}
-          aria-hidden="true"
-        />
+        <div className="client-bg-prev" style={{ backgroundImage: prevBgUrl }} aria-hidden="true" />
       )}
 
-      {/* ── Idle state ───────────────────────────────────────────────────────
-          Shown before any verse arrives from the presenter.
-          Minimal and reverent: a thin cross + breathing accent line.        */}
       {isIdle && (
         <div className="client-idle-state" aria-live="polite" aria-label="Waiting for scripture">
           <div className="idle-cross" aria-hidden="true">
@@ -461,9 +657,6 @@ function Client() {
         </div>
       )}
 
-      {/* ── Live verse ───────────────────────────────────────────────────────
-          .verse-backdrop uses clip-path to match border-radius — prevents
-          text rendering outside rounded corners at any zoom level.          */}
       {!isIdle && (
         <div className="verse-content">
           <div className="verse-backdrop">
@@ -473,17 +666,21 @@ function Client() {
                 {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
               </div>
             )}
-            {hasMoreSegments && (
-              <div className="cont-indicator">›</div>
-            )}
+            {hasMoreSegments && <div className="cont-indicator">›</div>}
           </div>
         </div>
       )}
 
-      {/* ── Session watermark + connection indicator ──────────────────────────
-          Normally: session code, 40% opacity, bottom-right corner.
-          On disconnect/reconnect: amber dot pulses beside the code —
-          visible to the operator without alarming the congregation.         */}
+      {/* Phase 1: Prominent reconnecting banner for the AV operator
+          Appears above the content but below the verse — visible from the
+          back of the room without alarming the congregation.               */}
+      {(isDisconnected || isReconnecting) && joinedSession && (
+        <div className="client-reconnect-banner" role="alert" aria-live="assertive">
+          <span className="client-reconnect-dot" />
+          {isReconnecting ? 'Reconnecting…' : 'Connection lost — retrying'}
+        </div>
+      )}
+
       {joinedSession && (
         <span className={[
           'session-watermark',
