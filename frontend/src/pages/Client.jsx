@@ -99,12 +99,13 @@ function Client() {
   const [bgFading, setBgFading]   = useState(false);
   const bgFadeTimer               = useRef(null);
 
-  const [animating, setAnimating]             = useState(false);
-  const [entering, setEntering]               = useState(false);
+  // textVisible drives the only animation: a gentle opacity crossfade
+  // on the text layer. The backdrop box never moves or disappears.
+  const [textVisible, setTextVisible]         = useState(false);
+  const [displayVerse, setDisplayVerse]       = useState(null);
   const [highlightedText, setHighlightedText] = useState('');
   const [connectionState, setConnectionState] = useState('connecting');
   const [fontsReady, setFontsReady]           = useState(false);
-  const [labelKey, setLabelKey]               = useState(0);
   const [readabilityMode, setReadabilityMode] = useState('balanced');
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
@@ -255,37 +256,38 @@ function Client() {
 
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
+    // TRANSITION STRATEGY:
+    // The backdrop box never disappears. Only the text layer inside it
+    // crossfades. On verse change:
+    //   1. Fade text out over TEXT_FADE_MS
+    //   2. Swap the verse data (instant, invisible — text is opacity:0)
+    //   3. Fade text back in
+    // This is imperceptible to readers as movement — they just see the
+    // words gently dissolve from one verse to the next.
+    const TEXT_FADE_MS = 400;
+
     const handleVerse = (data) => {
       setHighlightedText('');
-      setEntering(false);
-      setAnimating(true);
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
-      // Wait for exit transition to fully complete (480ms matches CSS exit duration)
-      // before swapping content, so the audience never sees a mid-fade text change.
+      // Step 1 — fade text out
+      setTextVisible(false);
       setTimeout(() => {
+        // Step 2 — swap content while invisible
         setVerse(data);
+        setDisplayVerse(data);
         setIsIdle(false);
-        setLabelKey((k) => k + 1);
-        setAnimating(false);
-        // Two rAF frames ensure the DOM has committed the new text before
-        // the enter animation class is applied — prevents a single-frame flash.
-        const doEnter = () =>
-          requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
-        if (fontsReady) doEnter();
-        else waitForFonts().then(doEnter);
-      }, 480);
+        // Step 3 — fade text back in after DOM commit
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => setTextVisible(true))
+        );
+      }, TEXT_FADE_MS);
     };
 
     const handleTheme = (theme) => {
-      setEntering(false);
-      setAnimating(true);
       if (theme.background_url) crossfadeBackground(theme.background_url);
-      setTimeout(() => {
-        setVerse((v) => ({ ...v, theme }));
-        setAnimating(false);
-        requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
-      }, 480);
+      // Theme change: just crossfade the background, keep text visible
+      setVerse((v) => ({ ...v, theme }));
     };
 
     const handleHighlight = ({ text }) => setHighlightedText(text || '');
@@ -302,7 +304,8 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
-      requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
+      if (v) setDisplayVerse(v);
+      requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
     };
 
     // Server broadcasts this ONLY when a Presenter joins the room.
@@ -567,8 +570,7 @@ function Client() {
     dyslexiaMode   ? 'readability-dyslexia' : '',
     noMotion       ? 'reduce-motion-auto'   : '',
     layout,
-    animating && !noMotion ? 'verse-exit'  : '',
-    entering  && !noMotion ? 'verse-enter' : '',
+
     isIdle         ? 'client-idle'          : '',
     isDisconnected ? 'client-disconnected'  : '',
     isReconnecting ? 'client-reconnecting'  : '',
@@ -594,15 +596,19 @@ function Client() {
       )}
 
       {!isIdle && (
-        <div className="verse-content" key={labelKey}>
+        <div className="verse-content">
           <div className="verse-backdrop">
-            <p>{renderHighlightedText()}</p>
-            {verse.book_title && verse.chapter_number && verse.verse_number && (
-              <div className="verse-caption">
-                {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
-              </div>
-            )}
-            {hasMoreSegments && <div className="cont-indicator">›</div>}
+            {/* verse-text-body is the ONLY thing that fades.
+                The backdrop box itself never animates. */}
+            <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
+              <p>{renderHighlightedText()}</p>
+              {verse.book_title && verse.chapter_number && verse.verse_number && (
+                <div className="verse-caption">
+                  {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
+                </div>
+              )}
+              {hasMoreSegments && <div className="cont-indicator">›</div>}
+            </div>
           </div>
         </div>
       )}
