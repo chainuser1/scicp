@@ -26,7 +26,7 @@ export default function Footer() {
       </nav>
 
       <div className="home-footer-credit">
-        <span>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by LDS Dev Team.</span>
+        <span>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by Dagami Ward Dev Team.</span>
       </div>
     </footer>
   );
