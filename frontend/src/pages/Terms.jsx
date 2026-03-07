@@ -53,8 +53,8 @@ export default function Terms() {
         </section>
       </main>
       
-      <footer className="terms-footer">
-        <p>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by LDS Dev Team.</p>
+      <footer className="terms-footer" style={{marginTop: '2rem', fontSize: '0.875rem', color: '#6b7280'}}>
+        <p>© {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by Dagami Ward Dev Team.</p>
       </footer>
     </div>
   );
