@@ -30,17 +30,28 @@
   box-sizing: border-box;
 }
 
-/* ── Viewport height anchor ──────────────────────────────────────────────
-   Without these, 100dvh on a child is calculated against the browser's
-   default scrollable document height on Android/Chrome — not the actual
-   visible viewport. The presenter page then overflows and the footer
-   floats mid-page instead of pinning to the bottom.
-   ─────────────────────────────────────────────────────────────────────── */
-html, body {
+/* ── Full-height chain ────────────────────────────────────────────────────
+   Every ancestor of .presenter-container must be exactly viewport-tall so
+   that 100dvh resolves to the actual screen height on Android Chrome.
+   Without height:100% on html/body AND #root, the browser treats the page
+   as a scrollable document, dvh becomes larger than the screen, and the
+   footer floats mid-page with a dead gap below it.
+   overflow:hidden on all three also prevents the rubber-band bounce scroll
+   that can expose the gap on iOS Safari.
+   ──────────────────────────────────────────────────────────────────────── */
+html {
+  height: 100%;
+  overflow: hidden;
+}
+body {
   height: 100%;
   overflow: hidden;
   margin: 0;
   padding: 0;
+}
+#root {
+  height: 100%;
+  overflow: hidden;
 }
 
 
@@ -984,43 +995,36 @@ button,
   font-style: normal;
 }
 
-/* ─── Verse transitions ─── */
+/* ─── Verse text crossfade ───────────────────────────────────────────────
+ *
+ * The backdrop box (.verse-backdrop) is ALWAYS visible and NEVER animates.
+ * Only the inner text layer (.verse-text-body) crossfades opacity.
+ *
+ * When a new verse arrives:
+ *   JS fades text out (400ms) → swaps content → fades text back in (600ms)
+ *
+ * No movement. No box disappearing. Words dissolve gently while the
+ * glass panel stays perfectly still the entire time.
+ * ──────────────────────────────────────────────────────────────────────── */
 
-/* EXIT: 480ms matches JS setTimeout so text swaps at exact opacity 0 */
-.client-view.verse-exit .verse-content {
+.verse-text-body {
   opacity: 0;
-  transform: translateY(-6px);
-  transition:
-    opacity  0.48s cubic-bezier(0.4, 0, 0.6, 1),
-    transform 0.48s cubic-bezier(0.4, 0, 0.6, 1);
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-/* ENTER: blooms from true opacity 0 — no pop, no flash */
-.client-view.verse-enter .verse-content {
-  animation: verse-rise 0.7s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+.verse-text-body.verse-text-visible {
+  opacity: 1;
 }
 
-@keyframes verse-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.client-view.verse-enter .verse-backdrop {
-  animation: backdrop-bloom 0.75s 0.04s cubic-bezier(0.22, 0.61, 0.36, 1) both;
-}
-
-@keyframes backdrop-bloom {
-  from { opacity: 0; transform: scale(0.997); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-/* Reduced motion */
-.client-view.reduce-motion-auto .verse-content,
-.client-view.reduce-motion-auto .verse-backdrop {
-  animation: none !important;
-  transform: none !important;
-  transition: none !important;
+/* Reduced motion — swap instantly, no fade */
+.client-view.reduce-motion-auto .verse-text-body,
+.client-view.reduce-motion-auto .verse-text-body.verse-text-visible {
   opacity: 1 !important;
+  transition: none !important;
 }
 .client-view.reduce-motion-auto .verse-caption {
   animation: none !important;
@@ -1146,36 +1150,72 @@ button,
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
+  /* 100% inherits the full viewport height from the html/body/#root chain
+     above. 100dvh is kept as a robust fallback for non-React contexts.    */
+  height: 100%;
+  max-height: 100dvh;
   background: var(--obsidian);
   font-family: 'Inter', sans-serif;
   color: var(--text-primary);
-  /* overflow: clip clips the gold crown-line pseudo-element without
-     breaking sticky/flex layout the way overflow: hidden does */
+  /* overflow:clip clips the decorative gold crown-line pseudo-element
+     without creating a scroll container (which overflow:hidden does),
+     so sticky positioning and flex shrinking work correctly.              */
   overflow: clip;
   position: relative;
 }
 
 .presenter-container > main {
-  /* flex: 1 1 0 + min-height: 0 lets main shrink properly so the
-     footer always gets its guaranteed space at the very bottom */
+  /* flex:1 1 0 + min-height:0 — the two values that make a flex child
+     actually shrink. Without min-height:0, a flex column child refuses
+     to shrink below its content size, pushing the footer off-screen.     */
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.presenter-container > footer {
-  /* flex-shrink: 0 — footer never gets squeezed out.
-     No sticky needed: the container is already locked to viewport height. */
+.presenter-footer {
+  /* flex-shrink:0 — always the last item in the flex column, never
+     compressed. The container is locked to 100% viewport height so
+     this naturally sits at the very bottom with no gap.                  */
   flex-shrink: 0;
   width: 100%;
   z-index: 10;
   background: var(--surface);
   border-top: 1px solid var(--gold-border);
-  padding: 0.65rem 0;
+  padding: 0.5rem 0 0.6rem;
   text-align: center;
+}
+
+.presenter-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.15rem 0.1rem;
+  margin-bottom: 0.25rem;
+}
+
+.presenter-footer-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.35rem;
+  border-radius: var(--radius);
+  transition: color var(--transition);
+}
+
+.presenter-footer-links a:hover {
+  color: var(--gold-light);
+}
+
+.presenter-footer-credit {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.58rem;
+  color: var(--text-dim);
+  opacity: 0.6;
+  line-height: 1.3;
 }
 
 .presenter-container--light {
