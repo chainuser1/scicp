@@ -156,7 +156,15 @@ function Client() {
     try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
   };
 
-  // ─── Phase 2: Fetch canonical public origin from /config ─────────────────
+  // ─── Eager QR session creation on mount ──────────────────────────────────
+  // Call immediately so the QR screen is shown the instant the TV page loads,
+  // with no click or remote-button press required. If the socket isn't
+  // connected yet, createClientSession will also be called from handleConnect.
+  useEffect(() => {
+    if (urlSession || !showQrMode) return;
+    createClientSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — run once on mount only
   // Resolves correctly even behind a reverse proxy or Cloudflare Tunnel.
   useEffect(() => {
     if (!showQrMode) return;
@@ -346,7 +354,7 @@ function Client() {
 
     // Phase 2: session expired server-side — auto-regenerate QR silently
     const handleSessionError = ({ message }) => {
-      if (showQrMode && message && message.toLowerCase().includes('not found')) {
+      if (showQrModeRef.current && message && message.toLowerCase().includes('not found')) {
         setSessionExpired(true);
         clearStoredTvSession();
         createClientSession();
@@ -360,15 +368,18 @@ function Client() {
       setConnectionState('connected');
       const current = joinedSessionRef.current;
       if (current) {
-        // Already in a live session — silently rejoin so display resumes
         socket.emit('join-session', { sessionId: current, role: 'viewer' }, () => {});
       } else if (urlSession) {
         socket.emit('join-session', { sessionId: urlSession, role: 'viewer' }, (res) => {
           if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session');
         });
-      } else if (showQrMode) {
-        // TV mode — request preferred session back so QR code doesn't change
-        createClientSession();
+      } else if (showQrModeRef.current) {
+        // Only re-create if we don't already have a session (avoids double-fire on mount)
+        if (!clientSessionIdRef.current) createClientSession();
+        else {
+          // Reconnect with existing session ID so QR code stays the same
+          socket.emit('create-client-session', { preferredSessionId: clientSessionIdRef.current }, () => {});
+        }
       }
     };
 
@@ -400,7 +411,7 @@ function Client() {
       socket.off('connect_error',     handleConnectError);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fontsReady, showQrMode, crossfadeBackground, createClientSession]);
+  }, [fontsReady, crossfadeBackground, createClientSession]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
   const displayText = verse.segments?.length > 0
