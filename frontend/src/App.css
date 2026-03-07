@@ -159,6 +159,29 @@ button,
   animation: fade-up 0.8s 0.3s forwards;
 }
 
+/* Ultra-narrow viewport optimization (≤320px) */
+@media (max-width: 320px) {
+  .home-footer-links {
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.6rem;
+  }
+
+  .home-footer-links a {
+    width: 100%;
+    text-align: center;
+    padding: 0.2rem 0;
+  }
+
+  .home-footer-credit {
+    font-size: 0.55rem;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+}
+
+
 .home-title {
   font-family: 'Cormorant Garamond', serif;
   font-size: clamp(3.5rem, 8vw, 6.5rem);
@@ -288,66 +311,60 @@ button,
   opacity: 0.5;
 }
 
-.home-footer-name {
-  font-family: 'Cinzel', serif;
-  font-size: 0.7rem;
-  letter-spacing: 0.2em;
+.home-footer {
+  padding: 0.65rem 0; /* Further reduced from 0.75rem */
+  background-color: var(--surface);
   color: var(--text-secondary);
-  text-transform: uppercase;
+  text-align: center;
+}
+
+.home-footer-brand {
+  display: none; /* Removed per compact design - brand remains in header */
 }
 
 .home-footer-links {
   display: flex;
-  gap: 2rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  margin: 0.15rem 0;
+  font-size: 0.68rem; /* Reduced from 0.75rem */
 }
 
 .home-footer-links a {
-  font-size: 0.75rem;
   color: var(--text-dim);
   text-decoration: none;
-  letter-spacing: 0.05em;
   transition: color var(--transition);
-  position: relative;
-}
-
-.home-footer-links a::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: var(--gold);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.3s ease;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius);
 }
 
 .home-footer-links a:hover {
-  color: var(--gold);
-}
-
-.home-footer-links a:hover::after {
-  transform: scaleX(1);
+  color: var(--gold-light);
+  background: var(--surface-2);
 }
 
 .home-footer-credit {
-  font-size: 0.72rem;
+  font-size: 0.62rem; /* Reduced from 0.7rem */
+  line-height: 1.1;
+  margin-top: 0.1rem;
   color: var(--text-dim);
-  opacity: 0.7;
-  text-align: right;
 }
 
-.home-footer-credit em {
-  color: var(--gold-light);
-  font-style: normal;
-  font-weight: 600;
-}
-
-/* Add separator styling */
 .home-footer-separator {
-  color: var(--text-dim);
-  opacity: 0.5;
+  display: none; /* Removed for compactness - replaced with space */
+}
+
+/* Mobile optimization */
+@media (max-width: 640px) {
+  .home-footer-links {
+    gap: 0.3rem;
+    font-size: 0.65rem;
+  }
+  
+  .home-footer-credit {
+    font-size: 0.58rem;
+  }
 }
 
 .home-tour-prompt {
