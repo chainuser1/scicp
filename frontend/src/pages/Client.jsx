@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 
-// ─── Shared util (Phase 3) ────────────────────────────────────────────────────
-// TODO: extract to src/utils/session.js and import from there everywhere.
+// ─── Shared util ──────────────────────────────────────────────────────────────
+// TODO: extract to src/utils/session.js and import everywhere
 const normalizeSessionId = (v) =>
   String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
 
@@ -15,8 +15,8 @@ const waitForFonts = () => {
   ]).catch(() => {});
 };
 
-// ─── QR generation (Phase 2) — uses npm `qrcode`, zero CDN dependency ────────
-// Falls back gracefully to a raw-URL display if the package is not installed.
+// ─── QR generation — uses npm `qrcode`, zero CDN dependency ──────────────────
+// Falls back to a raw-URL text display if the package is not installed.
 const generateQrDataUrl = async (text) => {
   try {
     const QRCode = await import('qrcode').catch(() => null);
@@ -27,17 +27,16 @@ const generateQrDataUrl = async (text) => {
       color: { dark: '#0a0a0f', light: '#f0ece0' },
       errorCorrectionLevel: 'H',
     });
-  } catch {
+  } catch (_e) {
     return null;
   }
 };
 
-// ─── sessionStorage key for TV session persistence (Phase 2) ─────────────────
-// Survives a browser crash / power-save disconnect so the QR code stays stable.
+// ─── sessionStorage key — keeps QR code stable across browser restarts ───────
 const TV_SESSION_KEY = 'siv.tv_session_id';
 
 function Client() {
-  // ─── Utilities ──────────────────────────────────────────────────────────────
+  // ─── Utilities ───────────────────────────────────────────────────────────────
   const extractImageUrl = (value) => {
     const match = String(value || '').match(/url\((['"]?)(.*?)\1\)/i);
     return match ? match[2] : '';
@@ -64,7 +63,7 @@ function Client() {
                  + 0.0722 * (data[i + 2] / 255);
         }
         resolve(total / pixels);
-      } catch { resolve(null); }
+      } catch (_e) { resolve(null); }
     };
     img.onerror = () => resolve(null);
     img.src = imageUrl;
@@ -75,13 +74,6 @@ function Client() {
     const idx = order.indexOf(mode);
     return order[Math.min(order.length - 1, (idx === -1 ? 1 : idx) + steps)];
   };
-
-  // ─── One-time URL param read — useRef not useState (Phase 3 fix) ──────────
-  // useRef means reconnection events can never accidentally clobber the value.
-  const urlSessionRef = useRef(
-    normalizeSessionId(new URLSearchParams(window.location.search).get('session') || '')
-  );
-  const urlSession = urlSessionRef.current;
 
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
@@ -107,43 +99,33 @@ function Client() {
   const [bgFading, setBgFading]   = useState(false);
   const bgFadeTimer               = useRef(null);
 
-  const [animating, setAnimating]         = useState(false);
-  const [entering, setEntering]           = useState(false);
+  const [animating, setAnimating]             = useState(false);
+  const [entering, setEntering]               = useState(false);
   const [highlightedText, setHighlightedText] = useState('');
-  const [sessionInput, setSessionInput]   = useState(urlSession);
-  const [joinedSession, setJoinedSession] = useState('');
-  const [sessionMessage, setSessionMessage] = useState(
-    urlSession ? 'Joining session…' : 'Enter session code'
-  );
   const [connectionState, setConnectionState] = useState('connecting');
   const [fontsReady, setFontsReady]           = useState(false);
   const [labelKey, setLabelKey]               = useState(0);
   const [readabilityMode, setReadabilityMode] = useState('balanced');
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
-  // ─── TV / QR mode state ───────────────────────────────────────────────────
+  // ─── QR / TV session state ────────────────────────────────────────────────
+  // The TV always creates its own session and shows QR.
+  // presenterJoined flips to true when the server broadcasts presenter-joined.
   const [clientSessionId, setClientSessionId]   = useState('');
-  const [showQrMode, setShowQrMode]             = useState(!urlSession);
-  // presenterJoined: true only when a *Presenter* has joined our session.
-  // Separate from clientSessionId so the QR screen stays visible while we
-  // own the session but no presenter has connected yet.
   const [presenterJoined, setPresenterJoined]   = useState(false);
   const [qrDataUrl, setQrDataUrl]               = useState('');
   const [qrError, setQrError]                   = useState(false);
-  const [presenterJoining, setPresenterJoining] = useState(false);
+  const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
   const [sessionExpired, setSessionExpired]     = useState(false);
 
-  const joinedSessionRef   = useRef('');
-  const sessionInputRef    = useRef(urlSession);
-  const showQrModeRef      = useRef(!urlSession);
-  // Ref mirror of clientSessionId for use inside socket handler closures
+  // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
+  const presenterJoinedRef = useRef(false);
+  const joinedSessionRef   = useRef('');
 
-  useEffect(() => { joinedSessionRef.current   = joinedSession;    }, [joinedSession]);
-  useEffect(() => { sessionInputRef.current    = sessionInput;     }, [sessionInput]);
-  useEffect(() => { showQrModeRef.current      = showQrMode;       }, [showQrMode]);
-  useEffect(() => { clientSessionIdRef.current = clientSessionId;  }, [clientSessionId]);
+  useEffect(() => { clientSessionIdRef.current = clientSessionId; }, [clientSessionId]);
+  useEffect(() => { presenterJoinedRef.current = presenterJoined; }, [presenterJoined]);
 
   // ─── sessionStorage helpers ───────────────────────────────────────────────
   const getStoredTvSession = () => {
@@ -156,24 +138,13 @@ function Client() {
     try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
   };
 
-  // ─── Eager QR session creation on mount ──────────────────────────────────
-  // Call immediately so the QR screen is shown the instant the TV page loads,
-  // with no click or remote-button press required. If the socket isn't
-  // connected yet, createClientSession will also be called from handleConnect.
+  // ─── Fetch canonical public origin from /config ───────────────────────────
   useEffect(() => {
-    if (urlSession || !showQrMode) return;
-    console.log('[SIV DEBUG] Mount effect — calling createClientSession');
-    createClientSession();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — run once on mount only
-  // Resolves correctly even behind a reverse proxy or Cloudflare Tunnel.
-  useEffect(() => {
-    if (!showQrMode) return;
     fetch('/config')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.publicOrigin) setPublicOrigin(d.publicOrigin); })
-      .catch(() => {}); // non-fatal — falls back to window.location.origin
-  }, [showQrMode]);
+      .catch(() => {});
+  }, []);
 
   // ─── Font loading ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -186,7 +157,7 @@ function Client() {
     return () => { cancelled = true; clearTimeout(deadline); };
   }, []);
 
-  // ─── Phase 2: QR code generation — npm qrcode, no CDN ────────────────────
+  // ─── QR code generation ───────────────────────────────────────────────────
   useEffect(() => {
     if (!clientSessionId) return;
     setQrDataUrl('');
@@ -198,12 +169,12 @@ function Client() {
     });
   }, [clientSessionId, publicOrigin]);
 
-  // ─── Issue create-client-session (stable ref — safe to call on reconnect) ─
+  // ─── Create / rejoin TV session ───────────────────────────────────────────
+  // Called on mount and on every reconnect.
+  // Sends the stored session ID so the QR code stays stable across reloads.
   const createClientSession = useCallback(() => {
     const preferred = getStoredTvSession();
-    console.log('[SIV DEBUG] createClientSession called', { preferred, socketConnected: socket.connected });
     socket.emit('create-client-session', { preferredSessionId: preferred }, (res) => {
-      console.log('[SIV DEBUG] create-client-session callback', res);
       if (res?.ok && res.sessionId) {
         setClientSessionId(res.sessionId);
         clientSessionIdRef.current = res.sessionId;
@@ -211,6 +182,12 @@ function Client() {
         setSessionExpired(false);
       }
     });
+  }, []);
+
+  // Eager call on mount so QR appears immediately
+  useEffect(() => {
+    createClientSession();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Viewport listeners ───────────────────────────────────────────────────
@@ -276,16 +253,6 @@ function Client() {
     }, 1400);
   }, [bgUrl]);
 
-  // ─── Session join (manual / URL mode) ────────────────────────────────────
-  const attemptJoin = (candidate) => {
-    const norm = normalizeSessionId(candidate);
-    if (!norm) { setSessionMessage('Enter a valid session code'); return; }
-    setSessionMessage('Joining session…');
-    socket.emit('join-session', { sessionId: norm, role: 'viewer' }, (res) => {
-      if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session');
-    });
-  };
-
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
     const handleVerse = (data) => {
@@ -319,11 +286,8 @@ function Client() {
 
     const handleHighlight = ({ text }) => setHighlightedText(text || '');
 
+    // Fires when we join our own session room — just record the ID.
     const handleSessionJoined = ({ sessionId, verse: v, theme: t }) => {
-      console.log('[SIV DEBUG] session-joined fired', { sessionId, clientSessionIdRef: clientSessionIdRef.current, showQrModeRef: showQrModeRef.current });
-      // This fires for our own join (viewer joining our own room).
-      // We just record the session — the QR stays open until presenter-joined.
-      setJoinedSession(sessionId);
       joinedSessionRef.current = sessionId;
       if (v) {
         setVerse(v);
@@ -337,49 +301,38 @@ function Client() {
       requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
     };
 
-    // Server broadcasts this specifically when a Presenter joins the room.
-    // This is the definitive signal to close the QR screen on the TV.
-    const handlePresenterJoined = ({ sessionId }) => {
-      console.log('[SIV DEBUG] presenter-joined fired', { sessionId, showQrModeRef: showQrModeRef.current });
-      if (showQrModeRef.current) {
-        setPresenterJoined(true);
-        setPresenterJoining(true);
-        setTimeout(() => {
-          setPresenterJoining(false);
-          setShowQrMode(false);
-        }, 1800);
-      }
-      requestAnimationFrame(() => requestAnimationFrame(() => setEntering(true)));
+    // Server broadcasts this ONLY when a Presenter joins the room.
+    // This is the definitive signal: close QR, enter display mode.
+    const handlePresenterJoined = () => {
+      if (presenterJoinedRef.current) return; // already handled
+      setPresenterJoined(true);
+      presenterJoinedRef.current = true;
+      setPresenterJoining(true);
+      setTimeout(() => setPresenterJoining(false), 1800);
     };
 
-    // Phase 2: session expired server-side — auto-regenerate QR silently
     const handleSessionError = ({ message }) => {
-      if (showQrModeRef.current && message && message.toLowerCase().includes('not found')) {
+      // Session expired on server — regenerate silently
+      if (message && message.toLowerCase().includes('not found')) {
         setSessionExpired(true);
         clearStoredTvSession();
         createClientSession();
-      } else {
-        setSessionMessage(message || 'Session error');
       }
     };
 
-    // Phase 1: reconnect handler — always re-join the active session
     const handleConnect = () => {
-      console.log('[SIV DEBUG] socket connect', { joinedSessionRef: joinedSessionRef.current, showQrModeRef: showQrModeRef.current, clientSessionIdRef: clientSessionIdRef.current });
       setConnectionState('connected');
       const current = joinedSessionRef.current;
       if (current) {
+        // Reconnect — rejoin existing session silently
         socket.emit('join-session', { sessionId: current, role: 'viewer' }, () => {});
-      } else if (urlSession) {
-        socket.emit('join-session', { sessionId: urlSession, role: 'viewer' }, (res) => {
-          if (!res?.ok) setSessionMessage(res?.message || 'Unable to join session');
-        });
-      } else if (showQrModeRef.current) {
-        // Only re-create if we don't already have a session (avoids double-fire on mount)
-        if (!clientSessionIdRef.current) createClientSession();
-        else {
-          // Reconnect with existing session ID so QR code stays the same
+      } else {
+        // Fresh connect — create/resume TV session
+        // Guard: only call if socket is actually ready (avoid double-fire with mount effect)
+        if (clientSessionIdRef.current) {
           socket.emit('create-client-session', { preferredSessionId: clientSessionIdRef.current }, () => {});
+        } else {
+          createClientSession();
         }
       }
     };
@@ -413,7 +366,7 @@ function Client() {
       socket.off('reconnect_attempt', handleReconnect);
       socket.off('connect_error',     handleConnectError);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
@@ -448,16 +401,16 @@ function Client() {
     return () => { active = false; };
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
-  // ─── QR / TV Mode screen ──────────────────────────────────────────────────
-  console.log('[SIV DEBUG] render', { showQrMode, presenterJoined, joinedSession, clientSessionId });
-  if (showQrMode && !presenterJoined) {
+  // ─── QR waiting screen ────────────────────────────────────────────────────
+  // Shown until the Presenter joins. No interaction needed from the TV side.
+  if (!presenterJoined) {
     const origin = publicOrigin || window.location.origin;
     const presenterUrl = clientSessionId ? `${origin}/presenter?session=${clientSessionId}` : '';
 
     return (
       <div className="home-page client-qr-screen">
 
-        {/* Phase 2: "Presenter connected" graceful transition overlay */}
+        {/* "Presenter connected" transition overlay */}
         {presenterJoining && (
           <div className="client-qr-joining-overlay" aria-live="assertive">
             <div className="client-qr-joining-check">✓</div>
@@ -473,13 +426,17 @@ function Client() {
             </div>
             <h1 className="client-qr-title">Scriptures in View</h1>
             <p className="client-qr-subtitle">
-              {sessionExpired ? 'Session refreshed — new code ready' : 'Ready for Presenter'}
+              {sessionExpired
+                ? 'Session refreshed — new code ready'
+                : connectionState === 'connecting' || connectionState === 'reconnecting'
+                  ? 'Connecting…'
+                  : 'Waiting for Presenter'}
             </p>
           </div>
 
           <div className="client-qr-body">
 
-            {/* QR code — or raw URL fallback if npm package not installed */}
+            {/* QR code — or raw-URL fallback */}
             <div className="client-qr-box">
               {qrDataUrl ? (
                 <img
@@ -502,7 +459,7 @@ function Client() {
               )}
             </div>
 
-            {/* Large session code — readable from across a room */}
+            {/* Large session code — readable from across the room */}
             {clientSessionId && (
               <div className="client-qr-code-row">
                 <span className="client-qr-code-label">Session Code</span>
@@ -516,30 +473,9 @@ function Client() {
             )}
 
             <p className="client-qr-instruction">
-              Scan the QR code or enter the code above in the Presenter app to connect.
+              Scan the QR code or enter the session code in the Presenter app to connect.
             </p>
 
-            <div className="client-qr-divider">
-              <span>or join a presenter's session manually</span>
-            </div>
-
-            {/* Original manual-entry mechanism — fully preserved */}
-            <div className="client-qr-manual">
-              <input
-                type="text"
-                className="client-qr-input"
-                placeholder="Presenter code…"
-                value={sessionInput}
-                onChange={(e) => setSessionInput(normalizeSessionId(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && attemptJoin(sessionInput)}
-              />
-              <button className="client-qr-join-btn" onClick={() => attemptJoin(sessionInput)}>
-                Join
-              </button>
-            </div>
-            {sessionMessage && sessionMessage !== 'Enter session code' && (
-              <div className="client-qr-status">{sessionMessage}</div>
-            )}
           </div>
 
           <div className="client-qr-footer">
@@ -556,45 +492,6 @@ function Client() {
     );
   }
 
-  // ─── Classic join screen (URL param provided or user switched manually) ───
-  if (!joinedSession && !showQrMode) {
-    return (
-      <div className="home-page" style={{ alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-        <div className="card card--theme" style={{ width: '100%', maxWidth: '540px' }}>
-          <div className="card-header">
-            <span className="card-label">Join Display Session</span>
-          </div>
-          <div className="theme-inputs">
-            <div className="theme-control-group">
-              <label htmlFor="client-session-code">Session Code</label>
-              <div className="input-group">
-                <input
-                  id="client-session-code"
-                  type="text"
-                  placeholder="AB12CD"
-                  value={sessionInput}
-                  onChange={(e) => setSessionInput(normalizeSessionId(e.target.value))}
-                  onKeyDown={(e) => e.key === 'Enter' && attemptJoin(sessionInput)}
-                />
-                <button className="control-button" onClick={() => attemptJoin(sessionInput)}>
-                  Join
-                </button>
-              </div>
-            </div>
-            <div style={{ color: '#a09880', fontSize: '0.85rem' }}>{sessionMessage}</div>
-            <div style={{ color: '#7f745f', fontSize: '0.75rem' }}>Connection: {connectionState}</div>
-            <button
-              style={{ marginTop: '0.75rem', background: 'none', border: 'none', color: 'var(--gold)', cursor: 'pointer', fontSize: '0.8rem', textDecoration: 'underline' }}
-              onClick={() => setShowQrMode(true)}
-            >
-              Show QR code instead (TV mode)
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // ─── Derived display props ────────────────────────────────────────────────
   const hasMoreSegments = verse.segments && verse.currentSegment < verse.segments.length - 1;
   const layout          = verse.theme?.layout || 'centered';
@@ -602,6 +499,7 @@ function Client() {
   const isDisconnected  = connectionState === 'disconnected' || connectionState === 'error';
   const isReconnecting  = connectionState === 'reconnecting';
   const noMotion        = autoReducedMotion;
+  const joinedSession   = joinedSessionRef.current;
 
   // ─── Highlight render ─────────────────────────────────────────────────────
   const renderHighlightedText = () => {
@@ -705,9 +603,7 @@ function Client() {
         </div>
       )}
 
-      {/* Phase 1: Prominent reconnecting banner for the AV operator
-          Appears above the content but below the verse — visible from the
-          back of the room without alarming the congregation.               */}
+      {/* Reconnecting banner — visible to AV operator, unobtrusive to congregation */}
       {(isDisconnected || isReconnecting) && joinedSession && (
         <div className="client-reconnect-banner" role="alert" aria-live="assertive">
           <span className="client-reconnect-dot" />
