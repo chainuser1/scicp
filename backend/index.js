@@ -1628,6 +1628,21 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       emitToSession(sessionId, 'highlight-text', state.highlightedText);
     });
 
+    // ── clear-screen ─────────────────────────────────────────────────────────
+    // Presenter hits "End Live" → blank the TV, return Client to QR idle state.
+    // Session stays alive — QR code is unchanged — presenter can go live again.
+    socket.on('clear-screen', (payload, callback) => {
+      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
+      const state = getSessionState(sessionId);
+      state.liveVerse      = null;
+      state.highlightedText = '';
+      state.updatedAt      = Date.now();
+      emitToSession(sessionId, 'clear-screen', {});
+      fastify.log.info(`clear-screen broadcast to session ${sessionId}`);
+      if (typeof callback === 'function') callback({ ok: true });
+    });
+
     socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
       const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
