@@ -124,7 +124,7 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
 // Pip dots are capped at MAX_PIPS to avoid rendering 300 dots for broad queries.
 const MAX_PIPS = 7;
 
-const SearchResults = ({ results, currentPage, totalPages, totalResults, onSelect, onGoLive, onPageChange, stagedVerseId }) => {
+const SearchResults = ({ results, currentPage, totalPages, totalResults, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId }) => {
   if (results.length === 0) return null;
 
   // Build a compact pip sequence around the current page
@@ -152,11 +152,10 @@ const SearchResults = ({ results, currentPage, totalPages, totalResults, onSelec
           >
             <div className="result-item-top">
               <span className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-              <button
-                className="result-live-icon"
-                onClick={e => { e.stopPropagation(); onGoLive(verse); }}
-                aria-label="Go live"
-              >●</button>
+              <div className="result-item-btns">
+                <button className="result-add-icon" onClick={e => { e.stopPropagation(); onAddToSetlist(verse); }} aria-label="Add to setlist" title="Add to setlist">+</button>
+                <button className="result-live-icon" onClick={e => { e.stopPropagation(); onGoLive(verse); }} aria-label="Go live" title="Go live">●</button>
+              </div>
             </div>
             <div className="result-text">{verse.scripture_text}</div>
           </li>
@@ -347,7 +346,14 @@ const Presenter = () => {
   const [results, setResults]               = useState([]);
   const [totalResults, setTotalResults]     = useState(0);
   const [currentTheme, setCurrentTheme]     = useState(themes.light);
-  const [history, setHistory]               = useState([]);
+  const PRESENTER_HISTORY_KEY = 'scicp.presenter_history_v1';
+  const [history, setHistory] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('scicp.presenter_history_v1');
+      if (raw) return JSON.parse(raw).slice(0, 20);
+    } catch { /* ignore */ }
+    return [];
+  });
   const [staged, setStaged]                 = useState(null);
   const [liveVerse, setLiveVerse]           = useState(null);
   const [bgUrlInput, setBgUrlInput]         = useState('');
@@ -371,7 +377,9 @@ const Presenter = () => {
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);
+  const [savedThemes, setSavedThemes]         = useState([]);
+  const [saveThemeName, setSaveThemeName]     = useState('');
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -385,11 +393,59 @@ const Presenter = () => {
   const [tourStep, setTourStep]             = useState(0);
 
   const [goLiveBarVisible, setGoLiveBarVisible] = useState(false);
+  const [setlist, setSetlist]                   = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('scicp.presenter_setlist_v1');
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return [];
+  });
+  const [setlistOpen, setSetlistOpen]           = useState(false);
+
+  // Persist setlist to localStorage
+  useEffect(() => {
+    try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
+    catch { /* ignore */ }
+  }, [setlist]);
+
+  const addToSetlist = (verse) => {
+    setSetlist(prev => {
+      if (prev.some(v => v.verse_id === verse.verse_id)) return prev; // no duplicates
+      const updated = [...prev, { ...verse, theme: currentTheme }];
+      showToast(`Added to setlist`);
+      return updated;
+    });
+  };
+
+  const removeFromSetlist = (verse_id) => {
+    setSetlist(prev => prev.filter(v => v.verse_id !== verse_id));
+  };
+
+  const moveSetlistItem = (fromIdx, toIdx) => {
+    if (toIdx < 0 || toIdx >= setlist.length) return;
+    setSetlist(prev => {
+      const arr = [...prev];
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return arr;
+    });
+  };
+
+  const goLiveFromSetlist = (verse) => {
+    goLiveDirectly(verse);
+  };
+
+  // Persist presenter history to localStorage so it survives page refresh
+  useEffect(() => {
+    try { window.localStorage.setItem(PRESENTER_HISTORY_KEY, JSON.stringify(history)); }
+    catch { /* storage full or unavailable */ }
+  }, [history]);
   const [toastMsg, setToastMsg]               = useState('');
   const toastTimer                             = React.useRef(null);
   const [themeCardOpen, setThemeCardOpen]     = useState(true);
   const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
-  const mainPanelRef = useRef(null);
+  const mainPanelRef    = useRef(null);
+  const searchDebounce  = useRef(null); // debounce timer for search socket emits
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
@@ -401,6 +457,32 @@ const Presenter = () => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
+  };
+
+  // ── Save / delete named themes ───────────────────────────────────────────
+  const saveTheme = () => {
+    const name = saveThemeName.trim();
+    if (!name) return;
+    fetch(`${API_URL}/themes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data: currentTheme }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(saved => {
+        if (saved?.id) {
+          setSavedThemes(prev => [...prev, saved]);
+          setSaveThemeName('');
+          showToast(`Theme "${name}" saved`);
+        }
+      })
+      .catch(() => showToast('Could not save theme'));
+  };
+
+  const deleteTheme = (id) => {
+    fetch(`${API_URL}/themes/${id}`, { method: 'DELETE' })
+      .then(r => { if (r.ok) setSavedThemes(prev => prev.filter(t => t.id !== id)); })
+      .catch(() => {});
   };
 
   // ── End Live — clear TV screen, return Client to QR idle ─────────────────
@@ -437,6 +519,14 @@ const Presenter = () => {
     }).catch(() => showToast('Copy failed — clipboard not available'));
   };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
+
+  // Load saved themes from server on mount
+  useEffect(() => {
+    fetch(`${API_URL}/themes`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (Array.isArray(data)) setSavedThemes(data); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
@@ -685,13 +775,18 @@ const Presenter = () => {
           break;
         case 'Escape':
           if (highlightedText) { e.preventDefault(); clearHighlight(); }
+          else if (drawerOpen) { e.preventDefault(); setDrawerOpen(false); }
+          break;
+        case '/':
+          e.preventDefault();
+          openDrawer('search');
           break;
         default: break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [staged, liveVerse, highlightedText, currentSegment]);
+  }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
@@ -710,7 +805,12 @@ const Presenter = () => {
     setQuery(q);
     setCurrentPage(0);
     setTotalResults(0);
-    emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE });
+    // 250 ms debounce — avoids flooding the server with a socket emit per
+    // keystroke, and prevents stale out-of-order results on slow WiFi.
+    clearTimeout(searchDebounce.current);
+    searchDebounce.current = setTimeout(() => {
+      emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
+    }, 250);
   };
 
   const handleSearchKeyDown = e => {
@@ -728,7 +828,7 @@ const Presenter = () => {
     emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
     setLiveVerse(v);
     setCurrentSegment(0);
-    setHistory(h => [v, ...h.slice(0, 9)]);
+    setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
     setDrawerOpen(false);
   };
 
@@ -737,7 +837,7 @@ const Presenter = () => {
     emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage });
     setLiveVerse(staged);
     setCurrentSegment(0);
-    setHistory(h => [staged, ...h.slice(0, 9)]);
+    setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
     setStaged(null);
   };
 
@@ -769,7 +869,7 @@ const Presenter = () => {
         emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
         setLiveVerse(v);
         setCurrentSegment(0);
-        setHistory(h => [v, ...h.slice(0, 9)]);
+        setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
       }
     } catch (err) { console.error('adjacent fetch failed', err); }
   };
@@ -815,7 +915,7 @@ const Presenter = () => {
     setQuery(topic);
     setCurrentPage(0);
     setTotalResults(0);
-    emitWithSession('search', { query: topic, page: 0, pageSize: PAGE_SIZE });
+    emitWithSession('search', { query: topic, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
     setDrawerTab('search');
     setDrawerOpen(true);
   };
@@ -1180,6 +1280,9 @@ const Presenter = () => {
             <button className={`drawer-tab${drawerTab === 'history' ? ' active' : ''}`} onClick={() => setDrawerTab('history')}>
               <IconClock /> Recent
             </button>
+            <button className={`drawer-tab${drawerTab === 'setlist' ? ' active' : ''}`} onClick={() => setDrawerTab('setlist')}>
+              ☰ Setlist{setlist.length > 0 ? ` (${setlist.length})` : ''}
+            </button>
           </div>
           {staged && (
             <span className="drawer-staged-badge" title="Verse staged — press Go Live">
@@ -1226,9 +1329,10 @@ const Presenter = () => {
                       totalResults={totalResults}
                       onSelect={selectVerse}
                       onGoLive={goLiveDirectly}
+                      onAddToSetlist={addToSetlist}
                       onPageChange={(newPage) => {
                         setCurrentPage(newPage);
-                        emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE });
+                        emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE, language: currentLanguage });
                       }}
                       stagedVerseId={staged?.verse_id}
                     />
@@ -1238,19 +1342,79 @@ const Presenter = () => {
                 }
               </div>
             </div>
-          ) : (
+          ) : drawerTab === 'history' ? (
             <div className="drawer-history">
-              {history.length > 0 ? (
-                <ul className="history-list">
-                  {history.map((verse, i) => (
-                    <li key={i} className="history-item" onClick={() => { setStaged(verse); setDrawerOpen(false); }}>
-                      <span className="history-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-                      <span className="history-hint">tap to stage</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
+              {history.length > 0 ? (() => {
+                // Group consecutive entries by book for a cleaner scan
+                const groups = [];
+                history.forEach(verse => {
+                  const last = groups[groups.length - 1];
+                  if (last && last.book === verse.book_title) last.verses.push(verse);
+                  else groups.push({ book: verse.book_title, verses: [verse] });
+                });
+                const elapsed = (ts) => {
+                  if (!ts) return '';
+                  const m = Math.round((Date.now() - ts) / 60000);
+                  if (m < 1) return 'just now';
+                  if (m < 60) return `${m}m ago`;
+                  return `${Math.round(m / 60)}h ago`;
+                };
+                return (
+                  <div className="history-groups">
+                    {groups.map((group, gi) => (
+                      <div key={gi} className="history-group">
+                        <div className="history-group-label">{group.book}</div>
+                        <ul className="history-list">
+                          {group.verses.map((verse, vi) => (
+                            <li key={verse.verse_id ?? vi} className="history-item">
+                              <div className="history-item-main" onClick={() => { setStaged(verse); setDrawerOpen(false); }}>
+                                <span className="history-ref">{verse.chapter_number}:{verse.verse_number}</span>
+                                <span className="history-time">{elapsed(verse._ts)}</span>
+                              </div>
+                              <div className="history-item-actions">
+                                <button className="history-action-btn" onClick={() => { setStaged(verse); setDrawerOpen(false); }}>Stage</button>
+                                <button className="history-action-btn" onClick={() => goLiveDirectly(verse)}>●</button>
+                                <button className="history-action-btn" onClick={() => addToSetlist(verse)}>+</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })() : (
                 <div className="empty-state">Verses you display<br />will appear here</div>
+              )}
+            </div>
+          ) : (
+            <div className="drawer-setlist">
+              {setlist.length > 0 ? (
+                <>
+                  <div className="setlist-hint">Tap ● to go live · ↑↓ to reorder · × to remove</div>
+                  <ul className="setlist-list">
+                    {setlist.map((verse, i) => (
+                      <li key={verse.verse_id} className={`setlist-item${liveVerse?.verse_id === verse.verse_id ? ' setlist-item--live' : ''}`}>
+                        <div className="setlist-order">
+                          <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i - 1)} disabled={i === 0} aria-label="Move up">↑</button>
+                          <span className="setlist-num">{i + 1}</span>
+                          <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i + 1)} disabled={i === setlist.length - 1} aria-label="Move down">↓</button>
+                        </div>
+                        <div className="setlist-verse-info" onClick={() => setStaged(verse)}>
+                          <span className="setlist-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
+                          <span className="setlist-text">{verse.scripture_text?.slice(0, 60)}…</span>
+                        </div>
+                        <div className="setlist-actions">
+                          <button className="setlist-live-btn" onClick={() => goLiveFromSetlist(verse)}>●</button>
+                          <button className="setlist-remove-btn" onClick={() => removeFromSetlist(verse.verse_id)}>×</button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <button className="setlist-clear-btn" onClick={() => { if (window.confirm('Clear entire setlist?')) setSetlist([]); }}>Clear Setlist</button>
+                </>
+              ) : (
+                <div className="empty-state">No verses in setlist yet.<br />Search and tap + to add.</div>
               )}
             </div>
           )}
@@ -1495,6 +1659,27 @@ const Presenter = () => {
                     }}>Apply</button>
                   </div>
                 </div>
+                {/* Saved themes */}
+                {savedThemes.length > 0 && (
+                  <div className="theme-control-group">
+                    <label>Saved Themes</label>
+                    <div className="saved-themes-list">
+                      {savedThemes.map(t => (
+                        <div key={t.id} className="saved-theme-row">
+                          <button className="theme-btn saved-theme-apply" onClick={() => handleThemeChange(t.data)} title={`Apply "${t.name}"`}>{t.name}</button>
+                          <button className="saved-theme-delete" onClick={() => deleteTheme(t.id)} title="Delete theme" aria-label="Delete theme">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="theme-control-group">
+                  <label>Save Current Theme</label>
+                  <div className="input-group">
+                    <input type="text" className="popover-input" placeholder="Theme name…" value={saveThemeName} onChange={e => setSaveThemeName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveTheme()} />
+                    <button className="control-button" onClick={saveTheme} disabled={!saveThemeName.trim()}>Save</button>
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -1532,9 +1717,11 @@ const Presenter = () => {
           </div>
           <div className="mobile-golive-actions">
             {liveVerse && (
-              <button className="mobile-endlive-btn" onClick={endLive} title="End live">
-                ◼ End
-              </button>
+              <>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">A−</button>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger text"  aria-label="Increase font size">A+</button>
+                <button className="mobile-endlive-btn" onClick={endLive} title="End live">◼ End</button>
+              </>
             )}
             {staged && (
               <button
