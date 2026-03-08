@@ -119,6 +119,7 @@ function Client() {
   const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
   const [sessionExpired, setSessionExpired]     = useState(false);
+  const [presenterLeft, setPresenterLeft]       = useState(false); // shows subtle notice on idle screen
 
   // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
@@ -310,6 +311,22 @@ function Client() {
 
     // Server broadcasts this ONLY when a Presenter joins the room.
     // This is the definitive signal: close QR, enter display mode.
+    const handleClearScreen = () => {
+      // Presenter ended live — return to QR idle. Session stays alive.
+      setTextVisible(false);
+      setTimeout(() => {
+        setIsIdle(true);
+        setDisplayVerse(null);
+        setHighlightedText('');
+      }, 400);
+    };
+
+    const handlePresenterLeft = () => {
+      setPresenterLeft(true);
+      // After 8 s, fade the notice — it already told the operator what happened
+      setTimeout(() => setPresenterLeft(false), 8000);
+    };
+
     const handlePresenterJoined = () => {
       if (presenterJoinedRef.current) return; // already handled
       setPresenterJoined(true);
@@ -352,6 +369,8 @@ function Client() {
     socket.on('update-theme',      handleTheme);
     socket.on('highlight-text',    handleHighlight);
     socket.on('session-joined',    handleSessionJoined);
+    socket.on('clear-screen',      handleClearScreen);
+    socket.on('presenter-left',    handlePresenterLeft);
     socket.on('presenter-joined',  handlePresenterJoined);
     socket.on('session-error',     handleSessionError);
     socket.on('connect',           handleConnect);
@@ -366,6 +385,8 @@ function Client() {
       socket.off('update-theme',      handleTheme);
       socket.off('highlight-text',    handleHighlight);
       socket.off('session-joined',    handleSessionJoined);
+      socket.off('clear-screen',      handleClearScreen);
+      socket.off('presenter-left',    handlePresenterLeft);
       socket.off('presenter-joined',  handlePresenterJoined);
       socket.off('session-error',     handleSessionError);
       socket.off('connect',           handleConnect);
@@ -587,6 +608,11 @@ function Client() {
 
       {isIdle && (
         <div className="client-idle-state" aria-live="polite" aria-label="Waiting for scripture">
+          {presenterLeft && (
+            <div className="client-presenter-left-notice" role="status">
+              Presenter disconnected — waiting for reconnection
+            </div>
+          )}
           <div className="idle-cross" aria-hidden="true">
             <div className="idle-cross-v" />
             <div className="idle-cross-h" />
