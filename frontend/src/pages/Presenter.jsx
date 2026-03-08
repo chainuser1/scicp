@@ -119,16 +119,34 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
   </button>
 );
 
-const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, PAGE_SIZE }) => {
+// SearchResults — results are already the correct page from the server.
+// No client-side slicing. onPageChange(newPage) triggers a fresh socket request.
+// Pip dots are capped at MAX_PIPS to avoid rendering 300 dots for broad queries.
+const MAX_PIPS = 7;
+
+const SearchResults = ({ results, currentPage, totalPages, totalResults, onSelect, onGoLive, onPageChange, stagedVerseId }) => {
   if (results.length === 0) return null;
-  const pageSlice = results.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+
+  // Build a compact pip sequence around the current page
+  const buildPips = () => {
+    if (totalPages <= MAX_PIPS) {
+      return Array.from({ length: totalPages }, (_, i) => i);
+    }
+    // Always show first, last, current, and neighbours
+    const set = new Set([0, totalPages - 1, currentPage]);
+    if (currentPage > 0) set.add(currentPage - 1);
+    if (currentPage < totalPages - 1) set.add(currentPage + 1);
+    return Array.from(set).sort((a, b) => a - b);
+  };
+  const pips = buildPips();
+
   return (
     <>
       <ul className="results-ul">
-        {pageSlice.map(verse => (
+        {results.map(verse => (
           <li
-            key={verse.verse_title}
-            className="result-item"
+            key={verse.verse_id}
+            className={`result-item${Number(verse.verse_id) === Number(stagedVerseId) ? ' result-item--staged' : ''}`}
             onClick={() => onSelect(verse)}
             onDoubleClick={() => onGoLive(verse)}
           >
@@ -146,14 +164,25 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
       </ul>
       {totalPages > 1 && (
         <div className="results-pagination">
-          <button className="pagination-arrow" onClick={() => onPageChange(p => Math.max(0, p - 1))} disabled={currentPage === 0}>‹</button>
+          <button className="pagination-arrow" onClick={() => onPageChange(Math.max(0, currentPage - 1))} disabled={currentPage === 0}>‹</button>
           <div className="pagination-track">
-            {Array.from({ length: totalPages }).map((_, i) => (
-              <button key={i} className={`pagination-pip${i === currentPage ? ' active' : ''}`} onClick={() => onPageChange(i)} aria-label={`Page ${i + 1}`} />
-            ))}
+            {pips.map((pageIdx, i) => {
+              const prevPip = pips[i - 1];
+              const gap = prevPip !== undefined && pageIdx - prevPip > 1;
+              return (
+                <React.Fragment key={pageIdx}>
+                  {gap && <span className="pagination-ellipsis">…</span>}
+                  <button
+                    className={`pagination-pip${pageIdx === currentPage ? ' active' : ''}`}
+                    onClick={() => onPageChange(pageIdx)}
+                    aria-label={`Page ${pageIdx + 1}`}
+                  />
+                </React.Fragment>
+              );
+            })}
           </div>
           <span className="pagination-label">{currentPage + 1}<span className="pagination-sep">/</span>{totalPages}</span>
-          <button className="pagination-arrow" onClick={() => onPageChange(p => Math.min(totalPages - 1, p + 1))} disabled={currentPage === totalPages - 1}>›</button>
+          <button className="pagination-arrow" onClick={() => onPageChange(Math.min(totalPages - 1, currentPage + 1))} disabled={currentPage === totalPages - 1}>›</button>
         </div>
       )}
     </>
@@ -200,7 +229,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
       try {
         const mod = await import('jsqr');
         jsQR = mod.default || mod;
-      } catch  {
+      } catch (_e) {
         if (active) setError('QR scanner not available. Install jsqr: npm install jsqr');
         return;
       }
@@ -210,7 +239,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-      } catch  {
+      } catch (_e) {
         if (active) setError('Camera access denied. Please allow camera permission and try again.');
         return;
       }
@@ -316,6 +345,7 @@ const Presenter = () => {
   ];
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
+  const [totalResults, setTotalResults]     = useState(0);
   const [currentTheme, setCurrentTheme]     = useState(themes.light);
   const [history, setHistory]               = useState([]);
   const [staged, setStaged]                 = useState(null);
@@ -340,6 +370,7 @@ const Presenter = () => {
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
+  const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
@@ -353,12 +384,58 @@ const Presenter = () => {
   });
   const [tourStep, setTourStep]             = useState(0);
 
+  const [goLiveBarVisible, setGoLiveBarVisible] = useState(false);
+  const [toastMsg, setToastMsg]               = useState('');
+  const toastTimer                             = React.useRef(null);
+  const [themeCardOpen, setThemeCardOpen]     = useState(true);
+  const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
   const mainPanelRef = useRef(null);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
-  const PAGE_SIZE = 5;
+  const PAGE_SIZE = 10; // matches server pageSize
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+
+  // ── Toast notification ───────────────────────────────────────────────────
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
+  };
+
+  // ── End Live — clear TV screen, return Client to QR idle ─────────────────
+  const endLive = () => {
+    emitWithSession('clear-screen');
+    setLiveVerse(null);
+    setHighlightedText('');
+    setCurrentSegment(0);
+    showToast('Screen cleared — TV showing QR code');
+  };
+
+  // ── Clear highlight only ──────────────────────────────────────────────────
+  const clearHighlight = () => {
+    setHighlightedText('');
+    emitWithSession('highlight-text', { text: '' });
+  };
+
+  // ── Font size control ─────────────────────────────────────────────────────
+  const adjustFontSize = (delta) => {
+    setFontSizeRem(prev => {
+      const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
+      const updatedTheme = { ...currentTheme, font_size: next + 'rem' };
+      handleThemeChange(updatedTheme);
+      return next;
+    });
+  };
+
+  // ── Copy verse text to clipboard ─────────────────────────────────────────
+  const copyVerseText = (verseObj, label = '') => {
+    if (!verseObj) return;
+    const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`✓ Copied${label ? ' ' + label : ''}`);
+    }).catch(() => showToast('Copy failed — clipboard not available'));
+  };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
 
   useEffect(() => {
@@ -399,7 +476,7 @@ const Presenter = () => {
         setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
         setMobileMenuOpen(false);
-        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch  { /* storage unavailable */ }
+        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
       } else {
         setSessionMessage(response?.message || 'TV session not found — check the code');
       }
@@ -416,7 +493,7 @@ const Presenter = () => {
     socket.emit('leave-session', {}, (response) => {
       if (response?.ok) {
         setSessionId('');
-        
+        setTvSessionInput('');
         setSessionMessage('You left the session');
         try {
           window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
@@ -448,6 +525,7 @@ const Presenter = () => {
     const handleSessionJoined = (data) => {
       if (!data?.sessionId) return;
       setSessionId(data.sessionId);
+      setTvSessionInput(data.sessionId);
       setSessionMessage(`Session ${data.sessionId} ready`);
       setHighlightedText('');
       setSessionPopover(false);
@@ -457,7 +535,7 @@ const Presenter = () => {
     };
     const handleSessionLeft = () => {
       setSessionId('');
-      
+      setTvSessionInput('');
       setSessionMessage('You left the session');
       try {
         window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
@@ -484,7 +562,7 @@ const Presenter = () => {
             setSessionMessage(`Reconnected — session ${response.sessionId}`);
           } else {
             // Last session is gone — clear it and wait for the presenter to scan/type
-            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch  { /* ignore */ }
+            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch (_e) { /* ignore */ }
             setSessionMessage('Scan the QR code on the TV screen, or type the session code');
           }
         });
@@ -503,7 +581,11 @@ const Presenter = () => {
     const handleConnectError = () => {
       setConnectionState('error');
     };
-    socket.on('search-results', data => { setResults(data); setCurrentPage(0); });
+    socket.on('search-results', ({ results, total, page }) => {
+      setResults(results ?? []);
+      setTotalResults(total ?? 0);
+      // page is already set by the emitter — don't reset to 0 on paginated fetches
+    });
     socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
     socket.on('session-created', handleSessionJoined);
     socket.on('session-joined', handleSessionJoined);
@@ -564,17 +646,71 @@ const Presenter = () => {
     };
   }, [drawerOpen, themePopover, sessionPopover, mobileMenuOpen]);
 
+  /* ── Keyboard shortcuts ─────────────────────────────────────────────────
+     Active only when no input / textarea is focused so typing in search
+     doesn't accidentally trigger navigation.
+     Space  → next segment (or next verse if single-segment)
+     →      → next verse
+     ←      → previous verse
+     L      → go live (if staged)
+     E      → end live (if live)
+     Esc    → clear highlight
+     ────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case ' ':
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.key === ' ' && liveVerse?.segments?.length > 1) {
+            navigateSegment('next');
+          } else {
+            fetchAdjacent('next');
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          fetchAdjacent('prev');
+          break;
+        case 'l':
+        case 'L':
+          if (staged) { e.preventDefault(); goLive(); }
+          break;
+        case 'e':
+        case 'E':
+          if (liveVerse) { e.preventDefault(); endLive(); }
+          break;
+        case 'Escape':
+          if (highlightedText) { e.preventDefault(); clearHighlight(); }
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [staged, liveVerse, highlightedText, currentSegment]);
+
   /* ── Handlers ── */
   const handleThemeChange = theme => {
     setCurrentTheme(theme);
     if (staged) setStaged(prev => ({ ...prev, theme }));
     emitWithSession('update-theme', { theme });
+    // Keep fontSizeRem slider in sync when theme is changed externally
+    if (theme.font_size) {
+      const parsed = parseFloat(theme.font_size);
+      if (!isNaN(parsed)) setFontSizeRem(parsed);
+    }
   };
 
   const handleSearch = e => {
-    setQuery(e.target.value);
+    const q = e.target.value;
+    setQuery(q);
     setCurrentPage(0);
-    emitWithSession('search', { query: e.target.value });
+    setTotalResults(0);
+    emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE });
   };
 
   const handleSearchKeyDown = e => {
@@ -583,7 +719,8 @@ const Presenter = () => {
 
   const selectVerse = verse => {
     setStaged({ ...verse, theme: currentTheme });
-    setDrawerOpen(false);
+    // Drawer stays open so presenter can keep browsing.
+    // Go Live button / double-click / ● icon still sends live immediately.
   };
 
   const goLiveDirectly = verse => {
@@ -671,12 +808,14 @@ const Presenter = () => {
   };
 
   const hasSegments = liveVerse?.segments?.length > 1;
-  const totalPages  = Math.ceil(results.length / PAGE_SIZE);
+  const totalPages  = totalResults > 0 ? Math.ceil(totalResults / PAGE_SIZE) : (results.length > 0 ? 1 : 0);
   const isIdle      = !staged && !liveVerse;
 
   const launchTopic = (topic) => {
     setQuery(topic);
-    emitWithSession('search', { query: topic });
+    setCurrentPage(0);
+    setTotalResults(0);
+    emitWithSession('search', { query: topic, page: 0, pageSize: PAGE_SIZE });
     setDrawerTab('search');
     setDrawerOpen(true);
   };
@@ -709,6 +848,12 @@ const Presenter = () => {
 
         {/* Live verse summary */}
         <div className="hdr-center">
+          {/* Persistent connection dot — always visible on desktop */}
+          <span
+            className={`hdr-conn-dot hdr-conn-dot--${connectionState}`}
+            title={`Connection: ${connectionState}`}
+            aria-label={`Connection: ${connectionState}`}
+          />
           {liveVerse ? (
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
@@ -1036,6 +1181,11 @@ const Presenter = () => {
               <IconClock /> Recent
             </button>
           </div>
+          {staged && (
+            <span className="drawer-staged-badge" title="Verse staged — press Go Live">
+              ● {staged.book_title} {staged.chapter_number}:{staged.verse_number}
+            </span>
+          )}
           <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Close drawer">
             <IconClose />
           </button>
@@ -1046,16 +1196,25 @@ const Presenter = () => {
             <div className="drawer-search">
               {query.length > 0 && (
                 <div className="search-results-count">
-                  {results.length === 0 ? 'No verses found' : `${results.length} verse${results.length === 1 ? '' : 's'} found`}
+                  {totalResults === 0 && results.length === 0
+                    ? 'No verses found'
+                    : totalResults > 0
+                      ? `${totalResults.toLocaleString()} verse${totalResults === 1 ? '' : 's'} found`
+                      : `${results.length} verse${results.length === 1 ? '' : 's'} found`}
                 </div>
               )}
               <input
                 type="search"
+                inputMode="search"
+                enterKeyHint="search"
                 className="search-input"
                 placeholder="John 3:16 or 'faith'…"
                 value={query}
                 onChange={handleSearch}
                 onKeyDown={handleSearchKeyDown}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 autoFocus={drawerOpen && drawerTab === 'search'}
               />
               <div className="results-list">
@@ -1064,10 +1223,14 @@ const Presenter = () => {
                       results={results}
                       currentPage={currentPage}
                       totalPages={totalPages}
+                      totalResults={totalResults}
                       onSelect={selectVerse}
                       onGoLive={goLiveDirectly}
-                      onPageChange={setCurrentPage}
-                      PAGE_SIZE={PAGE_SIZE}
+                      onPageChange={(newPage) => {
+                        setCurrentPage(newPage);
+                        emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE });
+                      }}
+                      stagedVerseId={staged?.verse_id}
                     />
                   : <div className="empty-state">
                       {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin…</>}
@@ -1120,6 +1283,11 @@ const Presenter = () => {
                   <div className="votd-footer">
                     <span className="votd-ref">— {verseOfDay.book_title} {verseOfDay.chapter_number}:{verseOfDay.verse_number}</span>
                     <div className="votd-actions">
+                      <button className="votd-btn" title="Copy verse text" onClick={() => {
+                        copyVerseText(verseOfDay, '');
+                        setVotdCopied(true);
+                        setTimeout(() => setVotdCopied(false), 1800);
+                      }}>{votdCopied ? '✓ Copied' : 'Copy'}</button>
                       <button className="votd-btn" title="Stage this verse" onClick={() => {
                         setStaged({ ...verseOfDay, theme: currentTheme });
                       }}>Stage</button>
@@ -1239,7 +1407,25 @@ const Presenter = () => {
           <section className="card card--preview">
             <div className="card-header">
               <span className="card-label">👁 Preview</span>
-              <span className="card-hint">select text to highlight</span>
+              <div className="preview-card-actions">
+                {highlightedText && (
+                  <button className="clear-highlight-btn" onClick={clearHighlight} title="Clear highlight (Esc)">
+                    ✕ Highlight
+                  </button>
+                )}
+                <span className="card-hint">select text to highlight</span>
+                <button className="end-live-btn" onClick={endLive} title="End live — clears TV screen (E)">
+                  ◼ End Live
+                </button>
+              </div>
+            </div>
+            {/* Session status while live */}
+            <div className="preview-session-status">
+              <span className={`preview-conn-dot preview-conn-dot--${connectionState}`} />
+              <span className="preview-session-text">
+                {viewerCount === 0 ? 'No TV connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                {sessionId && <span className="preview-session-id"> · {sessionId}</span>}
+              </span>
             </div>
             <div className={`preview-nav${activeTourTarget === 'nav' ? ' tour-focus' : ''}`}>
               <button className="preview-nav-btn preview-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
@@ -1274,31 +1460,54 @@ const Presenter = () => {
           </section>
         )}
 
-        {/* ── Theme card ── */}
+        {/* ── Theme card — collapsible ── */}
         <section className="card card--theme">
-          <div className="card-header">
+          <div
+            className="card-header card-header--clickable"
+            onClick={() => setThemeCardOpen(o => !o)}
+            title={themeCardOpen ? 'Collapse theme controls' : 'Expand theme controls'}
+          >
             <span className="card-label">🎨 Theme &amp; Display</span>
+            <span className="card-collapse-icon">{themeCardOpen ? '▲' : '▼'}</span>
           </div>
-          <div className="theme-buttons">
-            <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
-            <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
-          </div>
-          <div className="theme-inputs">
-            <div className="theme-control-group">
-              <label htmlFor="bg-url">Background URL</label>
-              <div className="input-group">
-                <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                <button className="control-button" onClick={() => {
-                  if (!bgUrlInput) return;
-                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
-                  setBgUrlInput('');
-                }}>Apply</button>
+          {themeCardOpen && (
+            <>
+              <div className="theme-buttons">
+                <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
+                <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
               </div>
-            </div>
-          </div>
+              {/* Font size control */}
+              <div className="font-size-controls">
+                <span className="font-size-label">Text Size</span>
+                <button className="font-size-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">−</button>
+                <span className="font-size-badge">{fontSizeRem.toFixed(1)}rem</span>
+                <button className="font-size-btn" onClick={() => adjustFontSize(0.3)} title="Larger text" aria-label="Increase font size">+</button>
+              </div>
+              <div className="theme-inputs">
+                <div className="theme-control-group">
+                  <label htmlFor="bg-url">Background URL</label>
+                  <div className="input-group">
+                    <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                    <button className="control-button" onClick={() => {
+                      if (!bgUrlInput) return;
+                      handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                      setBgUrlInput('');
+                    }}>Apply</button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
       </main>
+      {/* Toast notification */}
+      {toastMsg && (
+        <div className="presenter-toast" role="status" aria-live="polite">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Desktop footer — hidden on mobile via CSS; links live in hamburger menu on small screens */}
       <footer className="presenter-footer">
         <nav className="presenter-footer-links">
@@ -1316,17 +1525,26 @@ const Presenter = () => {
       </footer>
 
       {/* Sticky Go Live bar — mobile only, appears when a verse is staged */}
-      {staged && (
+      {(staged || liveVerse) && (
         <div className="mobile-golive-bar">
           <div className="mobile-golive-ref">
-            {staged.book_title} {staged.chapter_number}:{staged.verse_number}
+            {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
           </div>
-          <button
-            className={`mobile-golive-btn${activeTourTarget === 'golive' ? ' tour-focus' : ''}`}
-            onClick={goLive}
-          >
-            ● Go Live
-          </button>
+          <div className="mobile-golive-actions">
+            {liveVerse && (
+              <button className="mobile-endlive-btn" onClick={endLive} title="End live">
+                ◼ End
+              </button>
+            )}
+            {staged && (
+              <button
+                className={`mobile-golive-btn${activeTourTarget === 'golive' ? ' tour-focus' : ''}`}
+                onClick={goLive}
+              >
+                ● Go Live
+              </button>
+            )}
+          </div>
         </div>
       )}
 
