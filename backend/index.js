@@ -962,9 +962,9 @@ const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
 // We cap the internal scan at MAX_COUNT_SCAN to avoid full-table scans on
 // very broad OR queries (e.g. "faith" OR "love" OR "hope" = tens of thousands).
 const MAX_COUNT_SCAN = 2000;
-const runFTSCount = (matchQuery, targetDb = db) => {
+const runFTSCount = (matchQuery) => {
   try {
-    const stmt = targetDb.prepare(`
+    const stmt = db.prepare(`
       SELECT COUNT(*) AS total
       FROM (
         SELECT verse_id
@@ -982,14 +982,14 @@ const runFTSCount = (matchQuery, targetDb = db) => {
 // runFTSQuery — fetch one page of results ranked by BM25 relevance.
 // offset allows true server-side pagination: the DB does the skipping,
 // nothing unnecessary is loaded into memory or sent over the socket.
-const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, targetDb = db) => {
+const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0) => {
   const literalPattern = rawPhrase
     ? `%${rawPhrase.trim().toLowerCase()}%`
     : null;
 
   // The inner subquery fetches limit+offset rows so BM25 ranking is stable
   // across pages — the same query plan is used each time, offsets are cheap.
-  const stmt = targetDb.prepare(`
+  const stmt = db.prepare(`
     SELECT
       s.volume_id, s.book_id, s.chapter_id, s.verse_id,
       s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
@@ -1019,7 +1019,7 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, targe
 // phraseSearch — paginated, returns { results: [...], total: N }
 // page is 0-based. pageSize controls rows returned. total is capped at
 // MAX_COUNT_SCAN so the count query stays fast on broad OR searches.
-const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
+const phraseSearch = (phrase, page = 0, pageSize = 10) => {
   if (!phrase || !phrase.trim()) return { results: [], total: 0 };
 
   const raw    = phrase.trim();
@@ -1027,7 +1027,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
   const alias  = applyDoctrineAliases(raw);
 
   try {
-    const ftsExists = targetDb.prepare(
+    const ftsExists = db.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'`
     ).get();
 
@@ -1041,24 +1041,24 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
         const phraseQueries = (alias.phrases || []).map(buildFTSPhraseQuery);
         if (phraseQueries.length > 0) {
           const combined = phraseQueries.join(' OR ');
-          const total   = runFTSCount(combined, targetDb);
-          const results = runFTSQuery(combined, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(combined);
+          const results = runFTSQuery(combined, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 1 — AND on alias terms
         const andQ = buildFTSTermQuery(alias.terms || [], 'and');
         if (andQ) {
-          const total   = runFTSCount(andQ, targetDb);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(andQ);
+          const results = runFTSQuery(andQ, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 2 — OR on alias terms
         const orQ = buildFTSTermQuery(alias.terms || [], 'or');
         if (orQ) {
-          const total   = runFTSCount(orQ, targetDb);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(orQ);
+          const results = runFTSQuery(orQ, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
@@ -1068,32 +1068,32 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
         // Pass 0 — exact phrase on raw input (multi-word only)
         if (raw.split(/\s+/).length > 1) {
           const exactQ  = buildFTSPhraseQuery(raw);
-          const total   = runFTSCount(exactQ, targetDb);
-          const results = runFTSQuery(exactQ, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(exactQ);
+          const results = runFTSQuery(exactQ, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 1 — AND on raw terms
         const andQ = buildFTSMatchQuery(raw);
         if (andQ) {
-          const total   = runFTSCount(andQ, targetDb);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(andQ);
+          const results = runFTSQuery(andQ, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 2 — OR on raw terms
         const orQ = buildFTSMatchQuery(raw, { orFallback: true });
         if (orQ) {
-          const total   = runFTSCount(orQ, targetDb);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(orQ);
+          const results = runFTSQuery(orQ, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 3 — prefix wildcard for single-word input
         if (raw.split(/\s+/).length === 1) {
           const wq      = `${raw}*`;
-          const total   = runFTSCount(wq, targetDb);
-          const results = runFTSQuery(wq, raw, pageSize, offset, targetDb);
+          const total   = runFTSCount(wq);
+          const results = runFTSQuery(wq, raw, pageSize, offset);
           if (results.length > 0 || total > 0) return { results, total };
         }
       }
@@ -1109,12 +1109,12 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
   const likeParams = [];
   fallbackTerms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
 
-  const countRow = targetDb.prepare(`
+  const countRow = db.prepare(`
     SELECT COUNT(*) AS total FROM scriptures WHERE ${clauses.join(' AND ')}
   `).get(...likeParams);
   const total = Math.min(countRow?.total ?? 0, MAX_COUNT_SCAN);
 
-  const results = targetDb.prepare(`
+  const results = db.prepare(`
     SELECT book_id, book_title, chapter_number, verse_number,
            scripture_text, verse_title, verse_id
     FROM scriptures
@@ -1175,10 +1175,10 @@ const searchScripture = (input, page = 0, pageSize = 10) => {
         const fbRows  = db.prepare(fallbackPageSql).all(...fallbackParams, pageSize, page * pageSize);
         if (fbRows.length > 0 || fbCount > 0) return { results: fbRows, total: fbCount };
 
-        return phraseSearch(input, page, pageSize, db);
+        return phraseSearch(input, page, pageSize);
     }
 
-    return phraseSearch(input, page, pageSize, db);
+    return phraseSearch(input, page, pageSize);
 };
 
 // searchScriptureInDb — same logic as searchScripture but operates on an
