@@ -983,11 +983,38 @@ const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
 };
 
 
-const runFTSQuery = (matchQuery, rawPhrase = null, limit = 50) => {
+// runFTSCount — returns the total number of matching verses for a query
+// without fetching any row data. Used to tell the client how many pages exist.
+// We cap the internal scan at MAX_COUNT_SCAN to avoid full-table scans on
+// very broad OR queries (e.g. "faith" OR "love" OR "hope" = tens of thousands).
+const MAX_COUNT_SCAN = 2000;
+const runFTSCount = (matchQuery) => {
+  try {
+    const stmt = db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT verse_id
+        FROM scriptures_fts
+        WHERE scriptures_fts MATCH ?
+        LIMIT ${MAX_COUNT_SCAN}
+      )
+    `);
+    return stmt.get(matchQuery)?.total ?? 0;
+  } catch (_err) {
+    return 0;
+  }
+};
+
+// runFTSQuery — fetch one page of results ranked by BM25 relevance.
+// offset allows true server-side pagination: the DB does the skipping,
+// nothing unnecessary is loaded into memory or sent over the socket.
+const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0) => {
   const literalPattern = rawPhrase
     ? `%${rawPhrase.trim().toLowerCase()}%`
     : null;
 
+  // The inner subquery fetches limit+offset rows so BM25 ranking is stable
+  // across pages — the same query plan is used each time, offsets are cheap.
   const stmt = db.prepare(`
     SELECT
       s.volume_id, s.book_id, s.chapter_id, s.verse_id,
@@ -1000,7 +1027,7 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 50) => {
       SELECT verse_id, bm25(scriptures_fts, 0, 10, 5, 1, 0, 0) AS rank
       FROM scriptures_fts
       WHERE scriptures_fts MATCH ?
-      LIMIT ${limit}
+      LIMIT ${limit} OFFSET ${offset}
     ) fts ON fts.verse_id = s.verse_id
     ORDER BY
       CASE WHEN ${literalPattern ? 'LOWER(s.scripture_text) LIKE ?' : '0'} THEN 0 ELSE 1 END,
@@ -1015,11 +1042,15 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 50) => {
   return stmt.all(...args);
 };
 
-const phraseSearch = (phrase) => {
-  if (!phrase || !phrase.trim()) return [];
+// phraseSearch — paginated, returns { results: [...], total: N }
+// page is 0-based. pageSize controls rows returned. total is capped at
+// MAX_COUNT_SCAN so the count query stays fast on broad OR searches.
+const phraseSearch = (phrase, page = 0, pageSize = 10) => {
+  if (!phrase || !phrase.trim()) return { results: [], total: 0 };
 
-  const raw = phrase.trim();
-  const alias = applyDoctrineAliases(raw);
+  const raw    = phrase.trim();
+  const offset = page * pageSize;
+  const alias  = applyDoctrineAliases(raw);
 
   try {
     const ftsExists = db.prepare(
@@ -1029,35 +1060,32 @@ const phraseSearch = (phrase) => {
     if (ftsExists) {
 
       if (alias) {
-        const seen = new Set();
-        const merged = [];
-
-        // Pass 0 — exact FTS5 phrase match on each alias phrase, in order
-        // These are the most precise possible matches — literal scripture phrases.
-        for (const phrase of (alias.phrases || [])) {
-          const q = buildFTSPhraseQuery(phrase);
-          const rows = runFTSQuery(q, raw);
-          for (const row of rows) {
-            if (!seen.has(row.verse_id)) {
-              seen.add(row.verse_id);
-              merged.push(row);
-            }
-          }
+        // Pass 0 — exact FTS5 phrase match on each alias phrase.
+        // For aliases we build a combined OR-of-phrases query so we can
+        // paginate cleanly with a single LIMIT/OFFSET rather than merging
+        // multiple result sets across page boundaries.
+        const phraseQueries = (alias.phrases || []).map(buildFTSPhraseQuery);
+        if (phraseQueries.length > 0) {
+          const combined = phraseQueries.join(' OR ');
+          const total   = runFTSCount(combined);
+          const results = runFTSQuery(combined, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
-        if (merged.length > 0) return merged.slice(0, 50);
 
-        // Pass 1 — AND on alias terms — all key terms must appear in verse
+        // Pass 1 — AND on alias terms
         const andQ = buildFTSTermQuery(alias.terms || [], 'and');
         if (andQ) {
-          const r1 = runFTSQuery(andQ, raw);
-          if (r1.length > 0) return r1;
+          const total   = runFTSCount(andQ);
+          const results = runFTSQuery(andQ, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
 
-        // Pass 2 — OR on alias terms — any key term qualifies, BM25 ranks relevance
+        // Pass 2 — OR on alias terms
         const orQ = buildFTSTermQuery(alias.terms || [], 'or');
         if (orQ) {
-          const r2 = runFTSQuery(orQ, raw, 50);
-          if (r2.length > 0) return r2;
+          const total   = runFTSCount(orQ);
+          const results = runFTSQuery(orQ, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
 
       } else {
@@ -1065,29 +1093,34 @@ const phraseSearch = (phrase) => {
         // No alias — raw input path
         // Pass 0 — exact phrase on raw input (multi-word only)
         if (raw.split(/\s+/).length > 1) {
-          const exactQ = buildFTSPhraseQuery(raw);
-          const r0 = runFTSQuery(exactQ, raw);
-          if (r0.length > 0) return r0;
+          const exactQ  = buildFTSPhraseQuery(raw);
+          const total   = runFTSCount(exactQ);
+          const results = runFTSQuery(exactQ, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 1 — AND on raw terms
         const andQ = buildFTSMatchQuery(raw);
         if (andQ) {
-          const r1 = runFTSQuery(andQ, raw);
-          if (r1.length > 0) return r1;
+          const total   = runFTSCount(andQ);
+          const results = runFTSQuery(andQ, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 2 — OR on raw terms
         const orQ = buildFTSMatchQuery(raw, { orFallback: true });
         if (orQ) {
-          const r2 = runFTSQuery(orQ, raw, 50);
-          if (r2.length > 0) return r2;
+          const total   = runFTSCount(orQ);
+          const results = runFTSQuery(orQ, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 3 — prefix wildcard for single-word input
         if (raw.split(/\s+/).length === 1) {
-          const r3 = runFTSQuery(`${raw}*`, raw);
-          if (r3.length > 0) return r3;
+          const wq      = `${raw}*`;
+          const total   = runFTSCount(wq);
+          const results = runFTSQuery(wq, raw, pageSize, offset);
+          if (results.length > 0 || total > 0) return { results, total };
         }
       }
     }
@@ -1095,25 +1128,36 @@ const phraseSearch = (phrase) => {
     fastify.log.warn('FTS pipeline failed, falling back to LIKE:', err && err.message);
   }
 
-  // Last resort — LIKE token scan
+  // Last resort — LIKE token scan (no FTS, count with subquery)
   const fallbackTerms = (alias ? (alias.terms || [raw]) : [raw])
     .join(' ').trim().split(/\s+/).filter(Boolean);
   const clauses = fallbackTerms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
-  const params = [];
-  fallbackTerms.forEach(t => params.push(`%${t}%`, `%${t}%`));
-  return db.prepare(`
+  const likeParams = [];
+  fallbackTerms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
+
+  const countRow = db.prepare(`
+    SELECT COUNT(*) AS total FROM scriptures WHERE ${clauses.join(' AND ')}
+  `).get(...likeParams);
+  const total = Math.min(countRow?.total ?? 0, MAX_COUNT_SCAN);
+
+  const results = db.prepare(`
     SELECT book_id, book_title, chapter_number, verse_number,
            scripture_text, verse_title, verse_id
     FROM scriptures
     WHERE ${clauses.join(' AND ')}
     ORDER BY verse_id
-    LIMIT 50
-  `).all(...params);
+    LIMIT ? OFFSET ?
+  `).all(...likeParams, pageSize, offset);
+
+  return { results, total };
 };
 
 
-const searchScripture = (input) => {
-    // first, attempt to parse a structured reference
+// searchScripture — paginated entry point.
+// For structured references (e.g. "John 3:16") pagination is a no-op since
+// the result set is always tiny (one chapter = ~30 verses max).
+// For phrase/FTS searches we delegate to phraseSearch which handles paging.
+const searchScripture = (input, page = 0, pageSize = 10) => {
     const ref = parseScriptureReference(input);
     if (ref) {
         let sql = `
@@ -1130,30 +1174,37 @@ const searchScripture = (input) => {
     WHERE
         LOWER(book_title) = LOWER(?)`;
         const params = [ref.book];
-        
+
         sql += '\n        AND chapter_number = ?';
         params.push(ref.chapter);
-        
+
         if (ref.verse !== null) {
             sql += ' AND verse_number = ?';
             params.push(ref.verse);
         }
-        
-        sql += '\n    ORDER BY verse_id ASC\n    LIMIT 50';
-        const stmt = db.prepare(sql);
-        const result = stmt.all(...params);
-        if (result.length > 0) return result;
 
-        // Fallback for unexpected title variants while preserving precision-first behavior.
-        const fallbackSql = sql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?');
-        const fallbackParams = [`%${ref.book}%`, ...params.slice(1)];
-        const fallbackStmt = db.prepare(fallbackSql);
-        const fallbackResult = fallbackStmt.all(...fallbackParams);
-        return fallbackResult.length > 0 ? fallbackResult : phraseSearch(input);
+        // For reference lookups: count first, then page
+        const countSql  = sql.replace(/SELECT[\s\S]+?FROM/, 'SELECT COUNT(*) AS total FROM');
+        const countRow  = db.prepare(countSql + ' LIMIT 200').get(...params);
+        const total     = countRow?.total ?? 0;
+
+        const pageSql   = sql + `\n    ORDER BY verse_id ASC\n    LIMIT ? OFFSET ?`;
+        const stmt      = db.prepare(pageSql);
+        const result    = stmt.all(...params, pageSize, page * pageSize);
+        if (result.length > 0 || total > 0) return { results: result, total };
+
+        // Fallback for unexpected title variants
+        const fallbackCountSql = countSql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?') + ' LIMIT 200';
+        const fallbackPageSql  = sql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?') + '\n    ORDER BY verse_id ASC\n    LIMIT ? OFFSET ?';
+        const fallbackParams   = [`%${ref.book}%`, ...params.slice(1)];
+        const fbCount = db.prepare(fallbackCountSql).get(...fallbackParams)?.total ?? 0;
+        const fbRows  = db.prepare(fallbackPageSql).all(...fallbackParams, pageSize, page * pageSize);
+        if (fbRows.length > 0 || fbCount > 0) return { results: fbRows, total: fbCount };
+
+        return phraseSearch(input, page, pageSize);
     }
 
-    // fallback: phrase search in scripture text and titles
-    return phraseSearch(input);
+    return phraseSearch(input, page, pageSize);
 };
 
 // direction should be 'next' or 'prev'
@@ -1585,14 +1636,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('search', (payload) => {
-        const query = typeof payload === 'string' ? payload : payload && payload.query;
+        const query    = typeof payload === 'string' ? payload : payload?.query;
+        const page     = Number(payload?.page)     || 0;
+        const pageSize = Number(payload?.pageSize) || 10;
+
         if (!query || !String(query).trim()) {
-          socket.emit('search-results', []);
+          socket.emit('search-results', { results: [], total: 0, page: 0, pageSize });
           return;
         }
-        console.log('searching for:', query);
-        const results = searchScripture(query);
-        socket.emit('search-results', results);
+
+        fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize}`);
+        const { results, total } = searchScripture(query, page, pageSize);
+        socket.emit('search-results', { results, total, page, pageSize, query });
     });
 
     socket.on('update-verse', (payload) => {
@@ -1626,6 +1681,21 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       state.highlightedText = text ? String(text).trim() : '';
       state.updatedAt = Date.now();
       emitToSession(sessionId, 'highlight-text', state.highlightedText);
+    });
+
+    // ── clear-screen ─────────────────────────────────────────────────────────
+    // Presenter hits "End Live" → blank the TV, return Client to QR idle state.
+    // Session stays alive — QR code is unchanged — presenter can go live again.
+    socket.on('clear-screen', (payload, callback) => {
+      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
+      const state = getSessionState(sessionId);
+      state.liveVerse      = null;
+      state.highlightedText = '';
+      state.updatedAt      = Date.now();
+      emitToSession(sessionId, 'clear-screen', {});
+      fastify.log.info(`clear-screen broadcast to session ${sessionId}`);
+      if (typeof callback === 'function') callback({ ok: true });
     });
 
     socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
