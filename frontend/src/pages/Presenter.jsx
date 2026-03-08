@@ -378,6 +378,7 @@ const Presenter = () => {
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);
+  const [savedThemes, setSavedThemes]         = useState([]);
   const [saveThemeName, setSaveThemeName]     = useState('');
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
@@ -435,7 +436,97 @@ const Presenter = () => {
   };
 
   // Persist presenter history to localStorage so it survives page refresh
- 
+  useEffect(() => {
+    try { window.localStorage.setItem(PRESENTER_HISTORY_KEY, JSON.stringify(history)); }
+    catch { /* storage full or unavailable */ }
+  }, [history]);
+  const [toastMsg, setToastMsg]               = useState('');
+  const toastTimer                             = React.useRef(null);
+  const [themeCardOpen, setThemeCardOpen]     = useState(true);
+  const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
+  const mainPanelRef    = useRef(null);
+  const searchDebounce  = useRef(null); // debounce timer for search socket emits
+
+  // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
+  // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
+  const PAGE_SIZE = 10; // matches server pageSize
+  const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+
+  // ── Toast notification ───────────────────────────────────────────────────
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
+  };
+
+  // ── Save / delete named themes ───────────────────────────────────────────
+  const saveTheme = () => {
+    const name = saveThemeName.trim();
+    if (!name) return;
+    fetch(`${API_URL}/themes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data: currentTheme }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(saved => {
+        if (saved?.id) {
+          setSavedThemes(prev => [...prev, saved]);
+          setSaveThemeName('');
+          showToast(`Theme "${name}" saved`);
+        }
+      })
+      .catch(() => showToast('Could not save theme'));
+  };
+
+  const deleteTheme = (id) => {
+    fetch(`${API_URL}/themes/${id}`, { method: 'DELETE' })
+      .then(r => { if (r.ok) setSavedThemes(prev => prev.filter(t => t.id !== id)); })
+      .catch(() => {});
+  };
+
+  // ── End Live — clear TV screen, return Client to QR idle ─────────────────
+  const endLive = () => {
+    emitWithSession('clear-screen');
+    setLiveVerse(null);
+    setHighlightedText('');
+    setCurrentSegment(0);
+    showToast('Screen cleared — TV showing QR code');
+  };
+
+  // ── Clear highlight only ──────────────────────────────────────────────────
+  const clearHighlight = () => {
+    setHighlightedText('');
+    emitWithSession('highlight-text', { text: '' });
+  };
+
+  // ── Font size control ─────────────────────────────────────────────────────
+  const adjustFontSize = (delta) => {
+    setFontSizeRem(prev => {
+      const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
+      const updatedTheme = { ...currentTheme, font_size: next + 'rem' };
+      handleThemeChange(updatedTheme);
+      return next;
+    });
+  };
+
+  // ── Copy verse text to clipboard ─────────────────────────────────────────
+  const copyVerseText = (verseObj, label = '') => {
+    if (!verseObj) return;
+    const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`✓ Copied${label ? ' ' + label : ''}`);
+    }).catch(() => showToast('Copy failed — clipboard not available'));
+  };
+  const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
+
+  // Load saved themes from server on mount
+  useEffect(() => {
+    fetch(`${API_URL}/themes`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (Array.isArray(data)) setSavedThemes(data); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
