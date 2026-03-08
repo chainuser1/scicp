@@ -1,11 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
-
-// ─── Shared util ──────────────────────────────────────────────────────────────
-// TODO: extract to src/utils/session.js and import everywhere
-const normalizeSessionId = (v) =>
-  String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-
 // ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
@@ -27,7 +21,7 @@ const generateQrDataUrl = async (text) => {
       color: { dark: '#0a0a0f', light: '#f0ece0' },
       errorCorrectionLevel: 'H',
     });
-  } catch (_e) {
+  } catch  {
     return null;
   }
 };
@@ -63,7 +57,7 @@ function Client() {
                  + 0.0722 * (data[i + 2] / 255);
         }
         resolve(total / pixels);
-      } catch (_e) { resolve(null); }
+      } catch  { resolve(null); }
     };
     img.onerror = () => resolve(null);
     img.src = imageUrl;
@@ -102,7 +96,6 @@ function Client() {
   // textVisible drives the only animation: a gentle opacity crossfade
   // on the text layer. The backdrop box never moves or disappears.
   const [textVisible, setTextVisible]         = useState(false);
-  const [displayVerse, setDisplayVerse]       = useState(null);
   const [highlightedText, setHighlightedText] = useState('');
   const [connectionState, setConnectionState] = useState('connecting');
   const [fontsReady, setFontsReady]           = useState(false);
@@ -133,10 +126,10 @@ function Client() {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
   };
   const storeTvSession = (id) => {
-    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { /* storage unavailable */ }
+    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch  { /* storage unavailable */ }
   };
   const clearStoredTvSession = () => {
-    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
+    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch  { /* storage unavailable */ }
   };
 
   // ─── Fetch canonical public origin from /config ───────────────────────────
@@ -275,7 +268,6 @@ function Client() {
       setTimeout(() => {
         // Step 2 — swap content while invisible
         setVerse(data);
-        setDisplayVerse(data);
         setIsIdle(false);
         // Step 3 — fade text back in after DOM commit
         requestAnimationFrame(() =>
@@ -304,7 +296,6 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
-      if (v) setDisplayVerse(v);
       requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
     };
 
@@ -373,7 +364,7 @@ function Client() {
       socket.off('reconnect_attempt', handleReconnect);
       socket.off('connect_error',     handleConnectError);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [fontsReady, crossfadeBackground, createClientSession]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
