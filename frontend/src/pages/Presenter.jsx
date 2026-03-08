@@ -795,13 +795,6 @@ const Presenter = () => {
     setCurrentLanguage(lang);
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang });
-    // Re-run active search in new language so results immediately reflect the switch
-    if (query.trim()) {
-      setCurrentPage(0);
-      setTotalResults(0);
-      clearTimeout(searchDebounce.current);
-      emitWithSession('search', { query, page: 0, pageSize: PAGE_SIZE, language: lang });
-    }
   };
 
   const renderPreviewText = () => {
@@ -1327,7 +1320,7 @@ const Presenter = () => {
                       </li>
                     ))}
                   </ul>
-                  <button className="setlist-clear-btn" onClick={() => { setSetlist([]); showToast('Setlist cleared'); }}>Clear Setlist</button>
+                  <button className="setlist-clear-btn" onClick={() => { if (window.confirm('Clear entire setlist?')) setSetlist([]); }}>Clear Setlist</button>
                 </>
               ) : (
                 <div className="empty-state">No verses in setlist yet.<br />Search and tap + to add.</div>
