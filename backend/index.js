@@ -42,60 +42,6 @@ fastify.get('/config', async (request) => {
   return { publicOrigin };
 });
 
-// theme management endpoints
-fastify.get('/themes', async (request, reply) => {
-  const rows = db.prepare('SELECT id, name, data FROM themes').all();
-  return rows.map(r => ({ id: r.id, name: r.name, data: JSON.parse(r.data) }));
-});
-
-fastify.post('/themes', async (request, reply) => {
-  const { name, data } = request.body;
-  if (!name || !data) {
-    reply.code(400);
-    return { error: 'name and data are required' };
-  }
-  try {
-    const stmt = db.prepare('INSERT INTO themes (name, data) VALUES (?, ?)');
-    const info = stmt.run(name, JSON.stringify(data));
-    return { id: info.lastInsertRowid, name, data };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not create theme' };
-  }
-});
-
-fastify.put('/themes/:id', async (request, reply) => {
-  const { id } = request.params;
-  const { name, data } = request.body;
-  if (!name || !data) {
-    reply.code(400);
-    return { error: 'name and data are required' };
-  }
-  try {
-    const stmt = db.prepare('UPDATE themes SET name = ?, data = ? WHERE id = ?');
-    stmt.run(name, JSON.stringify(data), id);
-    return { id: Number(id), name, data };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not update theme' };
-  }
-});
-
-fastify.delete('/themes/:id', async (request, reply) => {
-  const { id } = request.params;
-  try {
-    const stmt = db.prepare('DELETE FROM themes WHERE id = ?');
-    stmt.run(id);
-    return { success: true };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not delete theme' };
-  }
-});
-
 // ─── Service timing constants ─────────────────────────────────────────────────
 // These are tuned for a church / worship-service environment where:
 //   • WiFi in chapel buildings is often congested and unreliable
@@ -131,19 +77,7 @@ const io = new Server(fastify.server, {
   pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
 });
 
-// ensure themes table exists
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS themes (
-      id INTEGER PRIMARY KEY,
-      name TEXT UNIQUE,
-      data TEXT NOT NULL
-    );
-  `);
-} catch (err) {
-  fastify.log.error('failed to ensure themes table', err);
-}
-
+// Remove the theme table creation code since we're not storing themes in the database anymore
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 function initializeFts() {
   const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
@@ -1466,7 +1400,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   function getSessionState(sessionId) {
     if (!sessionState.has(sessionId)) {
       sessionState.set(sessionId, {
-        theme: null,
         liveVerse: null,
         highlightedText: '',
         presenterSocketId: null,
@@ -1831,9 +1764,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('updating theme:', theme);
       const state = getSessionState(sessionId);
-      state.theme = theme;
       state.updatedAt = Date.now();
-      emitToSession(sessionId, 'update-theme', theme);
     });
 
     socket.on('highlight-text', (payload) => {
@@ -1967,7 +1898,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       
       const state = getSessionState(sessionId);
       state.liveVerse = verseWithSegments;
-      state.theme = theme;
       state.highlightedText = '';
       state.updatedAt = Date.now();
 
