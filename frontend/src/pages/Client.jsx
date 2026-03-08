@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
+
+// ─── Shared util ──────────────────────────────────────────────────────────────
+// TODO: extract to src/utils/session.js and import everywhere
+const normalizeSessionId = (v) =>
+  String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+
 // ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
@@ -21,7 +27,7 @@ const generateQrDataUrl = async (text) => {
       color: { dark: '#0a0a0f', light: '#f0ece0' },
       errorCorrectionLevel: 'H',
     });
-  } catch  {
+  } catch (_e) {
     return null;
   }
 };
@@ -57,7 +63,7 @@ function Client() {
                  + 0.0722 * (data[i + 2] / 255);
         }
         resolve(total / pixels);
-      } catch  { resolve(null); }
+      } catch (_e) { resolve(null); }
     };
     img.onerror = () => resolve(null);
     img.src = imageUrl;
@@ -96,6 +102,7 @@ function Client() {
   // textVisible drives the only animation: a gentle opacity crossfade
   // on the text layer. The backdrop box never moves or disappears.
   const [textVisible, setTextVisible]         = useState(false);
+  const [displayVerse, setDisplayVerse]       = useState(null);
   const [highlightedText, setHighlightedText] = useState('');
   const [connectionState, setConnectionState] = useState('connecting');
   const [fontsReady, setFontsReady]           = useState(false);
@@ -112,6 +119,8 @@ function Client() {
   const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
   const [sessionExpired, setSessionExpired]     = useState(false);
+  const [presenterLeft, setPresenterLeft]       = useState(false); // shows subtle notice on idle screen
+  const [votd, setVotd]                         = useState(null);  // verse of the day — shown while presenter is live but idle
 
   // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
@@ -126,10 +135,10 @@ function Client() {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
   };
   const storeTvSession = (id) => {
-    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch  { /* storage unavailable */ }
+    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { /* storage unavailable */ }
   };
   const clearStoredTvSession = () => {
-    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch  { /* storage unavailable */ }
+    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
   };
 
   // ─── Fetch canonical public origin from /config ───────────────────────────
@@ -137,6 +146,15 @@ function Client() {
     fetch('/config')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.publicOrigin) setPublicOrigin(d.publicOrigin); })
+      .catch(() => {});
+  }, []);
+
+  // ─── Fetch Verse of the Day — displayed on TV while presenter is connected
+  //     but hasn't sent a verse yet (the "connected-idle" state).
+  useEffect(() => {
+    fetch('/verse/of-the-day')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.verse_id) setVotd(d); })
       .catch(() => {});
   }, []);
 
@@ -247,6 +265,48 @@ function Client() {
     }, 1400);
   }, [bgUrl]);
 
+  // ─── Show VOTD on the TV display while presenter is connected but idle ──────
+  // This is called the moment the presenter joins, so the TV never shows a blank
+  // background. The verse fades in with the same animation as a real live verse.
+  // It will be overwritten seamlessly the moment the presenter hits Go Live.
+  const setVotdAsDisplay = useCallback(() => {
+    // votd is captured via closure — may be null if fetch hasn't resolved yet.
+    // In that case we set up a one-shot effect to retry when votd arrives.
+    setVotdPending(true);
+  }, []);
+
+  // ─── When votd arrives (or when pending flag is set), push it to the display ─
+  const [votdPending, setVotdPending] = useState(false);
+
+  useEffect(() => {
+    if (!votdPending || !votd || !presenterJoinedRef.current) return;
+    if (displayVerse) return; // a real verse is already showing — don't overwrite
+    setVotdPending(false);
+    const DEFAULT_THEME = {
+      background_url: DEFAULT_BG,
+      font_family: "'Cormorant Garamond', Georgia, serif",
+      font_size: '4.1rem',
+      layout: 'centered',
+      tone: 'dark',
+    };
+    const votdData = {
+      ...votd,
+      segments: [votd.scripture_text],
+      currentSegment: 0,
+      totalSegments: 1,
+      theme: DEFAULT_THEME,
+    };
+    setTextVisible(false);
+    setTimeout(() => {
+      setVerse(votdData);
+      setDisplayVerse(votdData);
+      setIsIdle(false);
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => setTextVisible(true))
+      );
+    }, 400);
+  }, [votd, votdPending, displayVerse]);
+
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
     // TRANSITION STRATEGY:
@@ -268,6 +328,7 @@ function Client() {
       setTimeout(() => {
         // Step 2 — swap content while invisible
         setVerse(data);
+        setDisplayVerse(data);
         setIsIdle(false);
         // Step 3 — fade text back in after DOM commit
         requestAnimationFrame(() =>
@@ -296,17 +357,39 @@ function Client() {
         setVerse((prev) => ({ ...prev, theme: t }));
         if (t.background_url) setBgUrl(t.background_url);
       }
+      if (v) setDisplayVerse(v);
       requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
     };
 
     // Server broadcasts this ONLY when a Presenter joins the room.
     // This is the definitive signal: close QR, enter display mode.
+    const handleClearScreen = () => {
+      // Presenter ended live — return to connected-idle and show VOTD again.
+      // Do NOT go back to the QR screen — presenter is still connected.
+      setTextVisible(false);
+      setTimeout(() => {
+        setDisplayVerse(null);
+        setHighlightedText('');
+        // Re-show VOTD so the TV is never blank between verses
+        setVotdPending(true);
+      }, 400);
+    };
+
+    const handlePresenterLeft = () => {
+      setPresenterLeft(true);
+      // After 8 s, fade the notice — it already told the operator what happened
+      setTimeout(() => setPresenterLeft(false), 8000);
+    };
+
     const handlePresenterJoined = () => {
       if (presenterJoinedRef.current) return; // already handled
       setPresenterJoined(true);
       presenterJoinedRef.current = true;
       setPresenterJoining(true);
       setTimeout(() => setPresenterJoining(false), 1800);
+      // Show VOTD immediately so TV is never blank while presenter finds first verse.
+      // If server sends a real verse shortly after, handleVerse overwrites this gracefully.
+      setVotdAsDisplay();
     };
 
     const handleSessionError = ({ message }) => {
@@ -343,6 +426,8 @@ function Client() {
     socket.on('update-theme',      handleTheme);
     socket.on('highlight-text',    handleHighlight);
     socket.on('session-joined',    handleSessionJoined);
+    socket.on('clear-screen',      handleClearScreen);
+    socket.on('presenter-left',    handlePresenterLeft);
     socket.on('presenter-joined',  handlePresenterJoined);
     socket.on('session-error',     handleSessionError);
     socket.on('connect',           handleConnect);
@@ -357,6 +442,8 @@ function Client() {
       socket.off('update-theme',      handleTheme);
       socket.off('highlight-text',    handleHighlight);
       socket.off('session-joined',    handleSessionJoined);
+      socket.off('clear-screen',      handleClearScreen);
+      socket.off('presenter-left',    handlePresenterLeft);
       socket.off('presenter-joined',  handlePresenterJoined);
       socket.off('session-error',     handleSessionError);
       socket.off('connect',           handleConnect);
@@ -364,7 +451,7 @@ function Client() {
       socket.off('reconnect_attempt', handleReconnect);
       socket.off('connect_error',     handleConnectError);
     };
-
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
@@ -491,6 +578,8 @@ function Client() {
   }
 
   // ─── Derived display props ────────────────────────────────────────────────
+  // True when currently displaying the VOTD (no real verse has been sent yet)
+  const isShowingVotd   = votd && displayVerse && displayVerse.verse_id === votd.verse_id && !votdPending;
   const hasMoreSegments = verse.segments && verse.currentSegment < verse.segments.length - 1;
   const layout          = verse.theme?.layout || 'centered';
   const tone            = verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark';
@@ -578,6 +667,11 @@ function Client() {
 
       {isIdle && (
         <div className="client-idle-state" aria-live="polite" aria-label="Waiting for scripture">
+          {presenterLeft && (
+            <div className="client-presenter-left-notice" role="status">
+              Presenter disconnected — waiting for reconnection
+            </div>
+          )}
           <div className="idle-cross" aria-hidden="true">
             <div className="idle-cross-v" />
             <div className="idle-cross-h" />
@@ -596,6 +690,9 @@ function Client() {
               {verse.book_title && verse.chapter_number && verse.verse_number && (
                 <div className="verse-caption">
                   {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
+                  {isShowingVotd && (
+                    <span className="client-votd-label">✦ Verse of the Day</span>
+                  )}
                 </div>
               )}
               {hasMoreSegments && <div className="cont-indicator">›</div>}
