@@ -355,12 +355,57 @@ const Presenter = () => {
   const [tourStep, setTourStep]             = useState(0);
 
   const [goLiveBarVisible, setGoLiveBarVisible] = useState(false);
+  const [toastMsg, setToastMsg]               = useState('');
+  const [toastTimer, setToastTimerRef]        = React.useRef(null);
+  const [themeCardOpen, setThemeCardOpen]     = useState(true);
+  const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
   const mainPanelRef = useRef(null);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
   const PAGE_SIZE = 5;
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+
+  // ── Toast notification ───────────────────────────────────────────────────
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
+  };
+
+  // ── End Live — clear TV screen, return Client to QR idle ─────────────────
+  const endLive = () => {
+    emitWithSession('clear-screen');
+    setLiveVerse(null);
+    setHighlightedText('');
+    setCurrentSegment(0);
+    showToast('Screen cleared — TV showing QR code');
+  };
+
+  // ── Clear highlight only ──────────────────────────────────────────────────
+  const clearHighlight = () => {
+    setHighlightedText('');
+    emitWithSession('highlight-text', { text: '' });
+  };
+
+  // ── Font size control ─────────────────────────────────────────────────────
+  const adjustFontSize = (delta) => {
+    setFontSizeRem(prev => {
+      const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
+      const updatedTheme = { ...currentTheme, font_size: next + 'rem' };
+      handleThemeChange(updatedTheme);
+      return next;
+    });
+  };
+
+  // ── Copy verse text to clipboard ─────────────────────────────────────────
+  const copyVerseText = (verseObj, label = '') => {
+    if (!verseObj) return;
+    const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`✓ Copied${label ? ' ' + label : ''}`);
+    }).catch(() => showToast('Copy failed — clipboard not available'));
+  };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
 
   useEffect(() => {
@@ -567,11 +612,63 @@ const Presenter = () => {
     };
   }, [drawerOpen, themePopover, sessionPopover, mobileMenuOpen]);
 
+  /* ── Keyboard shortcuts ─────────────────────────────────────────────────
+     Active only when no input / textarea is focused so typing in search
+     doesn't accidentally trigger navigation.
+     Space  → next segment (or next verse if single-segment)
+     →      → next verse
+     ←      → previous verse
+     L      → go live (if staged)
+     E      → end live (if live)
+     Esc    → clear highlight
+     ────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case ' ':
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.key === ' ' && liveVerse?.segments?.length > 1) {
+            navigateSegment('next');
+          } else {
+            fetchAdjacent('next');
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          fetchAdjacent('prev');
+          break;
+        case 'l':
+        case 'L':
+          if (staged) { e.preventDefault(); goLive(); }
+          break;
+        case 'e':
+        case 'E':
+          if (liveVerse) { e.preventDefault(); endLive(); }
+          break;
+        case 'Escape':
+          if (highlightedText) { e.preventDefault(); clearHighlight(); }
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [staged, liveVerse, highlightedText, currentSegment]);
+
   /* ── Handlers ── */
   const handleThemeChange = theme => {
     setCurrentTheme(theme);
     if (staged) setStaged(prev => ({ ...prev, theme }));
     emitWithSession('update-theme', { theme });
+    // Keep fontSizeRem slider in sync when theme is changed externally
+    if (theme.font_size) {
+      const parsed = parseFloat(theme.font_size);
+      if (!isNaN(parsed)) setFontSizeRem(parsed);
+    }
   };
 
   const handleSearch = e => {
@@ -712,6 +809,12 @@ const Presenter = () => {
 
         {/* Live verse summary */}
         <div className="hdr-center">
+          {/* Persistent connection dot — always visible on desktop */}
+          <span
+            className={`hdr-conn-dot hdr-conn-dot--${connectionState}`}
+            title={`Connection: ${connectionState}`}
+            aria-label={`Connection: ${connectionState}`}
+          />
           {liveVerse ? (
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
@@ -1123,6 +1226,11 @@ const Presenter = () => {
                   <div className="votd-footer">
                     <span className="votd-ref">— {verseOfDay.book_title} {verseOfDay.chapter_number}:{verseOfDay.verse_number}</span>
                     <div className="votd-actions">
+                      <button className="votd-btn" title="Copy verse text" onClick={() => {
+                        copyVerseText(verseOfDay, '');
+                        setVotdCopied(true);
+                        setTimeout(() => setVotdCopied(false), 1800);
+                      }}>{votdCopied ? '✓ Copied' : 'Copy'}</button>
                       <button className="votd-btn" title="Stage this verse" onClick={() => {
                         setStaged({ ...verseOfDay, theme: currentTheme });
                       }}>Stage</button>
@@ -1242,7 +1350,25 @@ const Presenter = () => {
           <section className="card card--preview">
             <div className="card-header">
               <span className="card-label">👁 Preview</span>
-              <span className="card-hint">select text to highlight</span>
+              <div className="preview-card-actions">
+                {highlightedText && (
+                  <button className="clear-highlight-btn" onClick={clearHighlight} title="Clear highlight (Esc)">
+                    ✕ Highlight
+                  </button>
+                )}
+                <span className="card-hint">select text to highlight</span>
+                <button className="end-live-btn" onClick={endLive} title="End live — clears TV screen (E)">
+                  ◼ End Live
+                </button>
+              </div>
+            </div>
+            {/* Session status while live */}
+            <div className="preview-session-status">
+              <span className={`preview-conn-dot preview-conn-dot--${connectionState}`} />
+              <span className="preview-session-text">
+                {viewerCount === 0 ? 'No TV connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                {sessionId && <span className="preview-session-id"> · {sessionId}</span>}
+              </span>
             </div>
             <div className={`preview-nav${activeTourTarget === 'nav' ? ' tour-focus' : ''}`}>
               <button className="preview-nav-btn preview-nav-btn--verse" onClick={() => fetchAdjacent('prev')} aria-label="Previous verse" title="Previous verse">
@@ -1277,31 +1403,54 @@ const Presenter = () => {
           </section>
         )}
 
-        {/* ── Theme card ── */}
+        {/* ── Theme card — collapsible ── */}
         <section className="card card--theme">
-          <div className="card-header">
+          <div
+            className="card-header card-header--clickable"
+            onClick={() => setThemeCardOpen(o => !o)}
+            title={themeCardOpen ? 'Collapse theme controls' : 'Expand theme controls'}
+          >
             <span className="card-label">🎨 Theme &amp; Display</span>
+            <span className="card-collapse-icon">{themeCardOpen ? '▲' : '▼'}</span>
           </div>
-          <div className="theme-buttons">
-            <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
-            <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
-          </div>
-          <div className="theme-inputs">
-            <div className="theme-control-group">
-              <label htmlFor="bg-url">Background URL</label>
-              <div className="input-group">
-                <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                <button className="control-button" onClick={() => {
-                  if (!bgUrlInput) return;
-                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
-                  setBgUrlInput('');
-                }}>Apply</button>
+          {themeCardOpen && (
+            <>
+              <div className="theme-buttons">
+                <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
+                <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
               </div>
-            </div>
-          </div>
+              {/* Font size control */}
+              <div className="font-size-controls">
+                <span className="font-size-label">Text Size</span>
+                <button className="font-size-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">−</button>
+                <span className="font-size-badge">{fontSizeRem.toFixed(1)}rem</span>
+                <button className="font-size-btn" onClick={() => adjustFontSize(0.3)} title="Larger text" aria-label="Increase font size">+</button>
+              </div>
+              <div className="theme-inputs">
+                <div className="theme-control-group">
+                  <label htmlFor="bg-url">Background URL</label>
+                  <div className="input-group">
+                    <input id="bg-url" type="text" placeholder="https://example.com/image.jpg" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                    <button className="control-button" onClick={() => {
+                      if (!bgUrlInput) return;
+                      handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                      setBgUrlInput('');
+                    }}>Apply</button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </section>
 
       </main>
+      {/* Toast notification */}
+      {toastMsg && (
+        <div className="presenter-toast" role="status" aria-live="polite">
+          {toastMsg}
+        </div>
+      )}
+
       {/* Desktop footer — hidden on mobile via CSS; links live in hamburger menu on small screens */}
       <footer className="presenter-footer">
         <nav className="presenter-footer-links">
@@ -1319,17 +1468,26 @@ const Presenter = () => {
       </footer>
 
       {/* Sticky Go Live bar — mobile only, appears when a verse is staged */}
-      {staged && (
+      {(staged || liveVerse) && (
         <div className="mobile-golive-bar">
           <div className="mobile-golive-ref">
-            {staged.book_title} {staged.chapter_number}:{staged.verse_number}
+            {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
           </div>
-          <button
-            className={`mobile-golive-btn${activeTourTarget === 'golive' ? ' tour-focus' : ''}`}
-            onClick={goLive}
-          >
-            ● Go Live
-          </button>
+          <div className="mobile-golive-actions">
+            {liveVerse && (
+              <button className="mobile-endlive-btn" onClick={endLive} title="End live">
+                ◼ End
+              </button>
+            )}
+            {staged && (
+              <button
+                className={`mobile-golive-btn${activeTourTarget === 'golive' ? ' tour-focus' : ''}`}
+                onClick={goLive}
+              >
+                ● Go Live
+              </button>
+            )}
+          </div>
         </div>
       )}
 
