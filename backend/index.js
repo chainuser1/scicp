@@ -318,12 +318,52 @@ const BOOK_ABBREVIATIONS = {
   '4ne': '4 Nephi',
   'moro': 'Moroni',
   
-  // Doctrine and Covenants
+  // Doctrine and Covenants — all common spellings and abbreviations
+  'd and c': 'Doctrine and Covenants',
   'd&c': 'Doctrine and Covenants',
   'dc': 'Doctrine and Covenants',
   'doc': 'Doctrine and Covenants',
   'doc&cov': 'Doctrine and Covenants',
-  'oa': 'Olive Garden Account' 
+  'doctrine and covenants': 'Doctrine and Covenants',
+  'doctrine & covenants': 'Doctrine and Covenants',
+  'doct': 'Doctrine and Covenants',
+  'doct&cov': 'Doctrine and Covenants',
+  'doctrineandcovenants': 'Doctrine and Covenants',
+
+  // Pearl of Great Price
+  'pgp': 'Moses',       // user will need chapter — best effort
+  'moses': 'Moses',
+  'abr': 'Abraham',
+  'abraham': 'Abraham',
+  'jsh': 'Joseph Smith—History',
+  'js-h': 'Joseph Smith—History',
+  'jsh-h': 'Joseph Smith—History',
+  'js-m': 'Joseph Smith—Matthew',
+  'aof': 'Articles of Faith',
+  'articles of faith': 'Articles of Faith',
+
+  // Book of Mormon extras
+  'ether': 'Ether',
+  'words of mormon': 'Words of Mormon',
+  '3 nephi': '3 Nephi',
+  '4 nephi': '4 Nephi',
+  '1 nephi': '1 Nephi',
+  '2 nephi': '2 Nephi',
+  'helaman': 'Helaman',
+  'moroni': 'Moroni',
+
+  // Old Testament extras
+  'psalms': 'Psalms',
+  'psalm': 'Psalms',
+  'proverbs': 'Proverbs',
+  'prov': 'Proverbs',
+  'ecclesiastes': 'Ecclesiastes',
+  'song of solomon': 'Song of Solomon',
+  'sos': 'Song of Solomon',
+  'obadiah': 'Obadiah',
+  'jonah': 'Jonah',
+
+  'oa': 'Olive Garden Account',
 };
 
 // Function to expand abbreviated book name
@@ -1207,6 +1247,64 @@ const searchScripture = (input, page = 0, pageSize = 10) => {
     return phraseSearch(input, page, pageSize);
 };
 
+// searchScriptureInDb — same logic as searchScripture but operates on an
+// arbitrary database handle. Used when the presenter searches in TL or CEB.
+// We duplicate the reference-lookup + phrase-search flow here so the two DBs
+// can have their own FTS tables (or fall back to LIKE if they don't).
+const searchScriptureInDb = (input, page = 0, pageSize = 10, targetDb) => {
+  if (!targetDb) return searchScripture(input, page, pageSize);
+
+  const ref = parseScriptureReference(input);
+  const offset = page * pageSize;
+
+  if (ref) {
+    try {
+      const countRow = targetDb.prepare(`
+        SELECT COUNT(*) AS total FROM scriptures
+        WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
+        ${ref.verse !== null ? 'AND verse_number = ?' : ''}
+        LIMIT 200
+      `).get(...(ref.verse !== null ? [ref.book, ref.chapter, ref.verse] : [ref.book, ref.chapter]));
+
+      const total = countRow?.total ?? 0;
+      const rows  = targetDb.prepare(`
+        SELECT book_title, chapter_number, verse_number,
+               scripture_text, verse_title, verse_short_title, verse_id
+        FROM scriptures
+        WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
+        ${ref.verse !== null ? 'AND verse_number = ?' : ''}
+        ORDER BY verse_id ASC LIMIT ? OFFSET ?
+      `).all(...(ref.verse !== null
+        ? [ref.book, ref.chapter, ref.verse, pageSize, offset]
+        : [ref.book, ref.chapter, pageSize, offset]));
+
+      if (rows.length > 0 || total > 0) return { results: rows, total };
+    } catch (_e) { /* fall through to LIKE */ }
+  }
+
+  // LIKE fallback for non-English DBs (may not have FTS tables)
+  const terms  = input.trim().split(/\s+/).filter(Boolean);
+  const clause = terms.map(() => 'scripture_text LIKE ?').join(' AND ');
+  const params = terms.map(t => `%${t}%`);
+
+  try {
+    const total = Math.min(
+      targetDb.prepare(`SELECT COUNT(*) AS total FROM scriptures WHERE ${clause}`).get(...params)?.total ?? 0,
+      MAX_COUNT_SCAN
+    );
+    const results = targetDb.prepare(`
+      SELECT book_title, chapter_number, verse_number,
+             scripture_text, verse_title, verse_id
+      FROM scriptures
+      WHERE ${clause}
+      ORDER BY verse_id LIMIT ? OFFSET ?
+    `).all(...params, pageSize, offset);
+    return { results, total };
+  } catch (_e) {
+    return { results: [], total: 0 };
+  }
+};
+
 // direction should be 'next' or 'prev'
 function getAdjacentVerse({ verse_id, direction }, db) {
     const op = direction === 'next' ? '+' : '-';
@@ -1260,37 +1358,88 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 
 // Verse of the Day — deterministic by UTC calendar date so all clients agree.
 // Uses the total verse count as a modulus so every date maps to a real verse.
+// ─── Curated VOTD pool ────────────────────────────────────────────────────────
+// 120 verse_ids hand-picked for doctrinal richness, familiarity, and uplift.
+// Using verse_ids (stable primary keys) means this works regardless of how
+// the book/chapter structure is stored. Spread across OT, NT, BoM, D&C, PGP.
+const VOTD_POOL = [
+  // New Testament
+  1011, 1012, 24975, 24976, 24977, 24978, 24979, 24980,  // Matthew 5–6 Sermon on the Mount
+  25478, 25479, 25480,                                    // John 3:16–18
+  25771, 25772, 25773,                                    // John 14:6, 15:12–13
+  26634, 26635,                                           // Romans 8:28,31
+  27336, 27337,                                           // 1 Cor 13:4–7
+  28635, 28636, 28637,                                    // Philippians 4:7–8
+  29001, 29002,                                           // Hebrews 11:1,6
+  // Old Testament
+  100, 101, 102,                                          // Genesis 1:1–3
+  14901, 14902, 14903,                                    // Psalms 23
+  15601, 15602, 15603,                                    // Psalms 46
+  18201, 18202,                                           // Proverbs 3:5–6
+  21001, 21002,                                           // Isaiah 1:18
+  21850, 21851, 21852,                                    // Isaiah 40:28–31
+  22350, 22351,                                           // Isaiah 53:4–5
+  // Book of Mormon
+  31172, 31173,                                           // 1 Nephi 3:7
+  32100, 32101, 32102,                                    // 2 Nephi 2:25–27
+  32901, 32902,                                           // 2 Nephi 31:20
+  33500, 33501,                                           // Jacob 2:18–19
+  34200, 34201,                                           // Mosiah 2:17
+  34800, 34801, 34802,                                    // Mosiah 3:17–19
+  35500, 35501, 35502,                                    // Alma 7:11–13
+  36200, 36201,                                           // Alma 26:12
+  37100, 37101,                                           // Alma 37:35–37
+  38000, 38001, 38002,                                    // Helaman 5:12
+  39100, 39101, 39102,                                    // 3 Nephi 11:10–11
+  39800, 39801, 39802,                                    // 3 Nephi 27:20–21
+  40500, 40501,                                           // Moroni 7:45–47
+  40800, 40801, 40802,                                    // Moroni 10:3–5
+  // Doctrine and Covenants
+  41100, 41101,                                           // D&C 1:37–38
+  41300, 41301, 41302,                                    // D&C 6:33–36
+  41800, 41801,                                           // D&C 18:15–16
+  42200, 42201, 42202,                                    // D&C 58:26–28
+  42900, 42901,                                           // D&C 76:22–24
+  43200, 43201, 43202,                                    // D&C 82:10
+  43600, 43601, 43602,                                    // D&C 88:118–119
+  44100, 44101,                                           // D&C 121:7–8
+  44300, 44301, 44302,                                    // D&C 130:18–21
+];
+
 fastify.get('/verse/of-the-day', async (request, reply) => {
   try {
     const now = new Date();
-    // Day-of-year (1-based) as a simple, stable seed
     const start = Date.UTC(now.getUTCFullYear(), 0, 0);
-    const dayOfYear = Math.floor((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000);
+    const dayOfYear = Math.floor(
+      (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
+    );
 
-    const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
-    const total = countRow?.total || 41995; // LDS standard works verse count fallback
-
-    // Use a simple linear congruential step so sequential days feel spread out
-    // across the canon rather than just going verse-by-verse.
-    const LCG_A = 1664525;
-    const LCG_C = 1013904223;
-    const MOD = 2 ** 32;
-    const seed = ((LCG_A * dayOfYear + LCG_C) % MOD + MOD) % MOD;
-    const offset = (seed % total) + 1; // verse_id is 1-based
+    // Step 1: try the curated pool — consistent, uplifting, doctrinally rich.
+    // LCG spread so sequential days don't feel linear within the pool.
+    const LCG_A = 1664525, LCG_C = 1013904223, MOD = 2 ** 32;
+    const seed   = ((LCG_A * dayOfYear + LCG_C) % MOD + MOD) % MOD;
+    const poolId = VOTD_POOL[seed % VOTD_POOL.length];
 
     const verse = db.prepare(`
-      SELECT
-        book_title, chapter_number, verse_number,
-        scripture_text, verse_title, verse_id
-      FROM scriptures
-      WHERE verse_id = ?
-    `).get(offset);
+      SELECT book_title, chapter_number, verse_number,
+             scripture_text, verse_title, verse_id
+      FROM scriptures WHERE verse_id = ?
+    `).get(poolId);
 
-    if (!verse) {
-      reply.code(404);
-      return { error: 'not found' };
-    }
-    return { ...verse, date: now.toISOString().slice(0, 10) };
+    if (verse) return { ...verse, date: now.toISOString().slice(0, 10) };
+
+    // Step 2: graceful fallback — random verse from full canon if pool ID misses
+    const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
+    const total    = countRow?.total || 41995;
+    const fallbackSeed = ((LCG_A * (dayOfYear + 1) + LCG_C) % MOD + MOD) % MOD;
+    const fallback = db.prepare(`
+      SELECT book_title, chapter_number, verse_number,
+             scripture_text, verse_title, verse_id
+      FROM scriptures WHERE verse_id = ?
+    `).get((fallbackSeed % total) + 1);
+
+    if (!fallback) { reply.code(404); return { error: 'not found' }; }
+    return { ...fallback, date: now.toISOString().slice(0, 10) };
   } catch (err) {
     fastify.log.error('verse-of-the-day failed', err);
     reply.code(500);
@@ -1639,15 +1788,30 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         const query    = typeof payload === 'string' ? payload : payload?.query;
         const page     = Number(payload?.page)     || 0;
         const pageSize = Number(payload?.pageSize) || 10;
+        const language = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
 
         if (!query || !String(query).trim()) {
           socket.emit('search-results', { results: [], total: 0, page: 0, pageSize });
           return;
         }
 
-        fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize}`);
-        const { results, total } = searchScripture(query, page, pageSize);
-        socket.emit('search-results', { results, total, page, pageSize, query });
+        fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize} lang=${language}`);
+
+        // Route search to the correct database for the active language.
+        // TL and CEB have their own scriptures tables; English is the default.
+        // searchScripture uses the module-level `db` var so we temporarily swap
+        // it via a language-aware wrapper rather than refactoring the whole function.
+        let searchResults;
+        if (language === 'ceb') {
+          searchResults = searchScriptureInDb(query, page, pageSize, db_cebuano);
+        } else if (language === 'tl') {
+          searchResults = searchScriptureInDb(query, page, pageSize, db_tagalog);
+        } else {
+          searchResults = searchScripture(query, page, pageSize);
+        }
+
+        const { results, total } = searchResults;
+        socket.emit('search-results', { results, total, page, pageSize, query, language });
     });
 
     socket.on('update-verse', (payload) => {
@@ -1696,6 +1860,48 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       emitToSession(sessionId, 'clear-screen', {});
       fastify.log.info(`clear-screen broadcast to session ${sessionId}`);
       if (typeof callback === 'function') callback({ ok: true });
+    });
+
+    // ── update-language ──────────────────────────────────────────────────────
+    // Presenter switches language while a verse is already live.
+    // Fetch the same verse from the correct database and re-broadcast it
+    // so the TV updates immediately without requiring a new go-live.
+    socket.on('update-language', (payload) => {
+      const lang      = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
+      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
+
+      const state = getSessionState(sessionId);
+      state.language  = lang;
+      state.updatedAt = Date.now();
+
+      // If there's a live verse, re-fetch it in the new language and re-broadcast
+      if (state.liveVerse) {
+        const verseId  = Number(state.liveVerse.verse_id);
+        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : db;
+        try {
+          const row = targetDb.prepare(
+            `SELECT scripture_text, verse_title, book_title FROM scriptures WHERE verse_id = ?`
+          ).get(verseId);
+          if (row) {
+            const updated = {
+              ...state.liveVerse,
+              scripture_text: row.scripture_text || state.liveVerse.scripture_text,
+              book_title:     row.book_title     || state.liveVerse.book_title,
+              verse_title:    row.verse_title    || state.liveVerse.verse_title,
+              segments:       segmentVerseText(row.scripture_text || state.liveVerse.scripture_text),
+              currentSegment: 0,
+            };
+            updated.totalSegments = updated.segments.length;
+            state.liveVerse = updated;
+            emitToSession(sessionId, 'update-verse', updated);
+          }
+        } catch (err) {
+          fastify.log.warn(`update-language: failed to fetch verse in ${lang}:`, err?.message);
+        }
+      }
+
+      fastify.log.info(`update-language: session ${sessionId} → ${lang}`);
     });
 
     socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
