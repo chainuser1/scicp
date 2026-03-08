@@ -200,7 +200,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
       try {
         const mod = await import('jsqr');
         jsQR = mod.default || mod;
-      } catch (_e) {
+      } catch  {
         if (active) setError('QR scanner not available. Install jsqr: npm install jsqr');
         return;
       }
@@ -210,7 +210,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-      } catch (_e) {
+      } catch  {
         if (active) setError('Camera access denied. Please allow camera permission and try again.');
         return;
       }
@@ -340,7 +340,6 @@ const Presenter = () => {
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
-  const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
@@ -354,7 +353,6 @@ const Presenter = () => {
   });
   const [tourStep, setTourStep]             = useState(0);
 
-  const [goLiveBarVisible, setGoLiveBarVisible] = useState(false);
   const mainPanelRef = useRef(null);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
@@ -401,7 +399,7 @@ const Presenter = () => {
         setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
         setMobileMenuOpen(false);
-        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
+        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch  { /* storage unavailable */ }
       } else {
         setSessionMessage(response?.message || 'TV session not found — check the code');
       }
@@ -418,7 +416,7 @@ const Presenter = () => {
     socket.emit('leave-session', {}, (response) => {
       if (response?.ok) {
         setSessionId('');
-        setSessionInput('');
+        
         setSessionMessage('You left the session');
         try {
           window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
@@ -450,7 +448,6 @@ const Presenter = () => {
     const handleSessionJoined = (data) => {
       if (!data?.sessionId) return;
       setSessionId(data.sessionId);
-      setSessionInput(data.sessionId);
       setSessionMessage(`Session ${data.sessionId} ready`);
       setHighlightedText('');
       setSessionPopover(false);
@@ -460,7 +457,7 @@ const Presenter = () => {
     };
     const handleSessionLeft = () => {
       setSessionId('');
-      setSessionInput('');
+      
       setSessionMessage('You left the session');
       try {
         window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
@@ -487,7 +484,7 @@ const Presenter = () => {
             setSessionMessage(`Reconnected — session ${response.sessionId}`);
           } else {
             // Last session is gone — clear it and wait for the presenter to scan/type
-            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch (_e) { /* ignore */ }
+            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch  { /* ignore */ }
             setSessionMessage('Scan the QR code on the TV screen, or type the session code');
           }
         });
