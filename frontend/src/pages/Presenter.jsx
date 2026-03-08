@@ -1,4 +1,4 @@
-import React, { useState, useEffect} from 'react';
+import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
@@ -342,6 +342,7 @@ const Presenter = () => {
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileTab, setMobileTab]           = useState('home');   // 'home' | 'search' | 'live' | 'more'
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -1209,7 +1210,9 @@ const Presenter = () => {
               <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
-            <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
+            <div className="go-live-sticky-wrap">
+              <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
+            </div>
           </section>
         )}
 
@@ -1278,20 +1281,159 @@ const Presenter = () => {
         </section>
 
       </main>
-      <footer className="presenter-footer">
-        <nav className="presenter-footer-links">
-          <a href="/">Home</a>
-          <a href="/presenter">Chapel Control</a>
-          <a href="/client">Sacred Display</a>
-          <a href="/about">About</a>
-          <a href="/contact">Contact</a>
-          <a href="/privacy">Privacy Policy</a>
-          <a href="/terms">Terms of Service</a>
-        </nav>
-        <div className="presenter-footer-credit">
-          © {new Date().getFullYear()} Scripture Projection Engine. Sacred Tech by Dagami Ward Dev Team.
+      {/* ════════════════════════════════════════
+          MOBILE BOTTOM TAB BAR  (≤540px only)
+          ════════════════════════════════════════ */}
+      <nav className="mob-tab-bar" aria-label="Bottom navigation">
+        <button
+          className={`mob-tab${mobileTab === 'home' ? ' mob-tab--active' : ''}`}
+          onClick={() => { setMobileTab('home'); setDrawerOpen(false); setMobileMenuOpen(false); }}
+          aria-label="Home"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Home</span>
+        </button>
+        <button
+          className={`mob-tab${drawerOpen && drawerTab === 'search' ? ' mob-tab--active' : ''}`}
+          onClick={() => { setMobileTab('search'); openDrawer('search'); setMobileMenuOpen(false); }}
+          aria-label="Search"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Search</span>
+        </button>
+        {liveVerse && (
+          <button
+            className="mob-tab mob-tab--live"
+            onClick={() => { setMobileTab('live'); setDrawerOpen(false); setMobileMenuOpen(false); }}
+            aria-label="Live"
+          >
+            <span className="mob-tab-live-dot" />
+            <span>Live</span>
+          </button>
+        )}
+        <button
+          className={`mob-tab${drawerOpen && drawerTab === 'history' ? ' mob-tab--active' : ''}`}
+          onClick={() => { setMobileTab('history'); openDrawer('history'); setMobileMenuOpen(false); }}
+          aria-label="Recent"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Recent</span>
+        </button>
+        <button
+          className={`mob-tab${mobileTab === 'more' ? ' mob-tab--active' : ''}`}
+          onClick={() => { setMobileTab(t => t === 'more' ? 'home' : 'more'); setDrawerOpen(false); setMobileMenuOpen(false); }}
+          aria-label="More"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+          <span>More</span>
+        </button>
+      </nav>
+
+      {/* ════════════════════════════════════════
+          MORE SHEET  (slides up from bottom tab)
+          ════════════════════════════════════════ */}
+      <div className={`mob-more-sheet${mobileTab === 'more' ? ' mob-more-sheet--open' : ''}`} aria-hidden={mobileTab !== 'more'}>
+        <div className="mob-more-handle" onClick={() => setMobileTab('home')} />
+        <div className="mob-more-body">
+
+          {/* Settings group */}
+          <div className="mob-more-group">
+            <div className="mob-more-group-label">Settings</div>
+            <div className="mob-more-row">
+              <span className="mob-more-row-label">Language</span>
+              <div className="mob-more-row-actions">
+                {['en','tl','ceb'].map(lang => (
+                  <button key={lang}
+                    className={`theme-btn${currentLanguage === lang ? ' active' : ''}`}
+                    onClick={() => handleLanguageChange({ target: { value: lang } })}
+                  >{lang.toUpperCase()}</button>
+                ))}
+              </div>
+            </div>
+            <div className="mob-more-row">
+              <span className="mob-more-row-label">Theme</span>
+              <div className="mob-more-row-actions">
+                {[{ label: '☀ Light', t: themes.light }, { label: '☽ Dark', t: themes.dark }].map(({ label, t }) => (
+                  <button key={label}
+                    className={`theme-btn${currentTheme === t ? ' active' : ''}`}
+                    onClick={() => handleThemeChange(t)}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="mob-more-row mob-more-row--col">
+              <span className="mob-more-row-label">Custom Background URL</span>
+              <div className="popover-row" style={{ marginTop: '0.3rem' }}>
+                <input type="text" className="popover-input" placeholder="https://…" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                <button className="popover-apply" onClick={() => {
+                  if (!bgUrlInput) return;
+                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                  setBgUrlInput('');
+                }}>Apply</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Session group */}
+          <div className="mob-more-group">
+            <div className="mob-more-group-label">Session</div>
+            {sessionId && (
+              <div className="idle-viewer-count" style={{ marginBottom: '0.5rem' }}>
+                <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
+                {viewerCount === 0 ? 'TV not connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+              </div>
+            )}
+            <div className="popover-row">
+              <button className="popover-apply qr-scan-btn" style={{ width: '100%' }}
+                onClick={() => { setScannerOpen(true); setMobileTab('home'); }}
+                aria-label="Scan QR code on TV">
+                <IconQr /> Scan TV QR Code
+              </button>
+            </div>
+            <div className="session-tv-hint">or type the code shown on the TV screen</div>
+            <div className="popover-row">
+              <input type="text" className="popover-input" value={tvSessionInput}
+                onChange={e => setTvSessionInput(normalizeSessionId(e.target.value))}
+                onKeyDown={e => e.key === 'Enter' && joinTvSession()}
+                placeholder="AB12CD" aria-label="TV session code" />
+              <button className="popover-apply" onClick={() => joinTvSession()}>Join</button>
+            </div>
+            {sessionId && (
+              <div className="popover-row" style={{ marginTop: '0.3rem' }}>
+                <button className="theme-btn" style={{ width: '100%' }} onClick={() => { leaveSession(); setMobileTab('home'); }}>Leave Session</button>
+              </div>
+            )}
+            <div className="session-message">{sessionMessage}</div>
+            <div className="session-message">Connection: {connectionState}</div>
+          </div>
+
+          {/* Help */}
+          <div className="mob-more-group">
+            <button className="theme-btn" style={{ width: '100%' }} onClick={() => { openTour(); setMobileTab('home'); }}>
+              <IconInfo /> Help &amp; Walkthrough
+            </button>
+          </div>
+
+          {/* Navigation links */}
+          <div className="mob-more-group mob-more-nav">
+            <div className="mob-more-group-label">Navigation</div>
+            <div className="mob-more-nav-links">
+              <a href="/">Home</a>
+              <a href="/presenter">Chapel Control</a>
+              <a href="/client">Sacred Display</a>
+              <a href="/about">About</a>
+              <a href="/contact">Contact</a>
+              <a href="/privacy">Privacy Policy</a>
+              <a href="/terms">Terms of Service</a>
+            </div>
+            <div className="presenter-footer-credit" style={{ marginTop: '0.75rem' }}>
+              © {new Date().getFullYear()} Scripture Projection Engine.<br />Sacred Tech by Dagami Ward Dev Team.
+            </div>
+          </div>
+
         </div>
-      </footer>
+      </div>
+      {mobileTab === 'more' && <div className="mob-more-backdrop" onClick={() => setMobileTab('home')} />}
 
       {/* QR Scanner Modal — rendered at root level so it overlays everything */}
       {scannerOpen && (

@@ -41,19 +41,17 @@
    ──────────────────────────────────────────────────────────────────────── */
 html {
   height: 100%;
+  overflow: hidden;
 }
 body {
   height: 100%;
+  overflow: hidden;
   margin: 0;
   padding: 0;
 }
-/* #root must fill the full viewport height so that:
-   - .presenter-container (height:100%) locks to the screen on mobile
-   - .home-page (min-height:100%) can still grow taller and scroll freely
-   overflow:visible (default) lets scrollable pages scroll normally while
-   presenter-container uses overflow:clip to contain itself.              */
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 
@@ -107,18 +105,13 @@ button,
 /* ===== HOME PAGE ===== */
 
 .home-page {
-  /* min-height:100dvh — on short-content pages (Home) the footer sits at
-     the viewport bottom. On tall-content pages (About, Privacy) the page
-     grows beyond the viewport and scrolls normally — no gap, no clip.   */
-  min-height: 100dvh;
+  min-height: 100vh;
   background: var(--obsidian);
   display: flex;
   flex-direction: column;
   font-family: 'Inter', sans-serif;
+  overflow: hidden;
   position: relative;
-  /* No overflow:hidden — scrollable pages must scroll freely.
-     The decorative ::before/::after glows use position:fixed so they
-     are unaffected by this change.                                       */
 }
 
 /* Ambient radial glows */
@@ -322,21 +315,22 @@ button,
 
 /* Updated footer styles */
 .home-footer {
-  /* flex-shrink:0 — always the last child of .home-page flex column.
-     On short pages it sits at the viewport bottom (home-page fills 100dvh).
-     On tall pages it sits below all content with no gap. Never fixed.    */
-  flex-shrink: 0;
   position: relative;
   z-index: 1;
   border-top: 1px solid var(--gold-border);
-  background: var(--surface);
-  color: var(--text-secondary);
-  text-align: center;
-  padding: 0.75rem 1rem 0.85rem;
+  padding: 2rem 3rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background: linear-gradient(to bottom, var(--surface), var(--obsidian));
 }
 
 .home-footer-brand {
-  display: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .home-footer-logo {
@@ -345,65 +339,70 @@ button,
   opacity: 0.5;
 }
 
+.home-footer {
+  padding: 0.65rem 0; /* Further reduced from 0.75rem */
+  background-color: var(--surface);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.home-footer-brand {
+  display: none; /* Removed per compact design - brand remains in header */
+}
+
 .home-footer-links {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.2rem 0.05rem;
-  margin: 0 0 0.3rem;
+  gap: 0.4rem;
+  margin: 0.15rem 0;
+  font-size: 0.68rem; /* Reduced from 0.75rem */
 }
 
-.home-footer-links ul {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.2rem 0.05rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.home-footer-links a,
-.home-footer-links ul li a {
+.home-footer-links a {
   color: var(--text-dim);
   text-decoration: none;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.68rem;
-  padding: 0.18rem 0.4rem;
-  border-radius: var(--radius);
   transition: color var(--transition);
-  white-space: nowrap;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius);
 }
 
-.home-footer-links a:hover,
-.home-footer-links ul li a:hover {
+.home-footer-links a:hover {
   color: var(--gold-light);
+  background: var(--surface-2);
 }
 
 .home-footer-credit {
-  font-size: 0.62rem;
-  line-height: 1.3;
+  font-size: 0.68rem ;
+  line-height: 1.1;
+  margin-top: 0.5rem;
   color: var(--text-dim);
-  opacity: 0.7;
-  margin-top: 0.2rem;
 }
 
 .home-footer-separator {
-  display: none;
+  display: none; /* Removed for compactness - replaced with space */
 }
 
-/* ── Mobile: tighten up on narrow screens ── */
-@media (max-width: 480px) {
-  .home-footer {
-    padding: 0.6rem 0.75rem 0.7rem;
+/* Mobile optimization */
+@media (max-width: 640px) {
+  .home-footer-links {
+    gap: 0.25rem;
+    font-size: 0.62rem;
   }
-  .home-footer-links a,
-  .home-footer-links ul li a {
-    font-size: 0.6rem;
-    padding: 0.15rem 0.28rem;
-  }
+  
   .home-footer-credit {
-    font-size: 0.55rem;
+    font-size: 0.58rem;
+  }
+}
+
+@media (max-width: 480px) { 
+  .home-footer-links {
+    gap: 0.25rem;
+    font-size: 0.5rem;
+  }
+
+  .home-footer-credit {
+    font-size: 0.5rem;
   }
 }
 
@@ -1166,19 +1165,14 @@ button,
 }
 
 .presenter-container > main {
-  /* flex:1 1 0 + min-height:0 — the two values that make a flex child
-     actually shrink. Without min-height:0, a flex column child refuses
-     to shrink below its content size, pushing the footer off-screen.     */
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
+/* presenter-footer is desktop-only — on mobile it is replaced by mob-tab-bar */
 .presenter-footer {
-  /* flex-shrink:0 — always the last item in the flex column, never
-     compressed. The container is locked to 100% viewport height so
-     this naturally sits at the very bottom with no gap.                  */
   flex-shrink: 0;
   width: 100%;
   z-index: 10;
@@ -4244,4 +4238,366 @@ button, [role="button"] {
   text-align: center;
   letter-spacing: 0.04em;
   border-top: 1px solid rgba(201, 168, 76, 0.1);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE BOTTOM TAB BAR + MORE SHEET
+   Only active on screens ≤ 540px. Desktop never sees any of these rules.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Tab bar — hidden on desktop */
+.mob-tab-bar {
+  display: none;
+}
+
+@media (max-width: 540px) {
+
+  /* ── Hide desktop footer, show tab bar ── */
+  .presenter-footer { display: none !important; }
+
+  .mob-tab-bar {
+    display: flex;
+    align-items: stretch;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    background: var(--surface);
+    border-top: 1px solid var(--gold-border);
+    z-index: 90;
+    /* Safe area inset for iPhone home bar */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Give main-panel bottom padding so content isn't hidden behind tab bar */
+  .main-panel {
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px) + 0.75rem) !important;
+  }
+
+  /* Each tab button */
+  .mob-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'Cinzel', serif;
+    font-size: 0.46rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color var(--transition);
+    padding: 0.3rem 0.25rem;
+    -webkit-tap-highlight-color: transparent;
+    min-height: 44px;
+  }
+
+  .mob-tab svg {
+    flex-shrink: 0;
+    transition: color var(--transition);
+  }
+
+  .mob-tab:active { opacity: 0.7; }
+
+  .mob-tab--active {
+    color: var(--gold-light);
+  }
+
+  /* Live tab — pulsing red accent */
+  .mob-tab--live {
+    color: #e74c3c;
+    position: relative;
+  }
+
+  .mob-tab-live-dot {
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #e74c3c;
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.5);
+    animation: live-tab-pulse 1.8s ease-in-out infinite;
+  }
+
+  @keyframes live-tab-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.45); }
+    50%       { box-shadow: 0 0 0 5px rgba(231, 76, 60, 0); }
+  }
+
+  /* ── More sheet — slides up from below the tab bar ── */
+  .mob-more-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Starts hidden below the screen */
+    transform: translateY(100%);
+    max-height: 85dvh;
+    background: var(--surface);
+    border-top: 1px solid var(--gold-border);
+    border-radius: 18px 18px 0 0;
+    z-index: 95;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.36s cubic-bezier(0.32, 0, 0.2, 1);
+    box-shadow: 0 -16px 48px rgba(0,0,0,0.45);
+  }
+
+  .mob-more-sheet--open {
+    transform: translateY(0);
+  }
+
+  /* Drag handle pill */
+  .mob-more-handle {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--gold-border);
+    margin: 0.65rem auto 0.3rem;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .mob-more-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.5rem 1rem calc(70px + env(safe-area-inset-bottom, 0px)) 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .mob-more-body::-webkit-scrollbar { display: none; }
+
+  /* Groups within sheet */
+  .mob-more-group {
+    background: var(--surface-2);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: var(--radius-lg);
+    padding: 0.75rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .mob-more-group-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.52rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 0.1rem;
+  }
+
+  .mob-more-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .mob-more-row--col {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mob-more-row-label {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    font-family: 'Inter', sans-serif;
+    flex-shrink: 0;
+  }
+
+  .mob-more-row-actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+
+  /* Navigation links in sheet */
+  .mob-more-nav-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.1rem;
+  }
+
+  .mob-more-nav-links a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: var(--radius);
+    transition: color var(--transition);
+    white-space: nowrap;
+  }
+
+  .mob-more-nav-links a:hover { color: var(--gold-light); }
+
+  /* Backdrop behind the sheet */
+  .mob-more-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 94;
+    animation: fade-in-quick 0.2s ease both;
+  }
+
+  @keyframes fade-in-quick {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* ── Go Live sticky wrapper — floats above tab bar when staged ── */
+  .go-live-sticky-wrap {
+    position: sticky;
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px) + 0.5rem);
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .go-live-sticky-wrap .go-live-button {
+    pointer-events: auto;
+    box-shadow: 0 4px 24px rgba(192,57,43,0.5), 0 0 0 1px rgba(192,57,43,0.25);
+  }
+
+  /* ── Card compaction for mobile ── */
+  .card {
+    padding: 0.75rem 0.85rem;
+    border-radius: 10px;
+  }
+
+  .card-header {
+    margin-bottom: 0.6rem;
+  }
+
+  .card-label {
+    font-size: 0.54rem;
+    letter-spacing: 0.18em;
+  }
+
+  /* Verse of the day — tighter */
+  .votd-text {
+    font-size: 1rem;
+    line-height: 1.55;
+    margin-bottom: 0.65rem;
+  }
+
+  /* Idle grid: single column, tighter gap */
+  .idle-grid {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+  }
+
+  /* Staged card */
+  .staged-title {
+    font-size: 0.75rem;
+  }
+
+  .staged-text {
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+
+  /* Preview nav — bigger touch targets */
+  .preview-nav-btn {
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 10px;
+  }
+
+  .preview-box {
+    max-height: 130px;
+  }
+
+  /* Nav buttons in staged card */
+  .nav-button {
+    padding: 0.6rem 0.85rem;
+    font-size: 0.72rem;
+    min-height: 42px;
+  }
+
+  /* Topic chips — slightly larger tap area */
+  .idle-chip {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.62rem;
+  }
+
+  /* Search input */
+  .search-input {
+    font-size: 1rem !important; /* prevent iOS zoom */
+    min-height: 48px;
+  }
+
+  /* Drawer: full width on narrow screens, positioned above tab bar */
+  .search-drawer {
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    width: 100vw;
+    border-right: none;
+    border-top: 1px solid var(--gold-border);
+  }
+
+  .drawer-backdrop {
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Result items — taller touch target */
+  .result-item {
+    padding: 0.75rem 0.85rem;
+  }
+
+  .history-item {
+    padding: 0.75rem 0.85rem;
+  }
+
+  /* Header: narrower on mobile — hide hamburger since we have tab bar */
+  .hdr-right--mobile .hdr-hamburger {
+    display: none !important;
+  }
+
+  /* Live badge — keep it in the header */
+  .live-badge--compact {
+    display: flex;
+  }
+
+  /* Tour card: push it up above the tab bar */
+  .tour-card {
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* ── Light theme overrides for mob-more-sheet ── */
+.presenter-container--light .mob-tab-bar {
+  background: #faf7f2;
+  border-top-color: rgba(139,58,26,0.2);
+}
+
+.presenter-container--light .mob-tab {
+  color: #9a7b68;
+}
+
+.presenter-container--light .mob-tab--active {
+  color: #8b3a1a;
+}
+
+.presenter-container--light .mob-more-sheet {
+  background: #faf7f2;
+  border-top-color: rgba(139,58,26,0.2);
+}
+
+.presenter-container--light .mob-more-group {
+  background: #ede7dc;
+  border-color: rgba(139,58,26,0.08);
+}
+
+.presenter-container--light .mob-more-backdrop {
+  background: rgba(30,15,5,0.35);
 }
