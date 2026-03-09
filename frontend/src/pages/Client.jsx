@@ -129,10 +129,10 @@ function Client() {
   const [presenterSessionLocked, setPresenterSessionLocked] = useState(false); // presenter disconnected but slot still held
   const [qrDataUrl, setQrDataUrl]               = useState('');       // /presenter?session= — for operator
   const [clientQrDataUrl, setClientQrDataUrl]   = useState('');       // /client?session=    — for audience
-  const [qrError, setQrError]                   = useState(false);
+  const [_qrError, setQrError]                  = useState(false);
   const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
-  const [sessionExpired, setSessionExpired]     = useState(false);
+  const [_sessionExpired, setSessionExpired]    = useState(false);
   const [presenterLeft, setPresenterLeft]       = useState(false); // shows subtle notice on idle screen
   const [votd, setVotd]                         = useState(null);  // verse of the day — shown while presenter is live but idle
 
@@ -415,7 +415,7 @@ function Client() {
           kioskTimerRef.current = setTimeout(() => advanceKiosk(fromVerseId), 8000);
         }
       });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // ─── Kiosk: start from VOTD the moment it loads (no presenter yet) ────────
   useEffect(() => {
