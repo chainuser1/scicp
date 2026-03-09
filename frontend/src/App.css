@@ -5593,6 +5593,11 @@ button, [role="button"] {
   opacity: 0.88;
   z-index: 10;
   animation: kiosk-qr-in 1.2s ease forwards;
+  transition: opacity 1.2s ease;
+}
+/* Live mode — dims back so the QR doesn't compete with the scripture text */
+.client-votd-qr-overlay--live {
+  opacity: 0.38;
 }
 @keyframes kiosk-qr-in {
   from { opacity: 0; transform: translateY(6px); }
