@@ -977,6 +977,21 @@ const Presenter = () => {
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: currentLanguage, secondaryLanguage: lang || null });
   };
 
+  const handleSwapLanguages = () => {
+    if (!secondaryLanguage) return;
+    const newPrimary   = secondaryLanguage;
+    const newSecondary = currentLanguage;
+    setCurrentLanguage(newPrimary);
+    setSecondaryLanguage(newSecondary);
+    emitWithSession('update-language', { language: newPrimary });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: newPrimary, secondaryLanguage: newSecondary });
+    if (query.trim()) {
+      clearTimeout(searchDebounce.current);
+      setCurrentPage(0);
+      emitWithSession('search', { query, page: 0, pageSize: PAGE_SIZE, language: newPrimary });
+    }
+  };
+
   const renderPreviewText = () => {
     if (!liveVerse) return '';
     const text = liveVerse.segments?.length > 0
@@ -1298,7 +1313,7 @@ const Presenter = () => {
               <div className="hdr-lang-popover">
                 <div className="popover-label">Language</div>
                 <div className="hdr-lang-pills">
-                  {[['en','EN'],['tl','TL'],['ceb','CEB'],['es','ES'],['el','EL']].map(([val, lbl]) => (
+                  {[['en','EN'],['tl','TL'],['ceb','CEB'],['es','ES'],['el','EL'],['ilo','ILO']].map(([val, lbl]) => (
                     <button
                       key={val}
                       className={`hdr-lang-pill${currentLanguage === val ? ' hdr-lang-pill--on' : ''}`}
@@ -1307,9 +1322,18 @@ const Presenter = () => {
                   ))}
                 </div>
                 <div className="popover-divider" />
-                <div className="popover-label">+ TV Screen</div>
+                <div className="popover-swap-row">
+                  <div className="popover-label">+ TV Screen</div>
+                  <button
+                    className="popover-swap-btn"
+                    onClick={handleSwapLanguages}
+                    disabled={!secondaryLanguage}
+                    title="Swap primary ↔ secondary language"
+                    aria-label="Swap primary and secondary language"
+                  >⇄</button>
+                </div>
                 <div className="hdr-lang-pills">
-                  {[['','Off'],['tl','TL'],['ceb','CEB'],['en','EN'],['es','ES'],['el','EL']].map(([val, lbl]) => (
+                  {[['','Off'],['tl','TL'],['ceb','CEB'],['en','EN'],['es','ES'],['el','EL'],['ilo','ILO']].map(([val, lbl]) => (
                     <button
                       key={val}
                       className={`hdr-lang-pill${secondaryLanguage === val ? ' hdr-lang-pill--on' : ''}`}
