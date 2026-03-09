@@ -338,6 +338,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
 const Presenter = () => {
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
   const PRESENTER_LAST_SESSION_KEY = 'scicp.presenter_last_session_v1';
+  const PRESENTER_TOKEN_KEY        = 'scicp.presenter_token_v1';
   const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
   // Support scanning the Client's QR code: ?session=XXXX in the Presenter URL
   const urlSessionParam = (() => {
@@ -398,6 +399,8 @@ const Presenter = () => {
   const [viewerCount, setViewerCount]       = useState(0);
   // Phase 1: show alert when a second device tried to take the presenter role
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
+  // show persistent banner when this device was evicted by a new presenter
+  const [evictedAlert, setEvictedAlert]     = useState(false);
 
   // ── Session PIN gate ─────────────────────────────────────────────────────────
   const [sessionPinActive, setSessionPinActive]     = useState(false);
@@ -631,7 +634,8 @@ const Presenter = () => {
       return;
     }
     setSessionMessage('Connecting…');
-    const payload = { sessionId: normalized, role: 'presenter' };
+    const savedToken = (() => { try { return window.sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
+    const payload = { sessionId: normalized, role: 'presenter', presenterToken: savedToken };
     if (pin) payload.pin = pin;
     socket.emit('join-session', payload, (response) => {
       if (response?.requiresPin) {
@@ -656,7 +660,12 @@ const Presenter = () => {
         setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
         setMobileMenuOpen(false);
-        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch { /* storage unavailable */ }
+        try {
+          window.sessionStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId);
+          if (response.presenterToken) window.sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken);
+        } catch { /* storage unavailable */ }
+      } else if (response?.error === 'presenter-locked-out') {
+        setSessionMessage('This session has an active presenter. You can join once they end the service.');
       } else {
         setSessionMessage(response?.message || 'TV session not found — check the code');
       }
@@ -676,7 +685,8 @@ const Presenter = () => {
         setTvSessionInput('');
         setSessionMessage('You left the session');
         try {
-          window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+          window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+          window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
         } catch {
           // ignore storage errors
         }
@@ -747,7 +757,8 @@ const Presenter = () => {
       setTvSessionInput('');
       setSessionMessage('You left the session');
       try {
-        window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+        window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+        window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
       } catch {
         // ignore storage errors
       }
@@ -762,16 +773,23 @@ const Presenter = () => {
       }
       // Priority 2: rejoin last known session (e.g. after page refresh mid-service)
       const lastSession = (() => {
-        try { return window.localStorage.getItem(PRESENTER_LAST_SESSION_KEY) || ''; } catch { return ''; }
+        try { return window.sessionStorage.getItem(PRESENTER_LAST_SESSION_KEY) || ''; } catch { return ''; }
       })();
       if (lastSession) {
-        socket.emit('join-session', { sessionId: lastSession, role: 'presenter' }, (response) => {
+        const savedToken = (() => { try { return window.sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
+        socket.emit('join-session', { sessionId: lastSession, role: 'presenter', presenterToken: savedToken }, (response) => {
           if (response?.ok && response.sessionId) {
             setSessionId(response.sessionId);
             setSessionMessage(`Reconnected — session ${response.sessionId}`);
+            if (response.presenterToken) {
+              try { window.sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken); } catch { /* ignore */ }
+            }
           } else {
             // Last session is gone — clear it and wait for the presenter to scan/type
-            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch { /* ignore */ }
+            try {
+              window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+              window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
+            } catch { /* ignore */ }
             setSessionMessage('Scan the QR code on the TV screen, or type the session code');
           }
         });
@@ -813,6 +831,15 @@ const Presenter = () => {
       setTakeoverAlert(true);
       setTimeout(() => setTakeoverAlert(false), 6000);
     });
+    // Eviction: a new presenter took over this idle slot — disable this device's controls
+    socket.on('presenter-evicted', () => {
+      setEvictedAlert(true);
+      setSessionId('');
+      try {
+        window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
+        window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
+      } catch { /* ignore */ }
+    });
     if (socket.connected) {
       handleConnect();
     }
@@ -829,6 +856,7 @@ const Presenter = () => {
       socket.off('connect_error', handleConnectError);
       socket.off('viewer-count');
       socket.off('presenter-takeover-attempt');
+      socket.off('presenter-evicted');
     };
   }, [urlSessionParam]);
 
@@ -1189,6 +1217,14 @@ const Presenter = () => {
         </div>
       )}
 
+      {/* Evicted presenter alert — persistent red banner, must be manually dismissed */}
+      {evictedAlert && (
+        <div className="presenter-takeover-alert presenter-evicted-alert" role="alert" aria-live="assertive">
+          ⛔ You have been removed as presenter — the session is now controlled by another device.
+          <button className="presenter-takeover-dismiss" onClick={() => setEvictedAlert(false)}>✕</button>
+        </div>
+      )}
+
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
           ════════════════════════════════════════ */}
@@ -1482,7 +1518,7 @@ const Presenter = () => {
               <div className="mobile-menu-section">
                 <div className="mobile-menu-label">Language</div>
                 <div className="mobile-menu-row">
-                  {['en','tl','ceb','es','el'].map(lang => (
+                  {['en','tl','ceb','es','el','ilo'].map(lang => (
                     <button
                       key={lang}
                       className={`theme-btn${currentLanguage === lang ? ' active' : ''}`}
@@ -1493,7 +1529,7 @@ const Presenter = () => {
                 {/* F8 — secondary language */}
                 <div className="mobile-menu-row" style={{ marginTop: '0.35rem' }}>
                   <span className="mobile-menu-label" style={{ margin: 0, marginRight: '0.4rem' }}>+Screen</span>
-                  {['', 'tl', 'ceb', 'en', 'es', 'el'].map(lang => (
+                  {['', 'tl', 'ceb', 'en', 'es', 'el', 'ilo'].map(lang => (
                     <button
                       key={`sec-${lang}`}
                       className={`theme-btn${secondaryLanguage === lang ? ' active' : ''}`}
