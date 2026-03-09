@@ -1491,25 +1491,6 @@ const Presenter = () => {
                   </button>
                 </div>
               </div>
-
-              <div className="mobile-menu-divider" />
-
-              {/* Nav links — replaces the footer on mobile */}
-              <div className="mobile-menu-section mobile-menu-nav">
-                <div className="mobile-menu-label">Navigation</div>
-                <div className="mobile-menu-nav-links">
-                  <a href="/" onClick={() => setMobileMenuOpen(false)}>Home</a>
-                  <a href="/presenter" onClick={() => setMobileMenuOpen(false)}>Chapel Control</a>
-                  <a href="/client" onClick={() => setMobileMenuOpen(false)}>Sacred Display</a>
-                  <a href="/about" onClick={() => setMobileMenuOpen(false)}>About</a>
-                  <a href="/contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
-                  <a href="/privacy" onClick={() => setMobileMenuOpen(false)}>Privacy Policy</a>
-                  <a href="/terms" onClick={() => setMobileMenuOpen(false)}>Terms of Service</a>
-                </div>
-                <div className="mobile-menu-credit">
-                  © {new Date().getFullYear()} Scripture Projection Engine
-                </div>
-              </div>
             </div>
           )}
         </div>
