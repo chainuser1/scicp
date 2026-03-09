@@ -2427,6 +2427,35 @@ button,
   margin: 0.2rem 0;
 }
 
+.popover-swap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.popover-swap-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 2px 7px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.popover-swap-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.3);
+  color: #fff;
+}
+.popover-swap-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .popover-row {
   display: flex;
   gap: 0.4rem;
@@ -4133,6 +4162,15 @@ button,
 }
 
 .presenter-container--light .popover-label { color: #9a7b68; }
+.presenter-container--light .popover-swap-btn {
+  border-color: rgba(0,0,0,0.13);
+  color: #9a7b68;
+}
+.presenter-container--light .popover-swap-btn:hover:not(:disabled) {
+  background: rgba(0,0,0,0.06);
+  border-color: rgba(139,58,26,0.3);
+  color: #8b3a1a;
+}
 .presenter-container--light .session-code-display {
   background: #ede7dc;
   border-color: rgba(139, 58, 26, 0.2);
