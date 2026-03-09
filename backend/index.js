@@ -1879,6 +1879,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
       const previousSessionId = activeSessionId;
       if (activeRole === 'presenter') {
+        // Tell the TV (and any secondary screens) the presenter has left so they
+        // can reset state and switch the QR back to the presenter-join URL.
+        socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId });
         releasePresenterLock(previousSessionId, socket.id);
       } else {
         decrementViewerCount(previousSessionId);
@@ -2267,12 +2270,20 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (socket.rooms && typeof socket.rooms.forEach === 'function') {
         socket.rooms.forEach((roomId) => {
           if (roomId !== socket.id) {
+            // During `disconnecting` the socket is still in its rooms, so
+            // socket.to() can still reach the TV/viewers before the lock is released.
+            if (activeRole === 'presenter') {
+              socket.to(roomId).emit('presenter-left', { sessionId: roomId });
+            }
             releasePresenterLock(roomId, socket.id);
             if (activeRole !== 'presenter') decrementViewerCount(roomId);
             scheduleCleanup(roomId, { disconnecting: true });
           }
         });
       } else {
+        if (activeRole === 'presenter') {
+          socket.to(activeSessionId).emit('presenter-left', { sessionId: activeSessionId });
+        }
         releasePresenterLock(activeSessionId, socket.id);
         if (activeRole !== 'presenter') decrementViewerCount(activeSessionId);
         scheduleCleanup(activeSessionId, { disconnecting: true });
