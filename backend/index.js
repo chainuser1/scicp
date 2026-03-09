@@ -10,6 +10,8 @@ const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db
 // additional language databases (optional)
 const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'), { fileMustExist: true });
 const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'), { fileMustExist: true });
+const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'), { fileMustExist: true });
+const db_greek   = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'),   { fileMustExist: true });
 
 const fastifyStatic = require('@fastify/static');
 
@@ -150,7 +152,7 @@ fastify.delete('/setlists/:id', async (request, reply) => {
 // ── scripture browser endpoints (F1) ──────────────────────────────────────────
 fastify.get('/browse/books', async (request, reply) => {
   const { language } = request.query;
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : db;
   try {
     const rows = targetDb.prepare(`
       SELECT b.id AS book_id, b.book_title, b.book_short_title,
@@ -173,7 +175,7 @@ fastify.get('/browse/books', async (request, reply) => {
 fastify.get('/browse/chapters', async (request, reply) => {
   const { book_id, language } = request.query;
   if (!book_id) { reply.code(400); return { error: 'book_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : db;
   try {
     const rows = targetDb.prepare(`
       SELECT c.id AS chapter_id, c.chapter_number,
@@ -195,7 +197,7 @@ fastify.get('/browse/chapters', async (request, reply) => {
 fastify.get('/browse/verses', async (request, reply) => {
   const { chapter_id, language } = request.query;
   if (!chapter_id) { reply.code(400); return { error: 'chapter_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : db;
   try {
     const rows = targetDb.prepare(`
       SELECT verse_id, book_title, chapter_number, verse_number,
@@ -1459,8 +1461,8 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     }
 
     let targetDb = db;
-    if (language && ['ceb', 'tl'].includes(language)) {
-        targetDb = language === 'ceb' ? db_cebuano : db_tagalog;
+    if (language && ['ceb', 'tl', 'es', 'el'].includes(language)) {
+        targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : db_greek;
     }
 
     const result = getAdjacentVerse({
@@ -1479,11 +1481,11 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
-  if (!language || !['tl', 'ceb'].includes(language.toLowerCase())) {
+  if (!language || !['tl', 'ceb', 'es', 'el'].includes(language.toLowerCase())) {
     reply.code(400);
-    return { error: 'language must be tl or ceb' };
+    return { error: 'language must be tl, ceb, es or el' };
   }
-  const targetDb = language === 'ceb' ? db_cebuano : db_tagalog;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : db_greek;
   try {
     const row = targetDb.prepare(
       'SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1'
@@ -1633,7 +1635,7 @@ fastify.get('/verse/of-the-day', async (request, reply) => {
   }
 });
 
-function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog }) {
+function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
@@ -2045,6 +2047,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           searchResults = searchScriptureInDb(query, page, pageSize, db_cebuano);
         } else if (language === 'tl') {
           searchResults = searchScriptureInDb(query, page, pageSize, db_tagalog);
+        } else if (language === 'es') {
+          searchResults = searchScriptureInDb(query, page, pageSize, db_spanish);
+        } else if (language === 'el') {
+          searchResults = searchScriptureInDb(query, page, pageSize, db_greek);
         } else {
           searchResults = searchScripture(query, page, pageSize);
         }
@@ -2141,7 +2147,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       // If there's a live verse, re-fetch it in the new language and re-broadcast
       if (state.liveVerse) {
         const verseId  = Number(state.liveVerse.verse_id);
-        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : db;
+        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : lang === 'es' ? db_spanish : lang === 'el' ? db_greek : db;
         try {
           const row = targetDb.prepare(
             `SELECT scripture_text, verse_title, book_title, volume_title, volume_short_title FROM scriptures WHERE verse_id = ? LIMIT 1`
@@ -2183,9 +2189,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // Determine target database with streamlined mapping
       let targetDb = db;
-      const isTranslation = normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage);
+      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el'].includes(normalizedLanguage);
       if (isTranslation) {
-        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : db_tagalog;
+        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : normalizedLanguage === 'tl' ? db_tagalog : normalizedLanguage === 'es' ? db_spanish : db_greek;
       }
 
       if (targetDb) {
@@ -2242,8 +2248,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // F8 — dual language display: fetch secondary language text
       const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
-      if (normSecLang && ['tl', 'ceb', 'en'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
-        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : db;
+      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
+        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : normSecLang === 'es' ? db_spanish : normSecLang === 'el' ? db_greek : db;
         try {
           const secRow = secDb.prepare(
             'SELECT scripture_text, book_title FROM scriptures WHERE verse_id = ? LIMIT 1'
@@ -2303,7 +2309,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
 // Only register handlers in production runtime
 if (require.main === module) {
-  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog });
+  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek });
 }
 
 const start = async () => {
@@ -2317,6 +2323,8 @@ const start = async () => {
       initializeFts(db, 'English');
       initializeFts(db_tagalog, 'Tagalog');
       initializeFts(db_cebuano, 'Cebuano');
+      initializeFts(db_spanish, 'Spanish');
+      initializeFts(db_greek,   'Greek');
     });
   } catch (err) {
     fastify.log.error(err)
