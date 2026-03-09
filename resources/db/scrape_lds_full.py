@@ -254,11 +254,21 @@ def get_vol_names(canonical_key: str, lang: str) -> Dict:
 def fetch_with_retry(url: str, lang: str, session: requests.Session,
                      delay: float, retries: int) -> Optional[str]:
     """Fetch a URL with exponential back-off.  Returns HTML text or None."""
+    from urllib.parse import urlsplit
     params = {"lang": lang}
     for attempt in range(1, retries + 1):
         try:
             resp = session.get(url, params=params, timeout=20)
             if resp.status_code == 200:
+                # Detect silent redirects (e.g. Chinese OT books beyond the Pentateuch
+                # redirect to the OT landing page instead of returning a 404).
+                # If the final URL's path differs from what was requested, the server
+                # has no content for this chapter — treat it as not found.
+                req_path = urlsplit(url).path.rstrip("/")
+                res_path = urlsplit(resp.url).path.rstrip("/")
+                if req_path != res_path:
+                    print(f"  [REDIRECT] {url} → {resp.url} — skipping")
+                    return None
                 resp.encoding = "utf-8"
                 time.sleep(delay)
                 return resp.text
@@ -285,6 +295,12 @@ def extract_verses(html: str, url: str) -> List[Tuple[int, str]]:
     verse_tags = soup.find_all("p", class_="verse")
     if verse_tags:
         results: List[Tuple[int, str]] = []
+        # If ANY <p class="verse"> carries an explicit verse-number <sup>, we
+        # treat the page as a numbered chapter and SKIP elements that lack one.
+        # This prevents study-summary paragraphs that some language sites
+        # (e.g. zh) render as <p class="verse"> without a verse number from
+        # inflating the chapter's verse count.
+        has_numbered = any(p.find("sup", class_="verse-number") for p in verse_tags)
         for p in verse_tags:
             sup = p.find("sup", class_="verse-number")
             if sup:
@@ -293,7 +309,12 @@ def extract_verses(html: str, url: str) -> List[Tuple[int, str]]:
                 except ValueError:
                     continue
                 sup.decompose()
+            elif has_numbered:
+                # Study summary / section heading — skip entirely.
+                continue
             else:
+                # Prose page where nothing has a <sup> (e.g. D&C intro).
+                # Fall back to data-aid then sequential numbering.
                 aid = p.get("data-aid", "")
                 m   = re.search(r"\.(\d+)$", aid)
                 v_num = int(m.group(1)) if m else len(results) + 1
