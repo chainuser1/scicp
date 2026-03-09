@@ -15,7 +15,7 @@ const themes = {
     background_url: "url('https://www.churchofjesuschrist.org/imgs/12e3b576ad7921a3bc2e36a70150958981e383c1/full/1280%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
-    layout: "lower-third",
+    layout: "centered",
     tone: "dark"
   }
 };
