@@ -401,6 +401,8 @@ const Presenter = () => {
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
   // show persistent banner when this device was evicted by a new presenter
   const [evictedAlert, setEvictedAlert]     = useState(false);
+  // confirmation dialog before leaving — prevents accidental mid-sermon tap
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
   // ── Session PIN gate ─────────────────────────────────────────────────────────
   const [sessionPinActive, setSessionPinActive]     = useState(false);
@@ -1225,6 +1227,49 @@ const Presenter = () => {
         </div>
       )}
 
+      {/* Leave Session confirmation — prevents accidental mid-sermon tap */}
+      {leaveConfirmOpen && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setLeaveConfirmOpen(false)}
+        >
+          <div
+            style={{
+              background: '#1e1e1e', border: '1px solid #444', borderRadius: '0.75rem',
+              padding: '1.75rem 2rem', maxWidth: '22rem', width: '90%', textAlign: 'center',
+              color: '#f0f0f0', boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '1.6rem', marginBottom: '0.5rem' }}>🚪</div>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.5rem' }}>End the session?</div>
+            <div style={{ fontSize: '0.85rem', color: '#aaa', marginBottom: '1.25rem', lineHeight: 1.4 }}>
+              Leaving will release the presenter slot. The audience screen will show "Scan to present" until someone rejoins.
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                className="theme-btn"
+                style={{ minWidth: '7rem', background: '#c0392b', borderColor: '#c0392b' }}
+                onClick={() => { setLeaveConfirmOpen(false); leaveSession(); }}
+              >
+                Leave
+              </button>
+              <button
+                className="theme-btn"
+                style={{ minWidth: '7rem' }}
+                onClick={() => setLeaveConfirmOpen(false)}
+              >
+                Stay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
           ════════════════════════════════════════ */}
@@ -1310,7 +1355,7 @@ const Presenter = () => {
                 </div>
                 {sessionId && (
                   <div className="popover-row">
-                    <button className="theme-btn" style={{ width: '100%' }} onClick={leaveSession}>Leave Session</button>
+                    <button className="theme-btn" style={{ width: '100%' }} onClick={() => setLeaveConfirmOpen(true)}>Leave Session</button>
                   </div>
                 )}
                 {sessionId && (
@@ -1523,7 +1568,7 @@ const Presenter = () => {
                 </div>
                 {sessionId && (
                   <div className="popover-row">
-                    <button className="theme-btn" style={{ width: '100%' }} onClick={() => { leaveSession(); setMobileMenuOpen(false); }}>Leave Session</button>
+                    <button className="theme-btn" style={{ width: '100%' }} onClick={() => { setLeaveConfirmOpen(true); setMobileMenuOpen(false); }}>Leave Session</button>
                   </div>
                 )}
                 <div className="session-message">{sessionMessage}</div>
