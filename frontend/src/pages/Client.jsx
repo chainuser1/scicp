@@ -142,6 +142,7 @@ function Client() {
   const kioskCurVerseRef    = useRef(null); // verse_id of the verse currently on-screen in kiosk
   const presenterLeftTimer  = useRef(null); // "Presenter left" notice auto-hide (8 s)
   const joiningOverlayTimer = useRef(null); // "✓ connected" flash auto-hide (1.8 s)
+  const presenterGraceTimerRef = useRef(null); // grace period before kiosk starts (15 min)
 
   // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
@@ -519,7 +520,7 @@ function Client() {
     };
 
     const handlePresenterLeft = () => {
-      // Reset so the next presenter join is treated as fresh, and kiosk can restart
+      // Reset so the next presenter join is treated as fresh
       setPresenterJoined(false);
       presenterJoinedRef.current = false;
       // Switch QR back to presenter-join URL and show the "presenter left" notice
@@ -528,12 +529,20 @@ function Client() {
       setHighlightedText('');
       clearTimeout(presenterLeftTimer.current);
       presenterLeftTimer.current = setTimeout(() => setPresenterLeft(false), 8000);
-      // Re-enter kiosk cycling from VOTD — kiosk start effect handles the display transition
-      setIsKioskMode(true);
-      setKioskRestart(n => n + 1);
+      // ── Grace period ──────────────────────────────────────────────────────────
+      // Keep the last live verse on screen for 15 min before falling back to kiosk.
+      // If the presenter reconnects within that window the timer is cancelled and
+      // the live verse is restored transparently (no kiosk flash mid-service).
+      clearTimeout(presenterGraceTimerRef.current);
+      presenterGraceTimerRef.current = setTimeout(() => {
+        setIsKioskMode(true);
+        setKioskRestart(n => n + 1);
+      }, 15 * 60 * 1000);
     };
 
-    const handlePresenterJoined = () => {
+    const handlePresenterJoined = ({ verse, theme } = {}) => {
+      // Cancel any pending kiosk grace timer — presenter is back
+      clearTimeout(presenterGraceTimerRef.current);
       // Stop kiosk cycling unconditionally — no leftover timer should fire after join
       setIsKioskMode(false);
       if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
@@ -544,11 +553,17 @@ function Client() {
       setPresenterJoining(true);
       clearTimeout(joiningOverlayTimer.current);
       joiningOverlayTimer.current = setTimeout(() => setPresenterJoining(false), 1800);
-      // Clear kiosk's displayVerse so the votdPending effect can write VOTD cleanly
-      setDisplayVerse(null);
-      // Show VOTD immediately so TV is never blank while presenter finds first verse.
-      // If server sends a real verse shortly after, handleVerse overwrites this gracefully.
-      setVotdAsDisplay();
+      if (verse) {
+        // Restore the session's live verse immediately — skip VOTD entirely.
+        // This handles both fresh joins where the presenter already went live
+        // and reconnects after a WiFi hiccup mid-service.
+        const verseData = theme ? { ...verse, theme } : verse;
+        handleVerse(verseData);
+      } else {
+        // Fresh session — presenter hasn't gone live yet, show VOTD as placeholder.
+        setDisplayVerse(null);
+        setVotdAsDisplay();
+      }
     };
 
     const handleSessionError = ({ message }) => {
@@ -640,6 +655,7 @@ function Client() {
       if (bgFadeTimer.current)           clearTimeout(bgFadeTimer.current);
       if (presenterLeftTimer.current)    clearTimeout(presenterLeftTimer.current);
       if (joiningOverlayTimer.current)   clearTimeout(joiningOverlayTimer.current);
+      if (presenterGraceTimerRef.current) clearTimeout(presenterGraceTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);

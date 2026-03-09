@@ -100,6 +100,14 @@ const IconCheck = () => (
   </svg>
 );
 
+const IconGlobe = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="2" y1="12" x2="22" y2="12"/>
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+  </svg>
+);
+
 const IconMenu = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
@@ -168,7 +176,7 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
             {expandedTranslations?.has(verse.verse_id) && (
               <div className="result-translation-snippet">
                 {(() => {
-                  const tl = srLang === 'en' ? 'tl' : srLang === 'tl' ? 'ceb' : 'tl';
+                  const tl = srLang === 'en' ? 'tl' : srLang === 'tl' ? 'ceb' : 'en';
                   return translationCache?.[`${verse.verse_id}_${tl}`] || 'Loading…';
                 })()}
               </div>
@@ -379,6 +387,7 @@ const Presenter = () => {
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
   const [themePopover, setThemePopover]     = useState(false);
+  const [langPopover,  setLangPopover]      = useState(false);
   const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
   const [tvSessionInput, setTvSessionInput] = useState('');
@@ -825,12 +834,14 @@ const Presenter = () => {
 
   /* ── Close drawer, theme popover, session popover, and mobile menu on outside tap ── */
   useEffect(() => {
-    if (!drawerOpen && !themePopover && !sessionPopover && !mobileMenuOpen) return;
+    if (!drawerOpen && !themePopover && !langPopover && !sessionPopover && !mobileMenuOpen) return;
     const handler = e => {
       if (!e.target.closest('.search-drawer') && !e.target.closest('.hdr-btn') && !e.target.closest('.hdr-theme-wrap'))
         setDrawerOpen(false);
       if (!e.target.closest('.hdr-theme-wrap'))
         setThemePopover(false);
+      if (!e.target.closest('.hdr-lang-wrap'))
+        setLangPopover(false);
       if (!e.target.closest('.hdr-session-wrap'))
         setSessionPopover(false);
       if (!e.target.closest('.hdr-mobile-menu') && !e.target.closest('.hdr-hamburger'))
@@ -842,7 +853,7 @@ const Presenter = () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('touchstart', handler);
     };
-  }, [drawerOpen, themePopover, sessionPopover, mobileMenuOpen]);
+  }, [drawerOpen, themePopover, langPopover, sessionPopover, mobileMenuOpen]);
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
@@ -1040,7 +1051,7 @@ const Presenter = () => {
 
   // ── F4 — Translation preview in search results ────────────────────────────
   const toggleTranslation = async (verse_id) => {
-    const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'tl';
+    const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'en';
     const cacheKey = `${verse_id}_${targetLang}`;
     setExpandedTranslations(prev => {
       const next = new Set(prev);
@@ -1270,24 +1281,45 @@ const Presenter = () => {
             )}
           </div>
 
-          {/* Language */}
-          <select className="hdr-lang-select" value={currentLanguage} onChange={handleLanguageChange} aria-label="Language">
-            <option value="en">EN</option>
-            <option value="tl">TL</option>
-            <option value="ceb">CEB</option>
-            <option value="es">ES</option>
-            <option value="el">EL</option>
-          </select>
-          {/* F8 — secondary language: segment toggle (Off / +TL / +CEB / +EN) */}
-          <div className="hdr-sec-lang" title="Also show this translation on the TV screen" aria-label="Secondary display language">
-            {[['', 'Off'], ['tl', '+TL'], ['ceb', '+CEB'], ['en', '+EN'], ['es', '+ES'], ['el', '+EL']].map(([val, label]) => (
-              <button
-                key={val}
-                className={`hdr-sec-btn${secondaryLanguage === val ? ' hdr-sec-btn--on' : ''}`}
-                onClick={() => handleSecondaryLanguageChange(val)}
-                aria-pressed={secondaryLanguage === val}
-              >{label}</button>
-            ))}
+          {/* F8 — Language & secondary language popover */}
+          <div className="hdr-lang-wrap">
+            <button
+              className={`hdr-lang-btn${langPopover ? ' hdr-lang-btn--active' : ''}`}
+              onClick={() => setLangPopover(o => !o)}
+              title="Language settings"
+              aria-label="Language settings"
+              aria-expanded={langPopover}
+            >
+              <IconGlobe />
+              <span className="hdr-lang-badge">{currentLanguage.toUpperCase()}</span>
+              {secondaryLanguage && <span className="hdr-lang-sec-dot" aria-hidden="true" />}
+            </button>
+            {langPopover && (
+              <div className="hdr-lang-popover">
+                <div className="popover-label">Language</div>
+                <div className="hdr-lang-pills">
+                  {[['en','EN'],['tl','TL'],['ceb','CEB'],['es','ES'],['el','EL']].map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      className={`hdr-lang-pill${currentLanguage === val ? ' hdr-lang-pill--on' : ''}`}
+                      onClick={() => handleLanguageChange({ target: { value: val } })}
+                    >{lbl}</button>
+                  ))}
+                </div>
+                <div className="popover-divider" />
+                <div className="popover-label">+ TV Screen</div>
+                <div className="hdr-lang-pills">
+                  {[['','Off'],['tl','TL'],['ceb','CEB'],['en','EN'],['es','ES'],['el','EL']].map(([val, lbl]) => (
+                    <button
+                      key={val}
+                      className={`hdr-lang-pill${secondaryLanguage === val ? ' hdr-lang-pill--on' : ''}`}
+                      onClick={() => handleSecondaryLanguageChange(val)}
+                      aria-pressed={secondaryLanguage === val}
+                    >{lbl}</button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Theme popover */}
