@@ -961,6 +961,11 @@ const Presenter = () => {
     }
   };
 
+  const handleSecondaryLanguageChange = (lang) => {
+    setSecondaryLanguage(lang);
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: currentLanguage, secondaryLanguage: lang || null });
+  };
+
   const renderPreviewText = () => {
     if (!liveVerse) return '';
     const text = liveVerse.segments?.length > 0
@@ -1275,7 +1280,7 @@ const Presenter = () => {
           <select
             className="hdr-lang-select hdr-lang-secondary"
             value={secondaryLanguage}
-            onChange={e => setSecondaryLanguage(e.target.value)}
+            onChange={e => handleSecondaryLanguageChange(e.target.value)}
             title="Also show this translation on the TV screen"
             aria-label="Secondary display language"
           >
@@ -1436,7 +1441,7 @@ const Presenter = () => {
                     <button
                       key={`sec-${lang}`}
                       className={`theme-btn${secondaryLanguage === lang ? ' active' : ''}`}
-                      onClick={() => setSecondaryLanguage(lang)}
+                      onClick={() => handleSecondaryLanguageChange(lang)}
                     >{lang ? `+${lang.toUpperCase()}` : 'Off'}</button>
                   ))}
                 </div>
