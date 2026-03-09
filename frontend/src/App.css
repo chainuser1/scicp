@@ -2033,9 +2033,8 @@ button,
 .presenter-header {
   display: flex;
   align-items: center;
-  height: 52px;
-  min-height: 52px;
-  padding: 0 1rem;
+  min-height: 52px;       /* floor only — grows with OS text scale */
+  padding: 0.5rem 1rem;   /* vertical padding lets height expand naturally */
   gap: 0.5rem;
   background: var(--surface);
   border-bottom: 1px solid var(--gold-border);
@@ -4098,7 +4097,7 @@ button,
 
 /* Wider screens: wider drawer, larger cards */
 @media (min-width: 768px) {
-  .presenter-header { height: 56px; min-height: 56px; padding: 0 1.5rem; }
+  .presenter-header { min-height: 56px; padding: 0.6rem 1.5rem; }
   .search-drawer { top: 56px; width: min(440px, 60vw); }
   .drawer-backdrop { top: 56px; }
   .preview-nav-btn { width: 34px; height: 34px; }
@@ -4136,11 +4135,10 @@ button,
    Everything here reclaims vertical space; no functionality changes.
    ══════════════════════════════════════════════════════════════ */
 @media (orientation: landscape) and (max-height: 500px) {
-  /* Slim header: saves 12 px of vertical space */
+  /* Slim header: saves ~12 px of vertical space */
   .presenter-header {
-    height: 40px;
     min-height: 40px;
-    padding: 0 0.75rem;
+    padding: 0.25rem 0.75rem;
     gap: 0.4rem;
   }
 
