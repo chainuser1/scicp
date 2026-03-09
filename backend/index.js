@@ -145,7 +145,8 @@ try {
 }
 
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
-function initializeFts() {
+// targetDb defaults to the English DB; label is used in log messages only.
+function initializeFts(targetDb = db, label = 'English') {
   const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
 
   const createFtsTableSql = `
@@ -161,8 +162,8 @@ function initializeFts() {
   `;
 
   const populateFts = () => {
-    fastify.log.info('Populating FTS5 table from verses...');
-    const insertStmt = db.prepare(`
+    fastify.log.info(`[${label}] Populating FTS5 table from verses...`);
+    const insertStmt = targetDb.prepare(`
       INSERT INTO scriptures_fts(verse_id, scripture_text, verse_title, book_title, chapter_number, verse_number)
       SELECT
         verses.id,
@@ -176,13 +177,13 @@ function initializeFts() {
       JOIN books    ON books.id    = chapters.book_id
     `);
     const result = insertStmt.run();
-    fastify.log.info(`FTS5 table populated with ${result.changes} verses`);
-    db.exec(`INSERT INTO scriptures_fts(scriptures_fts) VALUES('optimize')`);
-    fastify.log.info('FTS5 index optimized');
+    fastify.log.info(`[${label}] FTS5 table populated with ${result.changes} verses`);
+    targetDb.exec(`INSERT INTO scriptures_fts(scriptures_fts) VALUES('optimize')`);
+    fastify.log.info(`[${label}] FTS5 index optimized`);
   };
 
   try {
-    const existing = db.prepare(`
+    const existing = targetDb.prepare(`
       SELECT sql
       FROM sqlite_master
       WHERE type = 'table' AND name = 'scriptures_fts'
@@ -190,20 +191,20 @@ function initializeFts() {
     const hasExpectedTokenizer = existing?.sql?.includes('porter ascii');
 
     if (forceRebuild || !existing || !hasExpectedTokenizer) {
-      db.exec(`DROP TABLE IF EXISTS scriptures_fts`);
-      db.exec(createFtsTableSql);
+      targetDb.exec(`DROP TABLE IF EXISTS scriptures_fts`);
+      targetDb.exec(createFtsTableSql);
       populateFts();
       return;
     }
 
-    const ftsCount = db.prepare(`SELECT COUNT(*) AS count FROM scriptures_fts`).get()?.count ?? 0;
+    const ftsCount = targetDb.prepare(`SELECT COUNT(*) AS count FROM scriptures_fts`).get()?.count ?? 0;
     if (ftsCount === 0) {
       populateFts();
     } else {
-      fastify.log.info(`FTS5 table ready with ${ftsCount} indexed verses`);
+      fastify.log.info(`[${label}] FTS5 table ready with ${ftsCount} indexed verses`);
     }
   } catch (err) {
-    fastify.log.error('FTS5 setup failed:', err && err.message ? err.message : err);
+    fastify.log.error(`[${label}] FTS5 setup failed:`, err && err.message ? err.message : err);
   }
 }
 
@@ -2047,8 +2048,11 @@ const start = async () => {
     await fastify.listen({ port, host: '0.0.0.0' })
     console.log(`Server running on ${port}`)
     // Initialize FTS in background so health checks can pass immediately.
+    // All three DBs share the same schema, so the same FTS setup works for each.
     setImmediate(() => {
-      initializeFts();
+      initializeFts(db, 'English');
+      initializeFts(db_tagalog, 'Tagalog');
+      initializeFts(db_cebuano, 'Cebuano');
     });
   } catch (err) {
     fastify.log.error(err)
