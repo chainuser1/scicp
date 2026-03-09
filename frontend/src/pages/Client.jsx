@@ -138,8 +138,10 @@ function Client() {
   // ─── Kiosk mode — cycles verses while no presenter is connected ──────────
   const [isKioskMode, setIsKioskMode] = useState(true); // true until first presenter join
   const [kioskRestart, setKioskRestart] = useState(0);  // incremented to retrigger kiosk after presenter leaves
-  const kioskTimerRef    = useRef(null);
-  const kioskCurVerseRef = useRef(null); // verse_id of the verse currently on-screen in kiosk
+  const kioskTimerRef       = useRef(null);
+  const kioskCurVerseRef    = useRef(null); // verse_id of the verse currently on-screen in kiosk
+  const presenterLeftTimer  = useRef(null); // "Presenter left" notice auto-hide (8 s)
+  const joiningOverlayTimer = useRef(null); // "✓ connected" flash auto-hide (1.8 s)
 
   // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
@@ -524,7 +526,8 @@ function Client() {
       setShowQrOverlay(true);
       setPresenterLeft(true);
       setHighlightedText('');
-      setTimeout(() => setPresenterLeft(false), 8000);
+      clearTimeout(presenterLeftTimer.current);
+      presenterLeftTimer.current = setTimeout(() => setPresenterLeft(false), 8000);
       // Re-enter kiosk cycling from VOTD — kiosk start effect handles the display transition
       setIsKioskMode(true);
       setKioskRestart(n => n + 1);
@@ -539,7 +542,8 @@ function Client() {
       setPresenterJoined(true);
       presenterJoinedRef.current = true;
       setPresenterJoining(true);
-      setTimeout(() => setPresenterJoining(false), 1800);
+      clearTimeout(joiningOverlayTimer.current);
+      joiningOverlayTimer.current = setTimeout(() => setPresenterJoining(false), 1800);
       // Clear kiosk's displayVerse so the votdPending effect can write VOTD cleanly
       setDisplayVerse(null);
       // Show VOTD immediately so TV is never blank while presenter finds first verse.
@@ -631,9 +635,11 @@ function Client() {
       socket.off('connect_error',        handleConnectError);
       socket.off('custom-text',          handleCustomText);
       socket.off('preload-background',   handlePreloadBackground);
-      if (screensaverTimerRef.current) clearTimeout(screensaverTimerRef.current);
-      if (kioskTimerRef.current)       clearTimeout(kioskTimerRef.current);
-      if (bgFadeTimer.current)         clearTimeout(bgFadeTimer.current);
+      if (screensaverTimerRef.current)   clearTimeout(screensaverTimerRef.current);
+      if (kioskTimerRef.current)         clearTimeout(kioskTimerRef.current);
+      if (bgFadeTimer.current)           clearTimeout(bgFadeTimer.current);
+      if (presenterLeftTimer.current)    clearTimeout(presenterLeftTimer.current);
+      if (joiningOverlayTimer.current)   clearTimeout(joiningOverlayTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);
