@@ -1394,7 +1394,7 @@ button,
    ══════════════════════════════════════════════════════════════ */
 .presenter-toast {
   position: fixed;
-  top: 60px; /* clears the 52px header */
+  top: calc(60px + env(safe-area-inset-top, 0px)); /* clears the header */
   left: 50%;
   transform: translateX(-50%);
   z-index: 500;
@@ -2034,7 +2034,7 @@ button,
   display: flex;
   align-items: center;
   min-height: 52px;       /* floor only — grows with OS text scale */
-  padding: 0.5rem 1rem;   /* vertical padding lets height expand naturally */
+  padding: max(0.5rem, env(safe-area-inset-top)) 1rem 0.5rem;
   gap: 0.5rem;
   background: var(--surface);
   border-bottom: 1px solid var(--gold-border);
@@ -2405,7 +2405,7 @@ button,
 
 .search-drawer {
   position: fixed;
-  top: 52px; /* sits flush below the header */
+  top: calc(52px + env(safe-area-inset-top, 0px)); /* sits flush below the header */
   left: 0;
   bottom: 0;
   width: min(380px, 92vw);
@@ -2525,7 +2525,7 @@ button,
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  top: 52px;
+  top: calc(52px + env(safe-area-inset-top, 0px));
   background: rgba(0,0,0,0.5);
   z-index: 90;
   backdrop-filter: blur(2px);
@@ -4097,9 +4097,9 @@ button,
 
 /* Wider screens: wider drawer, larger cards */
 @media (min-width: 768px) {
-  .presenter-header { min-height: 56px; padding: 0.6rem 1.5rem; }
-  .search-drawer { top: 56px; width: min(440px, 60vw); }
-  .drawer-backdrop { top: 56px; }
+  .presenter-header { min-height: 56px; padding: max(0.6rem, env(safe-area-inset-top)) 1.5rem 0.6rem; }
+  .search-drawer { top: calc(56px + env(safe-area-inset-top, 0px)); width: min(440px, 60vw); }
+  .drawer-backdrop { top: calc(56px + env(safe-area-inset-top, 0px)); }
   .preview-nav-btn { width: 34px; height: 34px; }
   .hdr-btn { width: 34px; height: 34px; }
   .hdr-lang-select { height: 34px; }
@@ -4196,8 +4196,8 @@ button,
   }
 
   /* Drawer and backdrop must sit flush below the new header height */
-  .search-drawer   { top: 40px; }
-  .drawer-backdrop { top: 40px; }
+  .search-drawer   { top: calc(40px + env(safe-area-inset-top, 0px)); }
+  .drawer-backdrop { top: calc(40px + env(safe-area-inset-top, 0px)); }
 
   /* Tighter main panel */
   .main-panel {
