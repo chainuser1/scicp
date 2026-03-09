@@ -5518,12 +5518,16 @@ button, [role="button"] {
   --client-accent-strong: rgba(155, 95, 195, 0.9);
 }
 
-/* ── F10 — Volume short title in caption ────────────────────────────────────── */
+/* ── F10 — Full volume name as subtitle under the verse reference ────────────── */
 .verse-caption-volume {
-  opacity: 0.5;
-  font-size: 0.82em;
-  letter-spacing: 0.02em;
+  display: block;
+  font-size: 0.6em;
+  font-weight: 400;
+  letter-spacing: 0.28em;
+  opacity: 0.52;
+  margin-top: 0.3em;
 }
+/* Hidden on small screens where vertical space is tight */
 @media (max-width: 640px) { .verse-caption-volume { display: none; } }
 
 /* ── F13 — Secondary screen badge ────────────────────────────────────────────── */
