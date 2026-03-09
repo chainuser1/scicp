@@ -22,6 +22,7 @@
   --accent-red: #c0392b;
   --accent-red-glow: rgba(192, 57, 43, 0.4);
   --radius: 6px;
+  --radius-md: 9px;
   --radius-lg: 12px;
   --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1495,7 +1496,7 @@ button,
   padding: 0.28rem 0.5rem;
   background: var(--surface-2);
   border-radius: var(--radius);
-  border: 1px solid rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.09);
 }
 
 .preview-conn-dot {
@@ -1512,8 +1513,8 @@ button,
 
 .preview-session-text {
   font-family: 'Inter', sans-serif;
-  font-size: 0.62rem;
-  color: var(--text-dim);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
 }
 
 .preview-session-id {
@@ -1539,10 +1540,9 @@ button,
 }
 
 .card-collapse-icon {
-  font-size: 0.55rem;
-  color: var(--text-dim);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
   margin-left: auto;
-  opacity: 0.7;
 }
 
 .font-size-controls {
@@ -2057,7 +2057,7 @@ button,
 
 .hdr-title {
   font-family: 'Cinzel', serif;
-  font-size: 0.7rem;
+  font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.2em;
   color: var(--gold);
@@ -2097,7 +2097,7 @@ button,
 
 .hdr-verse-ref {
   font-family: 'Cinzel', serif;
-  font-size: 0.68rem;
+  font-size: clamp(0.82rem, 1.1vw, 0.93rem); /* fluid — live sermon status must be legible */
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--gold-light);
@@ -2110,7 +2110,7 @@ button,
 
 .hdr-seg-count {
   font-family: 'Inter', sans-serif;
-  font-size: 0.56rem;
+  font-size: 0.68rem;
   color: var(--text-dim);
   letter-spacing: 0.05em;
   line-height: 1.2;
@@ -2586,9 +2586,9 @@ button,
   border: 1px solid transparent;
   border-radius: var(--radius);
   font-family: 'Cinzel', serif;
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-dim);
   cursor: pointer;
@@ -3012,7 +3012,7 @@ button,
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: clamp(0.75rem, 1.5vw, 1.1rem);
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -3020,8 +3020,7 @@ button,
   scrollbar-width: thin;
   scrollbar-color: rgba(201,168,76,0.2) transparent;
   min-height: 0;
-  padding: 1.1rem;
-  gap: 0.85rem;
+  padding: clamp(1rem, 2.5vw, 1.75rem) clamp(1.1rem, 3vw, 2rem);
 }
 
 .main-panel::-webkit-scrollbar { width: 3px; }
@@ -3114,7 +3113,7 @@ button,
 
 .staged-text {
   font-family: 'Cormorant Garamond', serif;
-  font-size: 1.1rem;
+  font-size: clamp(1.05rem, 0.85rem + 0.5vw, 1.3rem); /* fluid — scales with viewport */
   font-style: italic;
   color: var(--text-primary);
   line-height: 1.65;
@@ -3192,7 +3191,7 @@ button,
   border-radius: var(--radius);
   padding: 0.9rem 1rem;
   overflow-y: auto;
-  max-height: 160px;
+  max-height: clamp(160px, 24vh, 340px); /* fluid — grows with taller viewports */
   scrollbar-width: thin;
   scrollbar-color: rgba(201,168,76,0.2) transparent;
   cursor: text;
@@ -3257,7 +3256,7 @@ button,
 
 .preview-nav-meta span:first-child {
   font-family: 'Cinzel', serif;
-  font-size: 0.67rem;
+  font-size: 0.76rem;
   letter-spacing: 0.08em;
   color: var(--gold-light);
   white-space: nowrap;
@@ -3273,13 +3272,7 @@ button,
 .preview-box::-webkit-scrollbar { width: 3px; }
 .preview-box::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.25); border-radius: 3px; }
 
-/* Taller preview text area on tall monitors — 160px is conservative on a 1440p screen */
-@media (min-height: 800px) {
-  .preview-box { max-height: 240px; }
-}
-@media (min-height: 1000px) {
-  .preview-box { max-height: 320px; }
-}
+/* preview-box height is fluid via clamp(160px, 22vh, 340px) — no breakpoints needed */
 
 .preview-title {
   font-family: 'Cinzel', serif;
@@ -3292,9 +3285,9 @@ button,
 
 .preview-text {
   font-family: 'Cormorant Garamond', serif;
-  font-size: 1rem;
+  font-size: clamp(0.95rem, 0.75rem + 0.5vw, 1.1rem); /* fluid — live content deserves room */
   font-style: italic;
-  color: var(--text-secondary);
+  color: var(--text-primary); /* primary — live content should outrank staged */
   line-height: 1.6;
 }
 
@@ -3327,7 +3320,7 @@ button,
 
 /* ── Theme card ── */
 .card--theme {
-  border-color: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.09);
 }
 
 .theme-buttons {
@@ -3616,9 +3609,9 @@ button,
 
 .idle-session-id {
   font-family: 'Cinzel', serif;
-  font-size: 1.4rem;
+  font-size: 1.15rem;
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   color: var(--gold-light);
   line-height: 1.1;
   padding: 0.4rem 0;
@@ -3720,7 +3713,7 @@ button,
 
 /* ── Quick Topics card ── */
 .idle-topics {
-  border-color: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.09);
 }
 
 .idle-topic-chips {
@@ -4276,7 +4269,7 @@ button,
    Same layout architecture, just more breathing room
    ══════════════════════════════════════════════════════════════ */
 
-/* Wider screens: wider drawer, larger cards */
+/* Wider screens: wider drawer, larger buttons */
 @media (min-width: 768px) {
   .presenter-header { min-height: 56px; padding: max(0.6rem, env(safe-area-inset-top)) 1.5rem 0.6rem; }
   .search-drawer { top: calc(56px + env(safe-area-inset-top, 0px)); width: min(440px, 60vw); }
@@ -4284,13 +4277,10 @@ button,
   .preview-nav-btn { width: 34px; height: 34px; }
   .hdr-btn { width: 34px; height: 34px; }
   .hdr-lang-btn { height: 34px; }
-  .main-panel { padding: 1.4rem; gap: 1rem; }
   .card { padding: 1.3rem 1.5rem; }
-  .staged-text { font-size: 1.2rem; }
-  .preview-text { font-size: 1.05rem; }
-  .preview-box { max-height: 200px; }
-  .hdr-verse-ref { font-size: 0.74rem; }
   .result-text { font-size: 0.92rem; }
+  /* main-panel padding/gap, staged-text, preview-text, preview-box, hdr-verse-ref
+     are handled by clamp() in their base rules — no override needed here */
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -4347,21 +4337,16 @@ button,
   .tour-card { left: calc(min(300px, 35vw) + 1rem); }
 }
 
-/* Large desktop: more breathing room, full width always */
+/* Large desktop: wider sidebar, bigger cards and CTA */
 @media (min-width: 1200px) {
   /* Widen sidebar column and keep drawer width in sync — avoids overflow into main panel */
   .presenter-container { grid-template-columns: 360px 1fr; }
-  .main-panel { padding: 1.75rem 2rem; gap: 1.1rem; }
   .card { padding: 1.5rem 1.75rem; }
-  .staged-text { font-size: 1.3rem; }
-  .preview-box { max-height: 220px; }
   .go-live-button { font-size: 0.9rem; letter-spacing: 0.22em; }
+  /* main-panel padding/gap, staged-text, preview-box handled by clamp() — no override needed */
 }
 
-/* Tall screens: let preview grow more */
-@media (min-height: 900px) {
-  .preview-box { max-height: 240px; }
-}
+/* preview-box tall-screen growth handled by clamp(160px, 24vh, 340px) in base rule */
 
 /* ══════════════════════════════════════════════════════════════
    LANDSCAPE PHONE
@@ -5695,7 +5680,10 @@ button, [role="button"] {
 }
 
 /* ── F2 — Announcement card (Presenter) ────────────────────────────────────── */
-.card--custom { border-color: rgba(201, 168, 76, 0.22); }
+.card--custom {
+  border-color: rgba(80, 140, 210, 0.3);
+  border-left: 3px solid rgba(80, 140, 210, 0.65); /* steel blue = broadcast / custom content */
+}
 .custom-text-form {
   display: flex;
   flex-direction: column;
