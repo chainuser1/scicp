@@ -2698,11 +2698,14 @@ button,
 
 /* ── Pagination ── */
 .results-pagination {
+  position: sticky;
+  bottom: 0;
+  background: var(--deep);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  padding: 0.7rem 0 0.2rem;
+  padding: 0.7rem 0 0.4rem;
   border-top: 1px solid rgba(201,168,76,0.1);
   margin-top: 0.5rem;
 }
