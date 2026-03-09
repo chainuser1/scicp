@@ -442,6 +442,12 @@ VOLUME_META: Dict[str, Dict[str, str]] = {
         "subtitle":    "Spanish",
         "short_title": "Esp.",
     },
+    "ilocano": {
+        "title":       "Biblia (Ilocano)",
+        "long_title":  "Ti Biblia (Revised Ilocano Parabur Version)",
+        "subtitle":    "Ilocano",
+        "short_title": "Ilo.",
+    },
 }
 
 
@@ -460,6 +466,9 @@ def get_book_names(book_num: int, language: str) -> Dict[str, str]:
         names = SPANISH_BOOK_NAMES.get(book_num)
     elif lang_key == "greek":
         names = GREEK_BOOK_NAMES.get(book_num)
+    elif lang_key == "ilocano":
+        # RIPV uses standard English book names; fall through to English fallback
+        names = None
     else:
         names = None
 
