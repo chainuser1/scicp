@@ -5738,8 +5738,37 @@ button, [role="button"] {
 }
 @media (max-width: 640px) { .verse-secondary-text { font-size: 0.48em; opacity: 0.5; } }
 
-/* F8 — Secondary language selector in header */
-.hdr-lang-secondary { opacity: 0.75; font-size: 0.7rem; }
+/* F8 — Secondary language segment toggle in header */
+.hdr-sec-lang {
+  display: flex;
+  gap: 0.15rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+.hdr-sec-btn {
+  padding: 0.15rem 0.4rem;
+  height: 30px;
+  background: transparent;
+  border: 1px solid rgba(201,168,76,0.15);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: 'Cinzel', serif;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.hdr-sec-btn:hover {
+  border-color: rgba(201,168,76,0.4);
+  color: var(--text-primary);
+}
+.hdr-sec-btn--on {
+  background: rgba(201,168,76,0.14);
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
 
 /* ── F9 — Canon volume accent (Client) ─────────────────────────────────────── */
 /* Only line/glow vars are set here — NOT --client-accent-strong.

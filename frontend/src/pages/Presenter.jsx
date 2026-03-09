@@ -1276,19 +1276,17 @@ const Presenter = () => {
             <option value="tl">TL</option>
             <option value="ceb">CEB</option>
           </select>
-          {/* F8 — secondary language displayed on TV below main text */}
-          <select
-            className="hdr-lang-select hdr-lang-secondary"
-            value={secondaryLanguage}
-            onChange={e => handleSecondaryLanguageChange(e.target.value)}
-            title="Also show this translation on the TV screen"
-            aria-label="Secondary display language"
-          >
-            <option value="">+Lang</option>
-            <option value="tl">+TL</option>
-            <option value="ceb">+CEB</option>
-            <option value="en">+EN</option>
-          </select>
+          {/* F8 — secondary language: segment toggle (Off / +TL / +CEB / +EN) */}
+          <div className="hdr-sec-lang" title="Also show this translation on the TV screen" aria-label="Secondary display language">
+            {[['', 'Off'], ['tl', '+TL'], ['ceb', '+CEB'], ['en', '+EN']].map(([val, label]) => (
+              <button
+                key={val}
+                className={`hdr-sec-btn${secondaryLanguage === val ? ' hdr-sec-btn--on' : ''}`}
+                onClick={() => handleSecondaryLanguageChange(val)}
+                aria-pressed={secondaryLanguage === val}
+              >{label}</button>
+            ))}
+          </div>
 
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
