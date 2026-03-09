@@ -4820,6 +4820,12 @@ button, [role="button"] {
 }
 .presenter-takeover-dismiss:hover { color: #fff; }
 
+/* Evicted presenter alert — deeper red, persistent (no auto-dismiss) */
+.presenter-evicted-alert {
+  background: rgba(110, 10, 20, 0.97);
+  box-shadow: 0 2px 20px rgba(0,0,0,0.7);
+}
+
 /* ── Viewer count in idle session card (Phase 1) ─────────────────────────── */
 .idle-viewer-count {
   display: flex;
