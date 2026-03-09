@@ -921,7 +921,7 @@ const Presenter = () => {
     adjacentAbortRef.current = controller;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
-      ...((['ceb', 'tl'].includes(currentLanguage)) && { language: currentLanguage })
+      ...((['ceb', 'tl', 'es', 'el'].includes(currentLanguage)) && { language: currentLanguage })
     });
     try {
       const res = await fetch(`${API_URL}/verse/adjacent?${params}`, { signal: controller.signal });
@@ -1275,10 +1275,12 @@ const Presenter = () => {
             <option value="en">EN</option>
             <option value="tl">TL</option>
             <option value="ceb">CEB</option>
+            <option value="es">ES</option>
+            <option value="el">EL</option>
           </select>
           {/* F8 — secondary language: segment toggle (Off / +TL / +CEB / +EN) */}
           <div className="hdr-sec-lang" title="Also show this translation on the TV screen" aria-label="Secondary display language">
-            {[['', 'Off'], ['tl', '+TL'], ['ceb', '+CEB'], ['en', '+EN']].map(([val, label]) => (
+            {[['', 'Off'], ['tl', '+TL'], ['ceb', '+CEB'], ['en', '+EN'], ['es', '+ES'], ['el', '+EL']].map(([val, label]) => (
               <button
                 key={val}
                 className={`hdr-sec-btn${secondaryLanguage === val ? ' hdr-sec-btn--on' : ''}`}
@@ -1424,7 +1426,7 @@ const Presenter = () => {
               <div className="mobile-menu-section">
                 <div className="mobile-menu-label">Language</div>
                 <div className="mobile-menu-row">
-                  {['en','tl','ceb'].map(lang => (
+                  {['en','tl','ceb','es','el'].map(lang => (
                     <button
                       key={lang}
                       className={`theme-btn${currentLanguage === lang ? ' active' : ''}`}
@@ -1435,7 +1437,7 @@ const Presenter = () => {
                 {/* F8 — secondary language */}
                 <div className="mobile-menu-row" style={{ marginTop: '0.35rem' }}>
                   <span className="mobile-menu-label" style={{ margin: 0, marginRight: '0.4rem' }}>+Screen</span>
-                  {['', 'tl', 'ceb', 'en'].map(lang => (
+                  {['', 'tl', 'ceb', 'en', 'es', 'el'].map(lang => (
                     <button
                       key={`sec-${lang}`}
                       className={`theme-btn${secondaryLanguage === lang ? ' active' : ''}`}
