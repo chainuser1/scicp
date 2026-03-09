@@ -559,7 +559,7 @@ const Presenter = () => {
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
-  const PAGE_SIZE = 10; // matches server pageSize
+  const PAGE_SIZE = 5; // 5 results/page keeps pagination controls clear of the mobile nav bar
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
 
   // ── Toast notification ───────────────────────────────────────────────────
