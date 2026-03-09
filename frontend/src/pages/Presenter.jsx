@@ -541,6 +541,7 @@ const Presenter = () => {
   const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
+  const adjacentAbortRef = useRef(null); // cancels in-flight fetchAdjacent when a newer one fires
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
@@ -914,12 +915,16 @@ const Presenter = () => {
   const fetchAdjacent = async (direction, preferStaged = false) => {
     const source = preferStaged ? (staged || liveVerse) : liveVerse;
     if (!source?.verse_id) return;
+    // Cancel any in-flight request so rapid navigation can't emit out-of-order go-live events
+    if (adjacentAbortRef.current) adjacentAbortRef.current.abort();
+    const controller = new AbortController();
+    adjacentAbortRef.current = controller;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
       ...((['ceb', 'tl'].includes(currentLanguage)) && { language: currentLanguage })
     });
     try {
-      const res = await fetch(`${API_URL}/verse/adjacent?${params}`);
+      const res = await fetch(`${API_URL}/verse/adjacent?${params}`, { signal: controller.signal });
       if (!res.ok) return;
       const data = await res.json();
       const v = { ...data, theme: currentTheme };
@@ -931,7 +936,9 @@ const Presenter = () => {
         setCurrentSegment(0);
         setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
       }
-    } catch (err) { console.error('adjacent fetch failed', err); }
+    } catch (err) {
+      if (err.name !== 'AbortError') console.error('adjacent fetch failed', err);
+    }
   };
 
   const handlePreviewTextSelection = () => {

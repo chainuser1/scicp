@@ -137,6 +137,7 @@ function Client() {
 
   // ─── Kiosk mode — cycles verses while no presenter is connected ──────────
   const [isKioskMode, setIsKioskMode] = useState(true); // true until first presenter join
+  const [kioskRestart, setKioskRestart] = useState(0);  // incremented to retrigger kiosk after presenter leaves
   const kioskTimerRef    = useRef(null);
   const kioskCurVerseRef = useRef(null); // verse_id of the verse currently on-screen in kiosk
 
@@ -193,17 +194,21 @@ function Client() {
   //   clientQR    → /client?session=    — shown while live, for audience devices
   useEffect(() => {
     if (!clientSessionId) return;
+    let cancelled = false;
     setQrDataUrl('');
     setClientQrDataUrl('');
     setQrError(false);
     const origin = publicOrigin || window.location.origin;
     generateQrDataUrl(`${origin}/presenter?session=${clientSessionId}`).then((url) => {
+      if (cancelled) return;
       if (url) setQrDataUrl(url);
       else setQrError(true);
     });
     generateQrDataUrl(`${origin}/client?session=${clientSessionId}`).then((url) => {
+      if (cancelled) return;
       if (url) setClientQrDataUrl(url);
     });
+    return () => { cancelled = true; };
   }, [clientSessionId, publicOrigin]);
 
   // ─── Create / rejoin TV session ───────────────────────────────────────────
@@ -434,7 +439,7 @@ function Client() {
       );
     }, 400);
     return () => clearTimeout(initTimer);
-  }, [votd, advanceKiosk]);
+  }, [votd, advanceKiosk, kioskRestart]); // kioskRestart reruns this when presenter leaves
 
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -512,10 +517,17 @@ function Client() {
     };
 
     const handlePresenterLeft = () => {
-      setPresenterLeft(true);
+      // Reset so the next presenter join is treated as fresh, and kiosk can restart
+      setPresenterJoined(false);
+      presenterJoinedRef.current = false;
+      // Switch QR back to presenter-join URL and show the "presenter left" notice
       setShowQrOverlay(true);
-      // After 8 s, fade the notice — it already told the operator what happened
+      setPresenterLeft(true);
+      setHighlightedText('');
       setTimeout(() => setPresenterLeft(false), 8000);
+      // Re-enter kiosk cycling from VOTD — kiosk start effect handles the display transition
+      setIsKioskMode(true);
+      setKioskRestart(n => n + 1);
     };
 
     const handlePresenterJoined = () => {
@@ -620,6 +632,8 @@ function Client() {
       socket.off('custom-text',          handleCustomText);
       socket.off('preload-background',   handlePreloadBackground);
       if (screensaverTimerRef.current) clearTimeout(screensaverTimerRef.current);
+      if (kioskTimerRef.current)       clearTimeout(kioskTimerRef.current);
+      if (bgFadeTimer.current)         clearTimeout(bgFadeTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);
