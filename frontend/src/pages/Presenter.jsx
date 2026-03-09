@@ -1347,36 +1347,48 @@ const Presenter = () => {
             </button>
             {langPopover && (
               <div className="hdr-lang-popover">
-                <div className="popover-label">Language</div>
-                <div className="hdr-lang-pills">
-                  {[['en','EN'],['tl','TL'],['ceb','CEB'],['es','ES'],['el','EL'],['ilo','ILO']].map(([val, lbl]) => (
-                    <button
-                      key={val}
-                      className={`hdr-lang-pill${currentLanguage === val ? ' hdr-lang-pill--on' : ''}`}
-                      onClick={() => handleLanguageChange({ target: { value: val } })}
-                    >{lbl}</button>
-                  ))}
+                <div className="popover-lang-row">
+                  <label className="popover-label" htmlFor="lang-primary">Language</label>
+                  <select
+                    id="lang-primary"
+                    className="lang-select"
+                    value={currentLanguage}
+                    onChange={handleLanguageChange}
+                  >
+                    <option value="en">English</option>
+                    <option value="tl">Tagalog</option>
+                    <option value="ceb">Cebuano</option>
+                    <option value="es">Español</option>
+                    <option value="el">Greek</option>
+                    <option value="ilo">Ilocano</option>
+                  </select>
                 </div>
                 <div className="popover-divider" />
-                <div className="popover-swap-row">
-                  <div className="popover-label">+ TV Screen</div>
-                  <button
-                    className="popover-swap-btn"
-                    onClick={handleSwapLanguages}
-                    disabled={!secondaryLanguage}
-                    title="Swap primary ↔ secondary language"
-                    aria-label="Swap primary and secondary language"
-                  >⇄</button>
-                </div>
-                <div className="hdr-lang-pills">
-                  {[['','Off'],['tl','TL'],['ceb','CEB'],['en','EN'],['es','ES'],['el','EL'],['ilo','ILO']].map(([val, lbl]) => (
+                <div className="popover-lang-row">
+                  <label className="popover-label" htmlFor="lang-secondary">+ TV Screen</label>
+                  <div className="popover-lang-swap-row">
+                    <select
+                      id="lang-secondary"
+                      className="lang-select"
+                      value={secondaryLanguage}
+                      onChange={e => handleSecondaryLanguageChange(e.target.value)}
+                    >
+                      <option value="">Off</option>
+                      <option value="en">English</option>
+                      <option value="tl">Tagalog</option>
+                      <option value="ceb">Cebuano</option>
+                      <option value="es">Español</option>
+                      <option value="el">Greek</option>
+                      <option value="ilo">Ilocano</option>
+                    </select>
                     <button
-                      key={val}
-                      className={`hdr-lang-pill${secondaryLanguage === val ? ' hdr-lang-pill--on' : ''}`}
-                      onClick={() => handleSecondaryLanguageChange(val)}
-                      aria-pressed={secondaryLanguage === val}
-                    >{lbl}</button>
-                  ))}
+                      className="popover-swap-btn"
+                      onClick={handleSwapLanguages}
+                      disabled={!secondaryLanguage}
+                      title="Swap primary ↔ secondary language"
+                      aria-label="Swap primary and secondary language"
+                    >⇄</button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1518,24 +1530,42 @@ const Presenter = () => {
               <div className="mobile-menu-section">
                 <div className="mobile-menu-label">Language</div>
                 <div className="mobile-menu-row">
-                  {['en','tl','ceb','es','el','ilo'].map(lang => (
-                    <button
-                      key={lang}
-                      className={`theme-btn${currentLanguage === lang ? ' active' : ''}`}
-                      onClick={() => { handleLanguageChange({ target: { value: lang } }); setMobileMenuOpen(false); }}
-                    >{lang.toUpperCase()}</button>
-                  ))}
+                  <select
+                    className="lang-select lang-select--mobile"
+                    value={currentLanguage}
+                    onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
+                  >
+                    <option value="en">English</option>
+                    <option value="tl">Tagalog</option>
+                    <option value="ceb">Cebuano</option>
+                    <option value="es">Español</option>
+                    <option value="el">Greek</option>
+                    <option value="ilo">Ilocano</option>
+                  </select>
                 </div>
                 {/* F8 — secondary language */}
-                <div className="mobile-menu-row" style={{ marginTop: '0.35rem' }}>
-                  <span className="mobile-menu-label" style={{ margin: 0, marginRight: '0.4rem' }}>+Screen</span>
-                  {['', 'tl', 'ceb', 'en', 'es', 'el', 'ilo'].map(lang => (
-                    <button
-                      key={`sec-${lang}`}
-                      className={`theme-btn${secondaryLanguage === lang ? ' active' : ''}`}
-                      onClick={() => handleSecondaryLanguageChange(lang)}
-                    >{lang ? `+${lang.toUpperCase()}` : 'Off'}</button>
-                  ))}
+                <div className="mobile-menu-row" style={{ marginTop: '0.35rem', gap: '0.4rem' }}>
+                  <span className="mobile-menu-label" style={{ margin: 0, flexShrink: 0 }}>+Screen</span>
+                  <select
+                    className="lang-select lang-select--mobile"
+                    value={secondaryLanguage}
+                    onChange={e => handleSecondaryLanguageChange(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">Off</option>
+                    <option value="en">English</option>
+                    <option value="tl">Tagalog</option>
+                    <option value="ceb">Cebuano</option>
+                    <option value="es">Español</option>
+                    <option value="el">Greek</option>
+                    <option value="ilo">Ilocano</option>
+                  </select>
+                  <button
+                    className="popover-swap-btn"
+                    onClick={handleSwapLanguages}
+                    disabled={!secondaryLanguage}
+                    title="Swap primary ↔ secondary language"
+                  >⇄</button>
                 </div>
               </div>
 
