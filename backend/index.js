@@ -2231,7 +2231,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         book_title: bookTitle,
         segments,
         totalSegments: segments.length,
-        currentSegment: 0
+        currentSegment: 0,
+        // Always clear secondary fields so stale values from ...verse don't
+        // bleed through when the presenter switches Off. The block below
+        // re-populates them only when a secondary language is active.
+        secondary_text:       null,
+        secondary_book_title: null,
+        secondaryLanguage:    null,
       };
 
       // F8 — dual language display: fetch secondary language text
