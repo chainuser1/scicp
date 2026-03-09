@@ -508,7 +508,6 @@ const Presenter = () => {
         .then(data => { setBrowseBooks(data); setBrowseBooksLoaded(true); })
         .catch(() => {});
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawerTab, browseBooksLoaded, currentLanguage]);
 
   const addToSetlist = (verse) => {
@@ -860,6 +859,7 @@ const Presenter = () => {
       socket.off('presenter-takeover-attempt');
       socket.off('presenter-evicted');
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSessionParam]);
 
   /* ── Close drawer, theme popover, session popover, and mobile menu on outside tap ── */
@@ -1189,6 +1189,7 @@ const Presenter = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
 
   const hasSegments = liveVerse?.segments?.length > 1;
