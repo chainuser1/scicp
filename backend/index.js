@@ -250,6 +250,11 @@ const SERVICE_CONFIG = {
   // Maximum number of concurrent named sessions (prevents memory exhaustion
   // if the server is left running across multiple weeks of service).
   MAX_SESSIONS: 50,
+
+  // How long a presenter can be idle (no go-live / update / search) before a
+  // different device is allowed to take over the presenter slot.  Set via
+  // PRESENTER_IDLE_MS env var for testing (e.g. PRESENTER_IDLE_MS=5000).
+  PRESENTER_IDLE_MS: 30 * 60 * 1000,
 };
 
 const io = new Server(fastify.server, {
@@ -1655,6 +1660,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const SESSION_GRACE_MS          = Number(process.env.SESSION_GRACE_MS          || SERVICE_CONFIG.SESSION_GRACE_MS);
   const SESSION_NO_VIEWER_GRACE_MS = Number(process.env.SESSION_NO_VIEWER_GRACE_MS || SERVICE_CONFIG.SESSION_NO_VIEWER_GRACE_MS);
   const PRESENTER_LEFT_DEBOUNCE_MS = Number(process.env.PRESENTER_LEFT_DEBOUNCE_MS || SERVICE_CONFIG.PRESENTER_LEFT_DEBOUNCE_MS);
+  const PRESENTER_IDLE_MS          = Number(process.env.PRESENTER_IDLE_MS          || SERVICE_CONFIG.PRESENTER_IDLE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
   // Track viewer counts per session so the Presenter can see "N displays connected"
@@ -1672,6 +1678,21 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         liveVerse: null,
         highlightedText: '',
         presenterSocketId: null,
+        // Stable hex token issued when a presenter first claims the slot.
+        // Persists across socket reconnects so the same browser tab can always
+        // reclaim its own session even after a network blip.
+        presenterToken: null,
+        // Unix timestamp of the last presenter action (go-live, update-verse,
+        // highlight, etc.).  Used to determine whether a presenter is "idle"
+        // and therefore evictable by a replacement presenter.
+        presenterLastActivityAt: null,
+        // Set of presenterTokens that were evicted from this session.  Barred
+        // from re-entering until the current presenter voluntarily leaves.
+        lockedOutTokens: new Set(),
+        // Token + socketId for the "main" TV/projector that created the session.
+        // Additional viewers join as secondary mirrors and get the same content.
+        mainClientToken: null,
+        mainClientSocketId: null,
         pinHash: null,
         updatedAt: Date.now(),
         // true once a TV/viewer socket has joined — used to pick the right grace period
@@ -1701,6 +1722,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
     }
     return `${SESSION_CODE_CHARS[Math.floor(Math.random() * SESSION_CODE_CHARS.length)]}${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  }
+
+  // Generate a 32-character cryptographically random hex token.
+  // Used to give each presenter (and main TV) a stable identity that survives
+  // socket reconnects.  Node's built-in `crypto` module — no extra deps.
+  function generateToken() {
+    return require('crypto').randomBytes(16).toString('hex');
   }
 
   // ── Viewer count tracking ────────────────────────────────────────────────
@@ -1783,12 +1811,22 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     return typeof roomSize === 'number' && roomSize > 0;
   }
 
-  function releasePresenterLock(sessionId, socketId) {
+  // voluntary=true  → presenter explicitly left (leave-session, end-live).
+  //                   Clear the token + lockout list so the room is fully open.
+  // voluntary=false → socket dropped (network blip, page refresh).
+  //                   Keep presenterToken so the same browser tab can reconnect.
+  function releasePresenterLock(sessionId, socketId, voluntary = false) {
     const normalized = normalizeSessionId(sessionId);
     if (!normalized || normalized === DEFAULT_SESSION_ID) return;
     const state = sessionState.get(normalized);
     if (state && state.presenterSocketId === socketId) {
       state.presenterSocketId = null;
+      if (voluntary) {
+        // Room is now completely open — any presenter can walk in.
+        state.presenterToken            = null;
+        state.presenterLastActivityAt   = null;
+        state.lockedOutTokens           = new Set();
+      }
       state.updatedAt = Date.now();
     }
   }
@@ -1813,14 +1851,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   function ensurePresenterAccess(sessionId, socket) {
     const state = getSessionState(sessionId);
     clearStalePresenterLock(state);
-    if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
-      const error = { message: 'Another presenter is active in this session' };
-      socket.emit('session-error', error);
-      return false;
+    // Track last-activity timestamp so idle-eviction logic stays current.
+    if (state.presenterSocketId === socket.id) {
+      state.presenterLastActivityAt = Date.now();
     }
-    if (!state.presenterSocketId) {
-      state.presenterSocketId = socket.id;
-      state.updatedAt = Date.now();
+    // Hard block: only the socket that won the presenter slot is allowed.
+    // NO silent grant — a socket must call join-session as presenter first.
+    if (!state.presenterSocketId || state.presenterSocketId !== socket.id) {
+      socket.emit('session-error', { message: 'Presenter access required — join as presenter first' });
+      return false;
     }
     return true;
   }
@@ -1850,21 +1889,73 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.join(activeSessionId);
     getSessionState(activeSessionId);
 
-    const joinSession = (candidateSessionId, role = 'viewer', pin = '') => {
+    const joinSession = (candidateSessionId, role = 'viewer', pin = '', presenterToken = '') => {
       const normalized = normalizeSessionId(candidateSessionId);
       if (!normalized) return null;
       const previousSessionId = activeSessionId;
       if (role === 'presenter') {
         const state = getSessionState(normalized);
-        clearStalePresenterLock(state);
-        if (state.presenterSocketId && state.presenterSocketId !== socket.id) {
-          // Phase 1: alert the current presenter that a takeover was attempted
-          io.to(state.presenterSocketId).emit('presenter-takeover-attempt', {
-            message: 'Another device attempted to join your session as presenter',
-          });
-          return { error: 'Another presenter is active in this session' };
+        clearStalePresenterLock(state);   // clear dead-socket reference first
+
+        const incomingToken = String(presenterToken || '').trim();
+        const now           = Date.now();
+        const isIdle        = !state.presenterLastActivityAt ||
+                              (now - state.presenterLastActivityAt) > PRESENTER_IDLE_MS;
+
+        // ── Step 1: Lockout check ─────────────────────────────────────────────
+        // A token that was evicted stays barred until the current presenter
+        // voluntarily leaves.
+        if (incomingToken && state.lockedOutTokens.has(incomingToken)) {
+          return { error: 'presenter-locked-out' };
         }
-        // PIN gate: require PIN if one has been set for this session
+
+        // ── Step 2: Same presenter reconnecting ───────────────────────────────
+        // The token matches — this is the original device/tab returning after
+        // a network blip or page refresh.  Skip all other checks.
+        if (incomingToken && state.presenterToken === incomingToken) {
+          // Fall through to the grant section.
+        }
+
+        // ── Step 3: No current presenter ─────────────────────────────────────
+        else if (!state.presenterToken) {
+          // Slot is vacant.  Assign the incoming token (or generate a fresh one
+          // if the client didn't supply one, as is the case on first join).
+          state.presenterToken = incomingToken || generateToken();
+        }
+
+        // ── Steps 4 & 5: Different token — check connected vs disconnected ────
+        else {
+          if (hasConnectedSocket(state.presenterSocketId)) {
+            // ── Step 4: current holder's socket is still alive ─────────────
+            if (!isIdle) {
+              // Active presenter — protect them and alert
+              io.to(state.presenterSocketId).emit('presenter-takeover-attempt', {
+                message: 'Another device attempted to join your session as presenter',
+              });
+              return { error: 'Another presenter is active in this session' };
+            }
+            // Idle presenter connected but unresponsive — evict and take over
+            io.to(state.presenterSocketId).emit('presenter-evicted', {
+              message: 'You have been replaced as presenter due to inactivity.',
+              sessionId: normalized,
+            });
+            state.lockedOutTokens.add(state.presenterToken);
+            state.presenterSocketId = null;
+            state.presenterToken    = incomingToken || generateToken();
+          } else {
+            // ── Step 5: holder's socket is gone (disconnected) ─────────────
+            if (!isIdle) {
+              // Recently active disconnect — reconnect window still open.
+              // Reject the newcomer so the original presenter can return.
+              return { error: 'Another presenter is active in this session' };
+            }
+            // Idle + disconnected — evict the ghost and open the slot
+            if (state.presenterToken) state.lockedOutTokens.add(state.presenterToken);
+            state.presenterToken = incomingToken || generateToken();
+          }
+        }
+
+        // ── PIN gate (runs after token checks so locked-out is caught first) ──
         if (state.pinHash) {
           const provided = String(pin || '').trim();
           if (!provided) return { requiresPin: true };
@@ -1874,7 +1965,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (activeSessionId && activeSessionId !== normalized) {
         socket.leave(activeSessionId);
         if (activeRole === 'presenter') {
-          releasePresenterLock(previousSessionId, socket.id);
+          releasePresenterLock(previousSessionId, socket.id, true /* voluntary — switching sessions */);
         } else {
           // Viewer leaving previous session
           decrementViewerCount(previousSessionId);
@@ -1935,7 +2026,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           });
         }
       }
-      return { sessionId: activeSessionId, pinSet: !!state.pinHash };
+      return { sessionId: activeSessionId, pinSet: !!state.pinHash, presenterToken: state.presenterToken };
     };
 
     const leaveActiveSession = () => {
@@ -1947,7 +2038,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         // Tell the TV (and any secondary screens) the presenter has left so they
         // can reset state and switch the QR back to the presenter-join URL.
         socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId });
-        releasePresenterLock(previousSessionId, socket.id);
+        releasePresenterLock(previousSessionId, socket.id, true /* voluntary */);
       } else {
         decrementViewerCount(previousSessionId);
       }
@@ -1968,16 +2059,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      const role = payload && payload.role === 'presenter' ? 'presenter' : 'presenter';
-      const joined = joinSession(sessionId, role);
+      // Pre-generate the presenter token so it can be returned to the client
+      // immediately and stored in sessionStorage for reconnect identity.
+      const presenterToken = generateToken();
+      const joined = joinSession(sessionId, 'presenter', '', presenterToken);
       if (joined && joined.error) {
         const error = { message: joined.error };
         socket.emit('session-error', error);
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      socket.emit('session-created', { sessionId: joined.sessionId });
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId });
+      socket.emit('session-created', { sessionId: joined.sessionId, presenterToken: joined.presenterToken });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken });
     });
 
     // ── TV/Client-initiated sessions ──────────────────────────────────────────
@@ -1989,15 +2082,30 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     // back.  If that session still exists in state, the TV silently rejoins it
     // without changing the QR code — the Presenter never notices the hiccup.
     socket.on('create-client-session', (payload, callback) => {
-      const preferred = normalizeSessionId(payload && payload.preferredSessionId);
+      const preferred      = normalizeSessionId(payload && payload.preferredSessionId);
+      const incomingToken  = payload && payload.mainClientToken ? String(payload.mainClientToken).trim() : '';
       let sessionId;
+      let isMainClient = false;
 
       if (preferred && sessionExists(preferred)) {
-        // The TV's previous session is still alive — rejoin it seamlessly
+        // The TV's previous session is still alive — try to rejoin it.
         sessionId = preferred;
-        fastify.log.info(`TV rejoining existing client session ${sessionId}`);
+        const state = getSessionState(sessionId);
+
+        if (!state.mainClientToken) {
+          // Session exists but has no main-client yet (edge case) — claim it.
+          isMainClient = true;
+        } else if (incomingToken && incomingToken === state.mainClientToken) {
+          // Same TV reconnecting (browser crash / power-save) — restore slot.
+          isMainClient = true;
+          fastify.log.info(`Main TV reconnecting to client session ${sessionId}`);
+        } else {
+          // Different device — join as secondary viewer (mirrors exactly).
+          isMainClient = false;
+          fastify.log.info(`Secondary viewer joining client session ${sessionId}`);
+        }
       } else {
-        // Create a fresh session room
+        // Create a fresh session room.
         sessionId = generateSessionId();
         if (!sessionId) {
           const error = { message: 'Server session limit reached' };
@@ -2005,9 +2113,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           if (typeof callback === 'function') callback({ ok: false, ...error });
           return;
         }
+        isMainClient = true;
       }
 
-      // Leave any previous session cleanly
+      // Leave any previous session cleanly.
       if (activeSessionId && activeSessionId !== DEFAULT_SESSION_ID && activeSessionId !== sessionId) {
         socket.leave(activeSessionId);
         decrementViewerCount(activeSessionId);
@@ -2018,24 +2127,48 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       activeRole = 'viewer';
       socket.join(sessionId);
       cancelCleanup(sessionId);
-      getSessionState(sessionId); // ensure state map entry exists
+
+      const state = getSessionState(sessionId); // ensure state map entry exists
+      state.hadViewer = true;                   // FIX: was never set on this path
       incrementViewerCount(sessionId);
 
-      socket.emit('client-session-created', { sessionId });
-      if (typeof callback === 'function') callback({ ok: true, sessionId });
+      let mainClientToken = state.mainClientToken || null;
+      if (isMainClient) {
+        if (!state.mainClientToken) {
+          // Freshly generated or unclaimed — mint a new token.
+          mainClientToken = generateToken();
+          state.mainClientToken = mainClientToken;
+        }
+        state.mainClientSocketId = socket.id;
+      }
+
+      socket.emit('client-session-created', {
+        sessionId,
+        mainClientToken: isMainClient ? mainClientToken : undefined,
+        isMainClient,
+      });
+      if (typeof callback === 'function') callback({
+        ok: true,
+        sessionId,
+        mainClientToken: isMainClient ? mainClientToken : undefined,
+        isMainClient,
+      });
     });
 
     socket.on('join-session', (payload, callback) => {
-      const requested = normalizeSessionId(payload && payload.sessionId);
-      const role = payload && payload.role === 'presenter' ? 'presenter' : 'viewer';
-      const pin  = payload && payload.pin ? String(payload.pin).trim() : '';
+      const requested      = normalizeSessionId(payload && payload.sessionId);
+      const role           = payload && payload.role === 'presenter' ? 'presenter' : 'viewer';
+      const pin            = payload && payload.pin ? String(payload.pin).trim() : '';
+      // Presenter token — stable identity persisted in the client's sessionStorage.
+      // An empty string is fine for viewers (token logic only runs for presenter role).
+      const presenterToken = payload && payload.presenterToken ? String(payload.presenterToken).trim() : '';
       if (!sessionExists(requested)) {
         const error = { message: 'Session not found' };
         socket.emit('session-error', error);
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      const joined = joinSession(requested, role, pin);
+      const joined = joinSession(requested, role, pin, presenterToken);
       // PIN-related rejections — do NOT emit session-error (they're expected flows)
       if (joined && joined.requiresPin) {
         if (typeof callback === 'function') callback({ ok: false, requiresPin: true });
@@ -2046,9 +2179,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         return;
       }
       if (!joined || joined.error) {
-        const error = { message: joined && joined.error ? joined.error : 'Valid session code is required' };
-        socket.emit('session-error', error);
-        if (typeof callback === 'function') callback({ ok: false, ...error });
+        const errCode = joined && joined.error;
+        const message = errCode === 'presenter-locked-out'
+          ? 'This session already has an active presenter. You can join once they end the service.'
+          : (errCode || 'Valid session code is required');
+        socket.emit('session-error', { message });
+        if (typeof callback === 'function') callback({ ok: false, error: errCode, message });
         return;
       }
       if (!joined.sessionId) {
@@ -2057,7 +2193,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, pinSet: joined.pinSet });
+      if (typeof callback === 'function') callback({
+        ok: true,
+        sessionId: joined.sessionId,
+        pinSet: joined.pinSet,
+        presenterToken: joined.presenterToken || null,
+      });
     });
 
     socket.on('leave-session', (payload, callback) => {
@@ -2196,6 +2337,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.on('preload-background', (payload) => {
       if (!payload?.background_url) return;
       const sessionId = activeSessionId || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
       emitToSession(sessionId, 'preload-background', { background_url: payload.background_url });
     });
 
