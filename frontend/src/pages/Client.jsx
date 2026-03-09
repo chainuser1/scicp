@@ -310,6 +310,9 @@ function Client() {
   // F13 — Secondary screen (URL ?session= param)
   const [isSecondaryScreen, setIsSecondaryScreen] = useState(false);
 
+  // QR overlay — shown when the room is vacant so the next presenter can scan
+  const [showQrOverlay, setShowQrOverlay] = useState(false);
+
   // F14 — Idle screensaver
   const screensaverTimerRef = useRef(null);
   const [isScreensaver, setIsScreensaver] = useState(false);
@@ -359,6 +362,7 @@ function Client() {
     const handleVerse = (data) => {
       setHighlightedText('');
       setCustomData(null);
+      setShowQrOverlay(false);
       resetScreensaver();
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
@@ -404,9 +408,10 @@ function Client() {
     // Server broadcasts this ONLY when a Presenter joins the room.
     // This is the definitive signal: close QR, enter display mode.
     const handleClearScreen = () => {
-      // Presenter ended live — return to connected-idle and show VOTD again.
-      // Do NOT go back to the QR screen — presenter is still connected.
+      // Presenter ended live — return to connected-idle, show VOTD, and reveal
+      // the QR overlay so the next presenter can scan to rejoin the same session.
       setCustomData(null);
+      setShowQrOverlay(true);
       resetScreensaver();
       setTextVisible(false);
       setTimeout(() => {
@@ -419,12 +424,14 @@ function Client() {
 
     const handlePresenterLeft = () => {
       setPresenterLeft(true);
+      setShowQrOverlay(true);
       // After 8 s, fade the notice — it already told the operator what happened
       setTimeout(() => setPresenterLeft(false), 8000);
     };
 
     const handlePresenterJoined = () => {
-      if (presenterJoinedRef.current) return; // already handled
+      setShowQrOverlay(false); // hide QR regardless — a presenter is in the room
+      if (presenterJoinedRef.current) return; // rest only runs on first join
       setPresenterJoined(true);
       presenterJoinedRef.current = true;
       setPresenterJoining(true);
@@ -467,6 +474,7 @@ function Client() {
     // F2 — custom-text: announcement / free-text mode
     const handleCustomText = (data) => {
       if (data.theme) crossfadeBackground(data.theme.background_url || bgUrl);
+      setShowQrOverlay(false);
       resetScreensaver();
       setTextVisible(false);
       setTimeout(() => {
@@ -840,8 +848,9 @@ function Client() {
       {isSecondaryScreen && clientSessionId && (
         <span className="secondary-screen-badge">Mirroring {clientSessionId}</span>
       )}
-      {/* QR overlay — shown over the VOTD so the next presenter can scan to join */}
-      {isShowingVotd && clientSessionId && !isSecondaryScreen && (
+      {/* QR overlay — visible only when the room is vacant (clear-screen or presenter left);
+           hidden while any presenter is actively connected or projecting */}
+      {showQrOverlay && clientSessionId && !isSecondaryScreen && (
         <div className="client-votd-qr-overlay" aria-label={`Scan to present · session ${clientSessionId}`}>
           {qrDataUrl && (
             <img src={qrDataUrl} alt="Scan to join as presenter" className="client-votd-qr-img" />
