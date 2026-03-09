@@ -1257,7 +1257,7 @@ button,
 
   .mobile-golive-ref {
     font-family: 'Cinzel', serif;
-    font-size: 0.68rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: var(--gold-light);
@@ -1452,7 +1452,7 @@ button,
   border-radius: var(--radius);
   color: #e74c3c;
   font-family: 'Cinzel', serif;
-  font-size: 0.55rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1554,7 +1554,7 @@ button,
 
 .font-size-label {
   font-family: 'Cinzel', serif;
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1663,7 +1663,7 @@ button,
 
 .history-group-label {
   font-family: 'Cinzel', serif;
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--gold);
@@ -1674,7 +1674,7 @@ button,
 }
 
 .history-time {
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   color: var(--text-dim);
   opacity: 0.6;
   white-space: nowrap;
@@ -1690,7 +1690,7 @@ button,
   color: var(--text-dim);
   border-radius: 4px;
   padding: 0.15rem 0.45rem;
-  font-size: 0.62rem;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
@@ -1767,7 +1767,7 @@ button,
   gap: 0.15rem;
 }
 .setlist-ref {
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -1775,7 +1775,7 @@ button,
   text-overflow: ellipsis;
 }
 .setlist-text {
-  font-size: 0.6rem;
+  font-size: 0.68rem;
   color: var(--text-dim);
   opacity: 0.6;
   overflow: hidden;
@@ -1794,7 +1794,7 @@ button,
   color: var(--gold);
   border-radius: 4px;
   padding: 0.2rem 0.5rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -2791,7 +2791,7 @@ button,
 
 .pagination-label {
   font-family: 'Cinzel', serif;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   letter-spacing: 0.12em;
   color: var(--gold);
   opacity: 0.6;
