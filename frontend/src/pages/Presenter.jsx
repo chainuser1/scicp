@@ -378,8 +378,6 @@ const Presenter = () => {
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);
-  const [savedThemes, setSavedThemes]         = useState([]);
-  const [saveThemeName, setSaveThemeName]     = useState('');
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -457,32 +455,6 @@ const Presenter = () => {
     toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
   };
 
-  // ── Save / delete named themes ───────────────────────────────────────────
-  const saveTheme = () => {
-    const name = saveThemeName.trim();
-    if (!name) return;
-    fetch(`${API_URL}/themes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, data: currentTheme }),
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(saved => {
-        if (saved?.id) {
-          setSavedThemes(prev => [...prev, saved]);
-          setSaveThemeName('');
-          showToast(`Theme "${name}" saved`);
-        }
-      })
-      .catch(() => showToast('Could not save theme'));
-  };
-
-  const deleteTheme = (id) => {
-    fetch(`${API_URL}/themes/${id}`, { method: 'DELETE' })
-      .then(r => { if (r.ok) setSavedThemes(prev => prev.filter(t => t.id !== id)); })
-      .catch(() => {});
-  };
-
   // ── End Live — clear TV screen, return Client to QR idle ─────────────────
   const endLive = () => {
     emitWithSession('clear-screen');
@@ -517,14 +489,6 @@ const Presenter = () => {
     }).catch(() => showToast('Copy failed — clipboard not available'));
   };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
-
-  // Load saved themes from server on mount
-  useEffect(() => {
-    fetch(`${API_URL}/themes`)
-      .then(r => r.ok ? r.json() : [])
-      .then(data => { if (Array.isArray(data)) setSavedThemes(data); })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
@@ -693,10 +657,6 @@ const Presenter = () => {
     if (socket.connected) {
       handleConnect();
     }
-    // fetch(`${API_URL}/themes`)
-    //   .then(r => r.json())
-    //   .then(setSavedThemes)
-    //   .catch(err => console.error('themes load failed', err));
     return () => {
       socket.off('search-results');
       socket.off('update-verse');
@@ -1661,27 +1621,6 @@ const Presenter = () => {
                       handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
                       setBgUrlInput('');
                     }}>Apply</button>
-                  </div>
-                </div>
-                {/* Saved themes */}
-                {savedThemes.length > 0 && (
-                  <div className="theme-control-group">
-                    <label>Saved Themes</label>
-                    <div className="saved-themes-list">
-                      {savedThemes.map(t => (
-                        <div key={t.id} className="saved-theme-row">
-                          <button className="theme-btn saved-theme-apply" onClick={() => handleThemeChange(t.data)} title={`Apply "${t.name}"`}>{t.name}</button>
-                          <button className="saved-theme-delete" onClick={() => deleteTheme(t.id)} title="Delete theme" aria-label="Delete theme">×</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="theme-control-group">
-                  <label>Save Current Theme</label>
-                  <div className="input-group">
-                    <input type="text" className="popover-input" placeholder="Theme name…" value={saveThemeName} onChange={e => setSaveThemeName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveTheme()} />
-                    <button className="control-button" onClick={saveTheme} disabled={!saveThemeName.trim()}>Save</button>
                   </div>
                 </div>
               </div>
