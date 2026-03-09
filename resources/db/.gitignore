@@ -1,0 +1,7 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# SQLite WAL-mode sidecars (auto-managed by SQLite, not for version control)
+*.db-shm
+*.db-wal
