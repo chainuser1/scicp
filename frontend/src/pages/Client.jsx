@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 
-// ─── Shared util ──────────────────────────────────────────────────────────────
-// TODO: extract to src/utils/session.js and import everywhere
-const normalizeSessionId = (v) =>
-  String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-
 // ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
@@ -27,7 +22,7 @@ const generateQrDataUrl = async (text) => {
       color: { dark: '#0a0a0f', light: '#f0ece0' },
       errorCorrectionLevel: 'H',
     });
-  } catch (_e) {
+  } catch {
     return null;
   }
 };
@@ -63,7 +58,7 @@ function Client() {
                  + 0.0722 * (data[i + 2] / 255);
         }
         resolve(total / pixels);
-      } catch (_e) { resolve(null); }
+      } catch { resolve(null); }
     };
     img.onerror = () => resolve(null);
     img.src = imageUrl;
@@ -135,10 +130,10 @@ function Client() {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
   };
   const storeTvSession = (id) => {
-    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch (_e) { /* storage unavailable */ }
+    try { sessionStorage.setItem(TV_SESSION_KEY, id); } catch { /* storage unavailable */ }
   };
   const clearStoredTvSession = () => {
-    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch (_e) { /* storage unavailable */ }
+    try { sessionStorage.removeItem(TV_SESSION_KEY); } catch { /* storage unavailable */ }
   };
 
   // ─── Fetch canonical public origin from /config ───────────────────────────
@@ -250,6 +245,15 @@ function Client() {
     document.title = 'Client Display | Scriptures in View';
     const m = document.querySelector('meta[name="robots"]');
     if (m) m.setAttribute('content', 'noindex,nofollow');
+  }, []);
+
+  // ─── PWA service worker registration ─────────────────────────────────────
+  // Caches the Client shell + static assets for offline display continuity.
+  // The last received verse stays on screen via React state — no SW work needed.
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => { /* SW is optional */ });
+    }
   }, []);
 
   // ─── Background crossfade ─────────────────────────────────────────────────
