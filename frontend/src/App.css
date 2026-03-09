@@ -5134,3 +5134,469 @@ button, [role="button"] {
   letter-spacing: 0.04em;
   border-top: 1px solid rgba(201, 168, 76, 0.1);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   F1–F14 ADDITIONS
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── F1 — Browse drawer panel ──────────────────────────────────────────────── */
+.drawer-browse {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.browse-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: var(--surface-2);
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--gold-light);
+  font-family: 'Cinzel', serif;
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: left;
+}
+.browse-back-btn:hover { background: var(--surface-3); }
+
+.browse-book-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.browse-book-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.72rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.browse-book-item:hover { background: var(--gold-dim); }
+.browse-book-info { flex: 1; display: flex; flex-direction: column; gap: 0.12rem; }
+.browse-book-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+.browse-book-meta {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.browse-chapter-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.4rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+@media (max-width: 540px) { .browse-chapter-grid { grid-template-columns: repeat(4, 1fr); } }
+
+.browse-chapter-btn {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: 'Cinzel', serif;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.browse-chapter-btn:hover { background: var(--gold-dim); color: var(--gold-light); }
+
+.browse-verse-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.browse-verse-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.browse-verse-item:hover { background: var(--gold-dim); }
+.browse-verse-item--staged {
+  border-left: 2px solid var(--gold);
+  background: rgba(201, 168, 76, 0.08);
+}
+.browse-verse-num {
+  font-family: 'Cinzel', serif;
+  font-size: 0.65rem;
+  color: var(--gold);
+  min-width: 1.8rem;
+  flex-shrink: 0;
+}
+.browse-verse-text {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── F2 — Announcement card (Presenter) ────────────────────────────────────── */
+.card--custom { border-color: rgba(201, 168, 76, 0.22); }
+.custom-text-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+.custom-text-area {
+  resize: vertical;
+  min-height: 60px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  caret-color: var(--gold);
+  padding: 0.45rem 0.55rem;
+  transition: border-color var(--transition);
+}
+.custom-text-area:focus { border-color: var(--gold-border); outline: none; }
+.custom-subtext-input {
+  padding: 0.35rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  caret-color: var(--gold);
+  transition: border-color var(--transition);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+.custom-subtext-input:focus { border-color: var(--gold-border); outline: none; }
+
+/* F2 — Client display: custom text backdrop */
+.custom-text-backdrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.custom-text-main {
+  font-size: inherit;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+}
+.custom-text-sub {
+  font-family: 'Cinzel', serif;
+  font-size: 0.45em;
+  opacity: 0.65;
+  letter-spacing: 0.1em;
+  margin-top: 0.4em;
+}
+
+/* ── F3 + F12 — Setlist toolbar, save/load, text items, notes ───────────────── */
+.setlist-toolbar {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--gold-border);
+  flex-wrap: wrap;
+}
+.setlist-toolbar-btn {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.setlist-toolbar-btn:hover { background: var(--gold-dim); color: var(--gold-light); }
+
+.setlist-save-row {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.4rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.setlist-load-list { border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.setlist-load-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background var(--transition);
+}
+.setlist-load-item:hover { background: var(--gold-dim); }
+.setlist-load-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  cursor: pointer;
+}
+.setlist-load-item-name {
+  font-family: 'Cinzel', serif;
+  font-size: 0.72rem;
+  color: var(--text-primary);
+}
+.setlist-load-item-count {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.64rem;
+  color: var(--text-dim);
+}
+
+.setlist-text-draft-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--gold-border);
+  background: var(--surface-2);
+}
+.setlist-draft-actions { display: flex; gap: 0.4rem; }
+.setlist-item--text { border-left: 2px solid rgba(201, 168, 76, 0.4); }
+
+.setlist-notes-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  opacity: 0.5;
+  transition: opacity var(--transition), color var(--transition);
+  align-self: flex-start;
+}
+.setlist-notes-btn:hover { opacity: 1; color: var(--gold); }
+.setlist-notes-area {
+  resize: none;
+  background: var(--surface-3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  padding: 0.3rem 0.4rem;
+  margin-top: 0.2rem;
+  caret-color: var(--gold);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── F4 — Translation preview toggle in search results ─────────────────────── */
+.result-translation-toggle {
+  padding: 0.15rem 0.35rem;
+  background: transparent;
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.result-translation-toggle:hover { background: var(--gold-dim); }
+.result-translation-snippet {
+  padding: 0.3rem 0;
+  margin-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── F5 — Segment dots (Presenter live preview) ─────────────────────────────── */
+.segment-dots-presenter {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+.seg-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background var(--transition);
+  flex-shrink: 0;
+}
+.seg-dot--active { background: var(--gold); }
+.seg-dot--past   { background: var(--gold-dim); border: 1px solid var(--gold-border); }
+
+/* ── F7 — Segment dots (Client / TV) ───────────────────────────────────────── */
+.segment-dots-client {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 0.5em;
+}
+.seg-dot-tv {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(240, 236, 224, 0.25);
+  border: 1px solid rgba(240, 236, 224, 0.4);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.seg-dot-tv--active {
+  background: var(--client-accent-strong, rgba(240, 236, 224, 0.9));
+  border-color: var(--client-accent-strong, rgba(240, 236, 224, 0.9));
+  box-shadow: 0 0 7px var(--client-accent-glow, rgba(240, 236, 224, 0.3));
+}
+.client-view.reduce-motion-auto .seg-dot-tv,
+.client-view.reduce-motion-auto .seg-dot-tv--active { transition: none; }
+@media (max-width: 640px) { .seg-dot-tv { width: 6px; height: 6px; } }
+
+/* ── F8 — Secondary language verse text (Client) ───────────────────────────── */
+.verse-secondary-text {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-style: italic;
+  font-size: 0.58em;
+  opacity: 0.58;
+  margin-top: 0.55em;
+  line-height: 1.5;
+  color: var(--client-text, #f0ece0);
+  text-align: inherit;
+}
+@media (max-width: 640px) { .verse-secondary-text { font-size: 0.48em; opacity: 0.5; } }
+
+/* F8 — Secondary language selector in header */
+.hdr-lang-secondary { opacity: 0.75; font-size: 0.7rem; }
+
+/* ── F9 — Canon volume accent (Client) ─────────────────────────────────────── */
+.client-view.volume-ot  {
+  --client-accent-line: rgba(185, 145, 60, 0.55);
+  --client-accent-glow: rgba(185, 145, 60, 0.12);
+  --client-accent-strong: rgba(185, 145, 60, 0.9);
+}
+.client-view.volume-nt  {
+  --client-accent-line: rgba(90, 155, 215, 0.50);
+  --client-accent-glow: rgba(90, 155, 215, 0.10);
+  --client-accent-strong: rgba(90, 155, 215, 0.9);
+}
+.client-view.volume-bom {
+  --client-accent-line: rgba(70, 175, 130, 0.50);
+  --client-accent-glow: rgba(70, 175, 130, 0.10);
+  --client-accent-strong: rgba(70, 175, 130, 0.9);
+}
+.client-view.volume-dc  {
+  --client-accent-line: rgba(205, 115, 60, 0.50);
+  --client-accent-glow: rgba(205, 115, 60, 0.10);
+  --client-accent-strong: rgba(205, 115, 60, 0.9);
+}
+.client-view.volume-pgp {
+  --client-accent-line: rgba(155, 95, 195, 0.50);
+  --client-accent-glow: rgba(155, 95, 195, 0.10);
+  --client-accent-strong: rgba(155, 95, 195, 0.9);
+}
+
+/* ── F10 — Volume short title in caption ────────────────────────────────────── */
+.verse-caption-volume {
+  opacity: 0.5;
+  font-size: 0.82em;
+  letter-spacing: 0.02em;
+}
+@media (max-width: 640px) { .verse-caption-volume { display: none; } }
+
+/* ── F13 — Secondary screen badge ────────────────────────────────────────────── */
+.secondary-screen-badge {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  color: var(--gold, #c9a84c);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── F14 — Idle screensaver ──────────────────────────────────────────────────── */
+.client-view.client-screensaver {
+  filter: brightness(0.28);
+  transition: filter 2.5s ease;
+  cursor: pointer;
+}
+.client-view:not(.client-screensaver) {
+  transition: filter 1s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .client-view.client-screensaver,
+  .client-view:not(.client-screensaver) { transition: none; }
+}
+
+/* ── go-live-button disabled state ───────────────────────────────────────────── */
+.go-live-button--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── VOTD QR overlay — next-presenter session hand-off ───────────────────────── */
+/* Appears over the Verse of the Day so a new presenter can scan to join the
+   same TV session without the display ever needing a full reload.               */
+.client-votd-qr-overlay {
+  position: absolute;
+  bottom: 2rem;
+  right: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(10, 10, 15, 0.78);
+  border: 1px solid rgba(201, 168, 76, 0.28);
+  border-radius: 10px;
+  padding: 0.6rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+  opacity: 0.88;
+  z-index: 10;
+}
+.client-votd-qr-img {
+  display: block;
+  width: 112px;
+  height: 112px;
+  border-radius: 6px;
+}
+.client-votd-qr-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  color: var(--gold, #c9a84c);
+  text-align: center;
+  max-width: 140px;
+  line-height: 1.4;
+}
+@media (max-width: 640px) {
+  .client-votd-qr-overlay { bottom: 0.75rem; right: 0.75rem; padding: 0.4rem; gap: 0.3rem; }
+  .client-votd-qr-img     { width: 80px; height: 80px; }
+  .client-votd-qr-label   { font-size: 0.52rem; max-width: 100px; }
+}
