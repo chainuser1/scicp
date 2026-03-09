@@ -1349,9 +1349,9 @@ button,
     min-height: 40px;
   }
 
-  /* Preview nav buttons — already 42px from coarse pointer rule, keep it */
+  /* Preview box — allow more room than the default 160px so long verses are readable */
   .preview-box {
-    max-height: 120px;
+    max-height: 200px;
   }
 
   /* Idle grid already stacks to 1 column — give it tighter gap */
