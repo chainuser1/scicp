@@ -4112,6 +4112,59 @@ button,
   .result-text { font-size: 0.92rem; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   TABLET — PERSISTENT SEARCH SIDEBAR
+   At ≥768 px wide and normal viewport height (≥500 px) the search
+   drawer becomes a permanent left column instead of a slide-in
+   overlay.  Uses CSS Grid on the container — no JSX changes needed.
+   min-height:500px excludes landscape phones (≤430 px tall) so the
+   landscape-phone rules above still win for those devices.
+   ══════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) and (min-height: 500px) {
+  /* Switch container from flex-column to a two-column grid */
+  .presenter-container {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    grid-template-columns: min(300px, 35vw) 1fr;
+    grid-template-areas:
+      "header header"
+      "drawer main";
+  }
+
+  .presenter-header { grid-area: header; }
+
+  /* Drawer: leave fixed positioning, lock it open permanently */
+  .search-drawer {
+    grid-area: drawer;
+    position: relative;       /* back into normal flow as grid child */
+    top: auto;
+    left: auto;
+    bottom: auto;
+    width: auto;              /* grid column sets the width */
+    height: 100%;
+    transform: translateX(0); /* always visible — overrides the -100% base */
+    transition: none;         /* no slide animation needed */
+    box-shadow: none;         /* no shadow on persistent column */
+    border-right: 1px solid var(--gold-border);
+    display: flex;
+  }
+
+  /* Close button is irrelevant — drawer never closes */
+  .drawer-close { display: none; }
+
+  /* Backdrop not needed — drawer is not an overlay */
+  .drawer-backdrop { display: none; }
+
+  .main-panel {
+    grid-area: main;
+    overflow-y: auto;
+    padding-bottom: 1.4rem; /* no sticky bar on tablet */
+  }
+
+  /* Tour guide card: nudge right so it doesn't sit under the drawer */
+  .tour-card { left: calc(min(300px, 35vw) + 1rem); }
+}
+
 /* Large desktop: more breathing room, full width always */
 @media (min-width: 1200px) {
   .main-panel { padding: 1.75rem 2rem; gap: 1.1rem; }
