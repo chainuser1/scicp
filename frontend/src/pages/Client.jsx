@@ -126,7 +126,8 @@ function Client() {
   // presenterJoined flips to true when the server broadcasts presenter-joined.
   const [clientSessionId, setClientSessionId]   = useState('');
   const [presenterJoined, setPresenterJoined]   = useState(false);
-  const [qrDataUrl, setQrDataUrl]               = useState('');
+  const [qrDataUrl, setQrDataUrl]               = useState('');       // /presenter?session= — for operator
+  const [clientQrDataUrl, setClientQrDataUrl]   = useState('');       // /client?session=    — for audience
   const [qrError, setQrError]                   = useState(false);
   const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
@@ -187,14 +188,21 @@ function Client() {
   }, []);
 
   // ─── QR code generation ───────────────────────────────────────────────────
+  // Two codes share the same session ID but serve different audiences:
+  //   presenterQR → /presenter?session= — shown while waiting, for the operator
+  //   clientQR    → /client?session=    — shown while live, for audience devices
   useEffect(() => {
     if (!clientSessionId) return;
     setQrDataUrl('');
+    setClientQrDataUrl('');
     setQrError(false);
     const origin = publicOrigin || window.location.origin;
     generateQrDataUrl(`${origin}/presenter?session=${clientSessionId}`).then((url) => {
       if (url) setQrDataUrl(url);
       else setQrError(true);
+    });
+    generateQrDataUrl(`${origin}/client?session=${clientSessionId}`).then((url) => {
+      if (url) setClientQrDataUrl(url);
     });
   }, [clientSessionId, publicOrigin]);
 
@@ -846,16 +854,29 @@ function Client() {
       {isSecondaryScreen && clientSessionId && (
         <span className="secondary-screen-badge">Mirroring {clientSessionId}</span>
       )}
-      {/* QR overlay — visible only when the room is vacant (clear-screen or presenter left);
-           hidden while any presenter is actively connected or projecting */}
-      {(!presenterJoined || showQrOverlay) && clientSessionId && !isSecondaryScreen && (
-        <div className="client-votd-qr-overlay" aria-label={`Scan to present · session ${clientSessionId}`}>
-          {qrDataUrl && (
-            <img src={qrDataUrl} alt="Scan to join as presenter" className="client-votd-qr-img" />
-          )}
-          <span className="client-votd-qr-label">Scan to present · {clientSessionId}</span>
-        </div>
-      )}
+      {/* QR overlay — persistent bottom-right badge, always visible.
+           Waiting mode  → /presenter URL so operator can scan to present.
+           Live mode     → /client URL so audience can mirror on their own device.
+           Hidden on secondary screens (they are the audience device). */}
+      {clientSessionId && !isSecondaryScreen && (() => {
+        const isLive = presenterJoined && !showQrOverlay;
+        const activeQr    = isLive ? clientQrDataUrl : qrDataUrl;
+        const activeLabel = isLive
+          ? `Follow on your device · ${clientSessionId}`
+          : `Scan to present · ${clientSessionId}`;
+        const activeAlt   = isLive ? 'Open on your device' : 'Scan to join as presenter';
+        return (
+          <div
+            className={`client-votd-qr-overlay${isLive ? ' client-votd-qr-overlay--live' : ''}`}
+            aria-label={activeLabel}
+          >
+            {activeQr && (
+              <img src={activeQr} alt={activeAlt} className="client-votd-qr-img" />
+            )}
+            <span className="client-votd-qr-label">{activeLabel}</span>
+          </div>
+        );
+      })()}
 
       {/* "✓ Presenter connected" flash — shown briefly when a presenter scans in */}
       {presenterJoining && (
