@@ -5121,6 +5121,8 @@ button, [role="button"] {
   border-radius: var(--radius-lg);
   overflow: hidden;
   width: min(480px, 96vw);
+  /* never taller than the viewport, especially in landscape on small phones */
+  max-height: 95dvh;
   box-shadow: 0 8px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(201,168,76,0.1);
   animation: qrs-slide-up 0.25s cubic-bezier(0.34, 1.4, 0.64, 1) forwards;
 }
@@ -5165,6 +5167,8 @@ button, [role="button"] {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
+  /* In landscape on short screens the 4:3 box can overflow; cap it */
+  max-height: 55dvh;
   background: #000;
   overflow: hidden;
 }
@@ -5193,8 +5197,9 @@ button, [role="button"] {
 
 .qr-scanner-reticle span {
   position: absolute;
-  width: 56px;
-  height: 56px;
+  /* 100 px per arm → total reticle box ≈ 200 × 200 px, very easy to aim a phone */
+  width: 100px;
+  height: 100px;
   border-color: var(--gold);
   border-style: solid;
   border-width: 0;
@@ -5202,32 +5207,32 @@ button, [role="button"] {
 
 /* Top-left */
 .qr-scanner-reticle span:nth-child(1) {
-  top: calc(50% - 56px);
-  left: calc(50% - 56px);
+  top: calc(50% - 100px);
+  left: calc(50% - 100px);
   border-top-width: 3px;
   border-left-width: 3px;
   border-radius: 4px 0 0 0;
 }
 /* Top-right */
 .qr-scanner-reticle span:nth-child(2) {
-  top: calc(50% - 56px);
-  right: calc(50% - 56px);
+  top: calc(50% - 100px);
+  right: calc(50% - 100px);
   border-top-width: 3px;
   border-right-width: 3px;
   border-radius: 0 4px 0 0;
 }
 /* Bottom-left */
 .qr-scanner-reticle span:nth-child(3) {
-  bottom: calc(50% - 56px);
-  left: calc(50% - 56px);
+  bottom: calc(50% - 100px);
+  left: calc(50% - 100px);
   border-bottom-width: 3px;
   border-left-width: 3px;
   border-radius: 0 0 0 4px;
 }
 /* Bottom-right */
 .qr-scanner-reticle span:nth-child(4) {
-  bottom: calc(50% - 56px);
-  right: calc(50% - 56px);
+  bottom: calc(50% - 100px);
+  right: calc(50% - 100px);
   border-bottom-width: 3px;
   border-right-width: 3px;
   border-radius: 0 0 4px 0;
@@ -5237,17 +5242,17 @@ button, [role="button"] {
 .qr-scanner-reticle::after {
   content: '';
   position: absolute;
-  left: calc(50% - 53px);
-  width: 106px;
+  left: calc(50% - 97px);
+  width: 194px;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--gold), transparent);
   animation: qr-sweep 2s ease-in-out infinite;
 }
 
 @keyframes qr-sweep {
-  0%   { top: calc(50% - 53px); opacity: 0.9; }
-  50%  { top: calc(50% + 51px); opacity: 0.9; }
-  100% { top: calc(50% - 53px); opacity: 0.9; }
+  0%   { top: calc(50% - 97px); opacity: 0.9; }
+  50%  { top: calc(50% + 95px); opacity: 0.9; }
+  100% { top: calc(50% - 97px); opacity: 0.9; }
 }
 
 /* Error state */
@@ -5856,8 +5861,9 @@ button, [role="button"] {
    same TV session without the display ever needing a full reload.               */
 .client-votd-qr-overlay {
   position: absolute;
-  bottom: 2rem;
-  right: 2rem;
+  /* respect device safe areas (rounded corners, notches) */
+  bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
+  right:  max(2rem, env(safe-area-inset-right,  2rem));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -5869,37 +5875,69 @@ button, [role="button"] {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
-  opacity: 0.88;
+  /* Waiting / kiosk mode: prominent so the next presenter can find and scan it */
+  opacity: 0.92;
   z-index: 10;
   animation: kiosk-qr-in 1.2s ease forwards;
   transition: opacity 1.2s ease;
 }
-/* Live mode — dims back so the QR doesn't compete with the scripture text */
-.client-votd-qr-overlay--live {
-  opacity: 0.38;
-}
 @keyframes kiosk-qr-in {
   from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 0.88; transform: none; }
+  to   { opacity: 0.92; transform: none; }
 }
+
+/* Live mode — shrinks to a quiet "vase in the corner"; label hides completely */
+.client-votd-qr-overlay--live {
+  opacity: 0.48;
+}
+.client-votd-qr-overlay--live .client-votd-qr-img {
+  /* Smaller in live mode so it doesn't compete with scripture text.
+     vmin tracks the shorter viewport dimension: ≈72 px on phone → ≈160 px on large TV. */
+  width:  clamp(72px, 9vmin, 160px);
+  height: clamp(72px, 9vmin, 160px);
+}
+.client-votd-qr-overlay--live .client-votd-qr-label {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  transition: max-height 1.2s ease, opacity 1.2s ease;
+}
+
 .client-votd-qr-img {
   display: block;
-  /* scales with the viewport minimum dimension — phone (≈80px) to 4K TV (≈210px) */
-  width: clamp(80px, 11vmin, 210px);
-  height: clamp(80px, 11vmin, 210px);
+  /* Waiting mode: scales with the viewport short dimension.
+     Phone ≈ 110 px → full-HD projector ≈ 240 px → 4 K TV ≈ 280 px.
+     vmin ensures it stays proportional regardless of orientation.      */
+  width:  clamp(110px, 15vmin, 280px);
+  height: clamp(110px, 15vmin, 280px);
   border-radius: 6px;
+  transition: width 1.2s ease, height 1.2s ease;
 }
 .client-votd-qr-label {
   font-family: 'Cinzel', serif;
-  font-size: clamp(0.5rem, 1.1vmin, 0.72rem);
+  font-size: clamp(0.55rem, 1.2vmin, 0.78rem);
   letter-spacing: 0.12em;
   color: var(--gold, #c9a84c);
   text-align: center;
-  max-width: clamp(100px, 15vmin, 280px);
+  max-width: clamp(120px, 18vmin, 300px);
   line-height: 1.4;
+  transition: max-height 1.2s ease, opacity 1.2s ease;
 }
+
+/* Portrait orientation: QR sits higher so it clears any bottom UI chrome */
+@media (orientation: portrait) {
+  .client-votd-qr-overlay {
+    bottom: max(3rem, env(safe-area-inset-bottom, 3rem));
+    right:  max(1.25rem, env(safe-area-inset-right, 1.25rem));
+  }
+}
+
 @media (max-width: 640px) {
-  /* On narrow screens pull the overlay closer to the corner; sizes are
-     handled by clamp() so no explicit overrides needed here */
-  .client-votd-qr-overlay { bottom: 0.75rem; right: 0.75rem; }
+  /* Narrow screens: pull closer to corner; clamp() handles image sizing */
+  .client-votd-qr-overlay {
+    bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
+    right:  max(0.75rem, env(safe-area-inset-right,  0.75rem));
+  }
 }
