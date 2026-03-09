@@ -5693,11 +5693,11 @@ button, [role="button"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.45rem;
+  gap: clamp(0.3rem, 0.6vmin, 0.55rem);
   background: rgba(10, 10, 15, 0.78);
   border: 1px solid rgba(201, 168, 76, 0.28);
   border-radius: 10px;
-  padding: 0.6rem;
+  padding: clamp(0.4rem, 0.9vmin, 0.75rem);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
@@ -5716,21 +5716,22 @@ button, [role="button"] {
 }
 .client-votd-qr-img {
   display: block;
-  width: 112px;
-  height: 112px;
+  /* scales with the viewport minimum dimension — phone (≈80px) to 4K TV (≈210px) */
+  width: clamp(80px, 11vmin, 210px);
+  height: clamp(80px, 11vmin, 210px);
   border-radius: 6px;
 }
 .client-votd-qr-label {
   font-family: 'Cinzel', serif;
-  font-size: 0.62rem;
+  font-size: clamp(0.5rem, 1.1vmin, 0.72rem);
   letter-spacing: 0.12em;
   color: var(--gold, #c9a84c);
   text-align: center;
-  max-width: 140px;
+  max-width: clamp(100px, 15vmin, 280px);
   line-height: 1.4;
 }
 @media (max-width: 640px) {
-  .client-votd-qr-overlay { bottom: 0.75rem; right: 0.75rem; padding: 0.4rem; gap: 0.3rem; }
-  .client-votd-qr-img     { width: 80px; height: 80px; }
-  .client-votd-qr-label   { font-size: 0.52rem; max-width: 100px; }
+  /* On narrow screens pull the overlay closer to the corner; sizes are
+     handled by clamp() so no explicit overrides needed here */
+  .client-votd-qr-overlay { bottom: 0.75rem; right: 0.75rem; }
 }
