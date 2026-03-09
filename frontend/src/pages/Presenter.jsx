@@ -1361,6 +1361,8 @@ const Presenter = () => {
                     <option value="es">Español</option>
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
+                    <option value="ja">Japanese</option>
+                    <option value="zh">Chinese (Simplified)</option>
                   </select>
                 </div>
                 <div className="popover-divider" />
@@ -1380,6 +1382,8 @@ const Presenter = () => {
                       <option value="es">Español</option>
                       <option value="el">Greek</option>
                       <option value="ilo">Ilocano</option>
+                      <option value="ja">Japanese</option>
+                      <option value="zh">Chinese (Simplified)</option>
                     </select>
                     <button
                       className="popover-swap-btn"
@@ -1541,6 +1545,8 @@ const Presenter = () => {
                     <option value="es">Español</option>
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
+                    <option value="ja">Japanese</option>
+                    <option value="zh">Chinese (Simplified)</option>
                   </select>
                 </div>
                 {/* F8 — secondary language */}
@@ -1559,6 +1565,8 @@ const Presenter = () => {
                     <option value="es">Español</option>
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
+                    <option value="ja">Japanese</option>
+                    <option value="zh">Chinese (Simplified)</option>
                   </select>
                   <button
                     className="popover-swap-btn"
