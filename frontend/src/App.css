@@ -2125,30 +2125,100 @@ button,
   margin-left: 0.25rem;
 }
 
-/* Language select */
-.hdr-lang-select {
+/* Language popover button */
+.hdr-lang-wrap {
+  position: relative;
+}
+.hdr-lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0 0.55rem;
   height: 30px;
-  padding: 0 1.4rem 0 0.55rem;
-  background-color: var(--surface-2);
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23c9a84c' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.25rem center;
-  color: var(--gold-light);
-  border: 1px solid rgba(201, 168, 76, 0.25);
+  background: var(--surface-2);
+  border: 1px solid rgba(201,168,76,0.25);
   border-radius: var(--radius);
+  color: var(--gold-light);
   font-family: 'Cinzel', serif;
   font-size: 0.6rem;
   font-weight: 600;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  transition: border-color var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
 }
-
-.hdr-lang-select:hover { border-color: var(--gold-border); }
-.hdr-lang-select:focus { outline: none; box-shadow: 0 0 0 2px var(--gold-dim); }
+.hdr-lang-btn:hover {
+  border-color: var(--gold-border);
+  background: var(--surface-3);
+  color: var(--gold);
+}
+.hdr-lang-btn--active {
+  background: var(--surface-3);
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+.hdr-lang-badge {
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: inherit;
+}
+.hdr-lang-sec-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gold);
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+.hdr-lang-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 210px;
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-lg);
+  padding: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  z-index: 200;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.1);
+  animation: popover-in 0.18s cubic-bezier(0.4,0,0.2,1) both;
+}
+.hdr-lang-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.hdr-lang-pill {
+  padding: 0 0.5rem;
+  height: 26px;
+  background: transparent;
+  border: 1px solid rgba(201,168,76,0.18);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: 'Cinzel', serif;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.hdr-lang-pill:hover {
+  border-color: rgba(201,168,76,0.45);
+  color: var(--text-primary);
+  background: rgba(201,168,76,0.06);
+}
+.hdr-lang-pill--on {
+  background: rgba(201,168,76,0.15);
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
 
 /* Icon buttons */
 .hdr-btn {
@@ -3829,15 +3899,15 @@ button,
   color: #8b3a1a;
 }
 
-.presenter-container--light .hdr-lang-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background-color: #ede7dc;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%238b3a1a' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.25rem center;
-  border-color: rgba(139, 58, 26, 0.25);
+.presenter-container--light .hdr-lang-btn {
+  background: #ede7dc;
+  border-color: rgba(139,58,26,0.25);
   color: #8b3a1a;
+}
+.presenter-container--light .hdr-lang-btn:hover,
+.presenter-container--light .hdr-lang-btn--active {
+  background: #e4d9ca;
+  border-color: rgba(139,58,26,0.45);
 }
 
 .presenter-container--light .main-panel { background: #f0ebe2; }
@@ -4040,10 +4110,26 @@ button,
 
 .presenter-container--light .hdr-session-popover,
 .presenter-container--light .hdr-theme-popover,
+.presenter-container--light .hdr-lang-popover,
 .presenter-container--light .hdr-mobile-menu {
   background: #faf7f2;
   border-color: rgba(139, 58, 26, 0.22);
   box-shadow: 0 16px 48px rgba(139, 58, 26, 0.14), 0 0 0 1px rgba(139, 58, 26, 0.07);
+}
+
+.presenter-container--light .hdr-lang-pill {
+  border-color: rgba(139,58,26,0.18);
+  color: #7a5c50;
+}
+.presenter-container--light .hdr-lang-pill:hover {
+  border-color: rgba(139,58,26,0.4);
+  color: #5c2e1a;
+  background: rgba(139,58,26,0.06);
+}
+.presenter-container--light .hdr-lang-pill--on {
+  background: rgba(139,58,26,0.1);
+  border-color: rgba(139,58,26,0.4);
+  color: #8b3a1a;
 }
 
 .presenter-container--light .popover-label { color: #9a7b68; }
@@ -4109,7 +4195,7 @@ button,
   .drawer-backdrop { top: calc(56px + env(safe-area-inset-top, 0px)); }
   .preview-nav-btn { width: 34px; height: 34px; }
   .hdr-btn { width: 34px; height: 34px; }
-  .hdr-lang-select { height: 34px; }
+  .hdr-lang-btn { height: 34px; }
   .main-panel { padding: 1.4rem; gap: 1rem; }
   .card { padding: 1.3rem 1.5rem; }
   .staged-text { font-size: 1.2rem; }
@@ -5744,37 +5830,6 @@ button, [role="button"] {
 @media (max-width: 640px) { .verse-secondary-text { font-size: 0.48em; opacity: 0.5; } }
 
 /* F8 — Secondary language segment toggle in header */
-.hdr-sec-lang {
-  display: flex;
-  gap: 0.15rem;
-  align-items: center;
-  flex-shrink: 0;
-}
-.hdr-sec-btn {
-  padding: 0.15rem 0.4rem;
-  height: 30px;
-  background: transparent;
-  border: 1px solid rgba(201,168,76,0.15);
-  border-radius: 4px;
-  color: var(--text-dim);
-  font-family: 'Cinzel', serif;
-  font-size: 0.65rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.hdr-sec-btn:hover {
-  border-color: rgba(201,168,76,0.4);
-  color: var(--text-primary);
-}
-.hdr-sec-btn--on {
-  background: rgba(201,168,76,0.14);
-  border-color: var(--gold-border);
-  color: var(--gold);
-}
-
 /* ── F9 — Canon volume accent (Client) ─────────────────────────────────────── */
 /* Only line/glow vars are set here — NOT --client-accent-strong.
    Tinting the text color causes illegible low-contrast in light mode
