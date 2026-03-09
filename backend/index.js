@@ -96,6 +96,118 @@ fastify.delete('/themes/:id', async (request, reply) => {
   }
 });
 
+// ── setlist management endpoints (F3) ─────────────────────────────────────────
+fastify.get('/setlists', async (request, reply) => {
+  const rows = db.prepare('SELECT id, name, items, created_at FROM setlists ORDER BY created_at DESC').all();
+  return rows.map(r => ({ id: r.id, name: r.name, items: JSON.parse(r.items), created_at: r.created_at }));
+});
+
+fastify.post('/setlists', async (request, reply) => {
+  const { name, items } = request.body;
+  if (!name) { reply.code(400); return { error: 'name is required' }; }
+  try {
+    const stmt = db.prepare('INSERT INTO setlists (name, items) VALUES (?, ?)');
+    const info = stmt.run(name, JSON.stringify(items || []));
+    return { id: info.lastInsertRowid, name, items: items || [] };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.code(500);
+    return { error: 'could not create setlist' };
+  }
+});
+
+fastify.put('/setlists/:id', async (request, reply) => {
+  const { id } = request.params;
+  const { name, items } = request.body;
+  if (!name) { reply.code(400); return { error: 'name is required' }; }
+  try {
+    db.prepare('UPDATE setlists SET name = ?, items = ? WHERE id = ?')
+      .run(name, JSON.stringify(items || []), id);
+    return { id: Number(id), name, items: items || [] };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.code(500);
+    return { error: 'could not update setlist' };
+  }
+});
+
+fastify.delete('/setlists/:id', async (request, reply) => {
+  const { id } = request.params;
+  try {
+    db.prepare('DELETE FROM setlists WHERE id = ?').run(id);
+    return { success: true };
+  } catch (err) {
+    fastify.log.error(err);
+    reply.code(500);
+    return { error: 'could not delete setlist' };
+  }
+});
+
+// ── scripture browser endpoints (F1) ──────────────────────────────────────────
+fastify.get('/browse/books', async (request, reply) => {
+  const { language } = request.query;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  try {
+    const rows = targetDb.prepare(`
+      SELECT b.id AS book_id, b.book_title, b.book_short_title,
+             v.id AS volume_id, v.volume_title, v.volume_short_title,
+             COUNT(DISTINCT c.id) AS chapter_count
+      FROM books b
+      JOIN volumes v ON v.id = b.volume_id
+      JOIN chapters c ON c.book_id = b.id
+      GROUP BY b.id
+      ORDER BY b.id
+    `).all();
+    return rows;
+  } catch (err) {
+    fastify.log.error('browse/books failed', err);
+    reply.code(500);
+    return { error: 'fetch failed' };
+  }
+});
+
+fastify.get('/browse/chapters', async (request, reply) => {
+  const { book_id, language } = request.query;
+  if (!book_id) { reply.code(400); return { error: 'book_id is required' }; }
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  try {
+    const rows = targetDb.prepare(`
+      SELECT c.id AS chapter_id, c.chapter_number,
+             COUNT(vs.id) AS verse_count
+      FROM chapters c
+      JOIN verses vs ON vs.chapter_id = c.id
+      WHERE c.book_id = ?
+      GROUP BY c.id
+      ORDER BY c.chapter_number
+    `).all(Number(book_id));
+    return rows;
+  } catch (err) {
+    fastify.log.error('browse/chapters failed', err);
+    reply.code(500);
+    return { error: 'fetch failed' };
+  }
+});
+
+fastify.get('/browse/verses', async (request, reply) => {
+  const { chapter_id, language } = request.query;
+  if (!chapter_id) { reply.code(400); return { error: 'chapter_id is required' }; }
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : db;
+  try {
+    const rows = targetDb.prepare(`
+      SELECT verse_id, book_title, chapter_number, verse_number,
+             scripture_text, verse_title, volume_title, volume_short_title
+      FROM scriptures
+      WHERE chapter_id = ?
+      ORDER BY verse_number
+    `).all(Number(chapter_id));
+    return rows;
+  } catch (err) {
+    fastify.log.error('browse/verses failed', err);
+    reply.code(500);
+    return { error: 'fetch failed' };
+  }
+});
+
 // ─── Service timing constants ─────────────────────────────────────────────────
 // These are tuned for a church / worship-service environment where:
 //   • WiFi in chapel buildings is often congested and unreliable
@@ -142,6 +254,20 @@ try {
   `);
 } catch (err) {
   fastify.log.error('failed to ensure themes table', err);
+}
+
+// ensure setlists table exists
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS setlists (
+      id         INTEGER PRIMARY KEY,
+      name       TEXT    NOT NULL UNIQUE,
+      items      TEXT    NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+    );
+  `);
+} catch (err) {
+  fastify.log.error('failed to ensure setlists table', err);
 }
 
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
@@ -1348,6 +1474,28 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     return result;
 });
 
+// ── verse translation endpoint (F4) ───────────────────────────────────────────
+fastify.get('/verse/:verse_id/translation', async (request, reply) => {
+  const { verse_id } = request.params;
+  const { language } = request.query;
+  if (!language || !['tl', 'ceb'].includes(language.toLowerCase())) {
+    reply.code(400);
+    return { error: 'language must be tl or ceb' };
+  }
+  const targetDb = language === 'ceb' ? db_cebuano : db_tagalog;
+  try {
+    const row = targetDb.prepare(
+      'SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1'
+    ).get(Number(verse_id));
+    if (!row) { reply.code(404); return { error: 'verse not found in translation' }; }
+    return { verse_id: Number(verse_id), language: language.toLowerCase(), scripture_text: row.scripture_text };
+  } catch (err) {
+    fastify.log.error('translation fetch failed', err);
+    reply.code(500);
+    return { error: 'fetch failed' };
+  }
+});
+
 // Verse of the Day — deterministic by UTC calendar date so all clients agree.
 // Uses the total verse count as a modulus so every date maps to a real verse.
 // ─── Curated VOTD pool ────────────────────────────────────────────────────────
@@ -1694,6 +1842,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       socket.emit('session-joined', { sessionId: activeSessionId });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
+      if (state.customMode) socket.emit('custom-text', { ...state.customMode, theme: state.theme });
       if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
       socket.emit('viewer-count', {
         sessionId: activeSessionId,
@@ -1893,10 +2042,34 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const state = getSessionState(sessionId);
       state.liveVerse      = null;
       state.highlightedText = '';
+      state.customMode     = null;
       state.updatedAt      = Date.now();
       emitToSession(sessionId, 'clear-screen', {});
       fastify.log.info(`clear-screen broadcast to session ${sessionId}`);
       if (typeof callback === 'function') callback({ ok: true });
+    });
+
+    // ── go-custom (F2/F12) — send arbitrary announcement text to the TV ───────
+    socket.on('go-custom', (payload) => {
+      const { text, subtext, theme } = payload || {};
+      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
+      if (!text) return;
+      const state = getSessionState(sessionId);
+      state.customMode = { text: String(text), subtext: String(subtext || '') };
+      state.theme      = theme || state.theme;
+      state.liveVerse  = null;
+      state.updatedAt  = Date.now();
+      emitToSession(sessionId, 'custom-text', { text: String(text), subtext: String(subtext || ''), theme });
+      if (theme) emitToSession(sessionId, 'update-theme', theme);
+      fastify.log.info(`go-custom broadcast to session ${sessionId}`);
+    });
+
+    // ── preload-background (F11) — pre-warm browser cache before go-live ──────
+    socket.on('preload-background', (payload) => {
+      if (!payload?.background_url) return;
+      const sessionId = activeSessionId || DEFAULT_SESSION_ID;
+      emitToSession(sessionId, 'preload-background', { background_url: payload.background_url });
     });
 
     // ── update-language ──────────────────────────────────────────────────────
@@ -1918,16 +2091,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : db;
         try {
           const row = targetDb.prepare(
-            `SELECT scripture_text, verse_title, book_title FROM scriptures WHERE verse_id = ?`
+            `SELECT scripture_text, verse_title, book_title, volume_title, volume_short_title FROM scriptures WHERE verse_id = ? LIMIT 1`
           ).get(verseId);
           if (row) {
             const updated = {
               ...state.liveVerse,
-              scripture_text: row.scripture_text || state.liveVerse.scripture_text,
-              book_title:     row.book_title     || state.liveVerse.book_title,
-              verse_title:    row.verse_title    || state.liveVerse.verse_title,
-              segments:       segmentVerseText(row.scripture_text || state.liveVerse.scripture_text),
-              currentSegment: 0,
+              scripture_text:    row.scripture_text || state.liveVerse.scripture_text,
+              book_title:        row.book_title     || state.liveVerse.book_title,
+              verse_title:       row.verse_title    || state.liveVerse.verse_title,
+              volume_title:      row.volume_title   || state.liveVerse.volume_title   || '',
+              volume_short_title: row.volume_short_title || state.liveVerse.volume_short_title || '',
+              segments:          segmentVerseText(row.scripture_text || state.liveVerse.scripture_text),
+              currentSegment:    0,
             };
             updated.totalSegments = updated.segments.length;
             state.liveVerse = updated;
@@ -1941,18 +2116,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       fastify.log.info(`update-language: session ${sessionId} → ${lang}`);
     });
 
-    socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId}) => {
+    socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId, secondaryLanguage}) => {
       const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
       console.log('go-live triggered', verse, theme, language, sessionId);
-      
+
       let scriptureText = verse.scripture_text;
-      let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; 
+      let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
       let bookTitle = verse.book_title;
-      
+
       // Normalize language input
       const normalizedLanguage = language ? language.toLowerCase().trim() : null;
-      
+
       // Determine target database with streamlined mapping
       let targetDb = db;
       const isTranslation = normalizedLanguage && ['ceb', 'tl'].includes(normalizedLanguage);
@@ -1962,12 +2137,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       if (targetDb) {
         const verseId = Number(verse.verse_id);
-        const query = `SELECT scripture_text, verse_title, book_title FROM scriptures WHERE verse_id = ?`;
-        
+        const query = `SELECT scripture_text, verse_title, book_title, volume_title, volume_short_title FROM scriptures WHERE verse_id = ? LIMIT 1`;
+
         try {
           const stmt = targetDb.prepare(query);
           const result = stmt.get(verseId);
-          
+
           if (result) {
             // Apply field validation only for translations per specification
             if (isTranslation) {
@@ -1979,17 +2154,21 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
               verseTitle = result.verse_title;
               bookTitle = result.book_title;
             }
+            verse = { ...verse,
+              volume_title:       result.volume_title       || verse.volume_title       || '',
+              volume_short_title: result.volume_short_title || verse.volume_short_title || '',
+            };
           }
         } catch (err) {
           fastify.log.error(
-            isTranslation 
-              ? `Failed to fetch ${normalizedLanguage} translation` 
+            isTranslation
+              ? `Failed to fetch ${normalizedLanguage} translation`
               : 'Failed to fetch English text',
             err
           );
         }
       }
-      
+
       // Segment the verse for readability
       const segments = segmentVerseText(scriptureText);
       const verseWithSegments = {
@@ -2001,7 +2180,25 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         totalSegments: segments.length,
         currentSegment: 0
       };
-      
+
+      // F8 — dual language display: fetch secondary language text
+      const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
+      if (normSecLang && ['tl', 'ceb', 'en'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
+        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : db;
+        try {
+          const secRow = secDb.prepare(
+            'SELECT scripture_text, book_title FROM scriptures WHERE verse_id = ? LIMIT 1'
+          ).get(Number(verse.verse_id));
+          if (secRow) {
+            verseWithSegments.secondary_text       = secRow.scripture_text;
+            verseWithSegments.secondary_book_title = secRow.book_title;
+            verseWithSegments.secondaryLanguage    = normSecLang;
+          }
+        } catch (err) {
+          fastify.log.warn('dual-lang fetch failed:', err?.message);
+        }
+      }
+
       const state = getSessionState(sessionId);
       state.liveVerse = verseWithSegments;
       state.theme = theme;
