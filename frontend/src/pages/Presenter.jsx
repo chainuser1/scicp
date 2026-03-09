@@ -1199,7 +1199,7 @@ const Presenter = () => {
                 {sessionId && (
                   <div className="idle-viewer-count" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
                     <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
-                    {viewerCount === 0 ? 'TV not connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                    {viewerCount === 0 ? 'No screens connected' : viewerCount === 1 ? '1 screen connected' : `${viewerCount} screens connected`}
                   </div>
                 )}
                 {/* Scan QR — primary action */}
@@ -1366,7 +1366,7 @@ const Presenter = () => {
                 {sessionId && (
                   <div className="idle-viewer-count" style={{ marginBottom: '0.5rem' }}>
                     <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
-                    {viewerCount === 0 ? 'TV not connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                    {viewerCount === 0 ? 'No screens connected' : viewerCount === 1 ? '1 screen connected' : `${viewerCount} screens connected`}
                   </div>
                 )}
                 <div className="popover-row">
@@ -1843,7 +1843,7 @@ const Presenter = () => {
                     <div className="idle-session-id">{sessionId}</div>
                     <div className="idle-viewer-count">
                       <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
-                      {viewerCount === 0 ? 'TV display not connected' : viewerCount === 1 ? '1 TV display connected' : `${viewerCount} TV displays connected`}
+                      {viewerCount === 0 ? 'No screens connected' : viewerCount === 1 ? '1 screen connected' : `${viewerCount} screens connected`}
                     </div>
                     <p className="idle-session-hint">Connected to the TV session</p>
                   </>
@@ -1966,7 +1966,7 @@ const Presenter = () => {
             <div className="preview-session-status">
               <span className={`preview-conn-dot preview-conn-dot--${connectionState}`} />
               <span className="preview-session-text">
-                {viewerCount === 0 ? 'No TV connected' : viewerCount === 1 ? '1 TV connected' : `${viewerCount} TVs connected`}
+                {viewerCount === 0 ? 'No screens connected' : viewerCount === 1 ? '1 screen connected' : `${viewerCount} screens connected`}
                 {sessionId && <span className="preview-session-id"> · {sessionId}</span>}
               </span>
             </div>
