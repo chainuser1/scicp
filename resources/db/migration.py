@@ -256,17 +256,210 @@ TAGALOG_BOOK_NAMES: Dict[int, Dict[str, str]] = {
     66: {"title": "Apocalipsis",   "long_title": "Ang Apocalipsis ni Juan",            "short_title": "Apo"},
 }
 
+# Spanish book names — Reina-Valera tradition (RV1960 / RVR, Public Domain).
+# Keys are book numbers 1–66.
+SPANISH_BOOK_NAMES: Dict[int, Dict[str, str]] = {
+    # OT: Pentateuch
+    1:  {"title": "Génesis",          "long_title": "El Libro de Génesis",                   "short_title": "Gén"},
+    2:  {"title": "Éxodo",            "long_title": "El Libro de Éxodo",                     "short_title": "Éx"},
+    3:  {"title": "Levítico",         "long_title": "El Libro de Levítico",                  "short_title": "Lev"},
+    4:  {"title": "Números",          "long_title": "El Libro de Números",                   "short_title": "Núm"},
+    5:  {"title": "Deuteronomio",     "long_title": "El Libro de Deuteronomio",              "short_title": "Deut"},
+    # OT: Historical
+    6:  {"title": "Josué",            "long_title": "El Libro de Josué",                     "short_title": "Jos"},
+    7:  {"title": "Jueces",           "long_title": "El Libro de Jueces",                    "short_title": "Jue"},
+    8:  {"title": "Rut",              "long_title": "El Libro de Rut",                       "short_title": "Rut"},
+    9:  {"title": "1 Samuel",         "long_title": "El Primer Libro de Samuel",             "short_title": "1 Sam"},
+    10: {"title": "2 Samuel",         "long_title": "El Segundo Libro de Samuel",            "short_title": "2 Sam"},
+    11: {"title": "1 Reyes",          "long_title": "El Primer Libro de los Reyes",          "short_title": "1 Rey"},
+    12: {"title": "2 Reyes",          "long_title": "El Segundo Libro de los Reyes",         "short_title": "2 Rey"},
+    13: {"title": "1 Crónicas",       "long_title": "El Primer Libro de las Crónicas",       "short_title": "1 Crón"},
+    14: {"title": "2 Crónicas",       "long_title": "El Segundo Libro de las Crónicas",      "short_title": "2 Crón"},
+    15: {"title": "Esdras",           "long_title": "El Libro de Esdras",                    "short_title": "Esd"},
+    16: {"title": "Nehemías",         "long_title": "El Libro de Nehemías",                  "short_title": "Neh"},
+    17: {"title": "Ester",            "long_title": "El Libro de Ester",                     "short_title": "Est"},
+    # OT: Wisdom/Poetry
+    18: {"title": "Job",              "long_title": "El Libro de Job",                       "short_title": "Job"},
+    19: {"title": "Salmos",           "long_title": "El Libro de los Salmos",                "short_title": "Sal"},
+    20: {"title": "Proverbios",       "long_title": "El Libro de Proverbios",                "short_title": "Prov"},
+    21: {"title": "Eclesiastés",      "long_title": "El Libro de Eclesiastés",               "short_title": "Ecl"},
+    22: {"title": "Cantares",         "long_title": "El Cantar de los Cantares",             "short_title": "Cant"},
+    # OT: Prophetic
+    23: {"title": "Isaías",           "long_title": "El Libro de Isaías",                    "short_title": "Is"},
+    24: {"title": "Jeremías",         "long_title": "El Libro de Jeremías",                  "short_title": "Jer"},
+    25: {"title": "Lamentaciones",    "long_title": "Las Lamentaciones de Jeremías",         "short_title": "Lam"},
+    26: {"title": "Ezequiel",         "long_title": "El Libro de Ezequiel",                  "short_title": "Ez"},
+    27: {"title": "Daniel",           "long_title": "El Libro de Daniel",                    "short_title": "Dan"},
+    28: {"title": "Oseas",            "long_title": "El Libro de Oseas",                     "short_title": "Os"},
+    29: {"title": "Joel",             "long_title": "El Libro de Joel",                      "short_title": "Joel"},
+    30: {"title": "Amós",             "long_title": "El Libro de Amós",                      "short_title": "Am"},
+    31: {"title": "Abdías",           "long_title": "El Libro de Abdías",                    "short_title": "Abd"},
+    32: {"title": "Jonás",            "long_title": "El Libro de Jonás",                     "short_title": "Jon"},
+    33: {"title": "Miqueas",          "long_title": "El Libro de Miqueas",                   "short_title": "Miq"},
+    34: {"title": "Nahúm",            "long_title": "El Libro de Nahúm",                     "short_title": "Nah"},
+    35: {"title": "Habacuc",          "long_title": "El Libro de Habacuc",                   "short_title": "Hab"},
+    36: {"title": "Sofonías",         "long_title": "El Libro de Sofonías",                  "short_title": "Sof"},
+    37: {"title": "Hageo",            "long_title": "El Libro de Hageo",                     "short_title": "Hag"},
+    38: {"title": "Zacarías",         "long_title": "El Libro de Zacarías",                  "short_title": "Zac"},
+    39: {"title": "Malaquías",        "long_title": "El Libro de Malaquías",                 "short_title": "Mal"},
+    # NT: Gospels
+    40: {"title": "Mateo",            "long_title": "El Evangelio según Mateo",              "short_title": "Mat"},
+    41: {"title": "Marcos",           "long_title": "El Evangelio según Marcos",             "short_title": "Mar"},
+    42: {"title": "Lucas",            "long_title": "El Evangelio según Lucas",              "short_title": "Luc"},
+    43: {"title": "Juan",             "long_title": "El Evangelio según Juan",               "short_title": "Juan"},
+    # NT: Acts and Paul
+    44: {"title": "Hechos",           "long_title": "Los Hechos de los Apóstoles",           "short_title": "Hech"},
+    45: {"title": "Romanos",          "long_title": "La Epístola a los Romanos",             "short_title": "Rom"},
+    46: {"title": "1 Corintios",      "long_title": "Primera Epístola a los Corintios",      "short_title": "1 Cor"},
+    47: {"title": "2 Corintios",      "long_title": "Segunda Epístola a los Corintios",      "short_title": "2 Cor"},
+    48: {"title": "Gálatas",          "long_title": "La Epístola a los Gálatas",             "short_title": "Gál"},
+    49: {"title": "Efesios",          "long_title": "La Epístola a los Efesios",             "short_title": "Ef"},
+    50: {"title": "Filipenses",       "long_title": "La Epístola a los Filipenses",          "short_title": "Fil"},
+    51: {"title": "Colosenses",       "long_title": "La Epístola a los Colosenses",          "short_title": "Col"},
+    52: {"title": "1 Tesalonicenses", "long_title": "Primera Epístola a los Tesalonicenses", "short_title": "1 Tes"},
+    53: {"title": "2 Tesalonicenses", "long_title": "Segunda Epístola a los Tesalonicenses", "short_title": "2 Tes"},
+    54: {"title": "1 Timoteo",        "long_title": "Primera Epístola a Timoteo",            "short_title": "1 Tim"},
+    55: {"title": "2 Timoteo",        "long_title": "Segunda Epístola a Timoteo",            "short_title": "2 Tim"},
+    56: {"title": "Tito",             "long_title": "La Epístola a Tito",                    "short_title": "Tit"},
+    57: {"title": "Filemón",          "long_title": "La Epístola a Filemón",                 "short_title": "Flm"},
+    # NT: Hebrews and other epistles
+    58: {"title": "Hebreos",          "long_title": "La Epístola a los Hebreos",             "short_title": "Heb"},
+    59: {"title": "Santiago",         "long_title": "La Epístola de Santiago",               "short_title": "Sant"},
+    60: {"title": "1 Pedro",          "long_title": "Primera Epístola de Pedro",             "short_title": "1 Ped"},
+    61: {"title": "2 Pedro",          "long_title": "Segunda Epístola de Pedro",             "short_title": "2 Ped"},
+    62: {"title": "1 Juan",           "long_title": "Primera Epístola de Juan",              "short_title": "1 Juan"},
+    63: {"title": "2 Juan",           "long_title": "Segunda Epístola de Juan",              "short_title": "2 Juan"},
+    64: {"title": "3 Juan",           "long_title": "Tercera Epístola de Juan",              "short_title": "3 Juan"},
+    65: {"title": "Judas",            "long_title": "La Epístola de Judas",                  "short_title": "Jud"},
+    # NT: Revelation
+    66: {"title": "Apocalipsis",      "long_title": "El Apocalipsis de Juan",                "short_title": "Apoc"},
+}
+
+# Greek book names — monotonic Greek matching the Public Domain Greek Bible
+# (Bible SuperSearch format, greek.db).
+# Keys are book numbers 1–66.
+GREEK_BOOK_NAMES: Dict[int, Dict[str, str]] = {
+    # OT: Pentateuch
+    1:  {"title": "Γένεσις",          "long_title": "Το Βιβλίο της Γένεσης",               "short_title": "Γεν"},
+    2:  {"title": "Έξοδος",           "long_title": "Το Βιβλίο της Εξόδου",                "short_title": "Εξ"},
+    3:  {"title": "Λευιτικό",         "long_title": "Το Βιβλίο του Λευιτικού",             "short_title": "Λεβ"},
+    4:  {"title": "Αριθμοί",          "long_title": "Το Βιβλίο των Αριθμών",               "short_title": "Αρ"},
+    5:  {"title": "Δευτερονόμιο",     "long_title": "Το Βιβλίο του Δευτερονομίου",         "short_title": "Δευτ"},
+    # OT: Historical
+    6:  {"title": "Ιησούς Ναυή",      "long_title": "Το Βιβλίο του Ιησού Ναυή",            "short_title": "Ιησ"},
+    7:  {"title": "Κριτές",           "long_title": "Το Βιβλίο των Κριτών",                "short_title": "Κρ"},
+    8:  {"title": "Ρούθ",             "long_title": "Το Βιβλίο της Ρούθ",                  "short_title": "Ρουθ"},
+    9:  {"title": "Α' Βασιλειών",     "long_title": "Πρώτο Βιβλίο Βασιλειών",             "short_title": "Α' Βα"},
+    10: {"title": "Β' Βασιλειών",     "long_title": "Δεύτερο Βιβλίο Βασιλειών",           "short_title": "Β' Βα"},
+    11: {"title": "Γ' Βασιλειών",     "long_title": "Τρίτο Βιβλίο Βασιλειών",             "short_title": "Γ' Βα"},
+    12: {"title": "Δ' Βασιλειών",     "long_title": "Τέταρτο Βιβλίο Βασιλειών",           "short_title": "Δ' Βα"},
+    13: {"title": "Α' Χρονικών",      "long_title": "Πρώτο Βιβλίο Χρονικών",              "short_title": "Α'Χρ"},
+    14: {"title": "Β' Χρονικών",      "long_title": "Δεύτερο Βιβλίο Χρονικών",            "short_title": "Β'Χρ"},
+    15: {"title": "Εσδράς",           "long_title": "Το Βιβλίο του Εσδρά",                 "short_title": "Εσδρ"},
+    16: {"title": "Νεεμίας",          "long_title": "Το Βιβλίο του Νεεμία",                "short_title": "Νεεμ"},
+    17: {"title": "Εσθήρ",            "long_title": "Το Βιβλίο της Εσθήρ",                 "short_title": "Εσθ"},
+    # OT: Wisdom/Poetry
+    18: {"title": "Ιώβ",              "long_title": "Το Βιβλίο του Ιώβ",                   "short_title": "Ιωβ"},
+    19: {"title": "Ψαλμοί",           "long_title": "Το Βιβλίο των Ψαλμών",                "short_title": "Ψαλ"},
+    20: {"title": "Παροιμίες",        "long_title": "Το Βιβλίο των Παροιμιών",             "short_title": "Παρ"},
+    21: {"title": "Εκκλησιαστής",     "long_title": "Το Βιβλίο του Εκκλησιαστή",           "short_title": "Εκκλ"},
+    22: {"title": "Άσμα Ασμάτων",     "long_title": "Το Άσμα Ασμάτων του Σολομώντα",       "short_title": "Ασμ"},
+    # OT: Prophetic
+    23: {"title": "Ησαΐας",           "long_title": "Το Βιβλίο του Ησαΐα",                 "short_title": "Ησ"},
+    24: {"title": "Ιερεμίας",         "long_title": "Το Βιβλίο του Ιερεμία",               "short_title": "Ιρμ"},
+    25: {"title": "Θρήνοι",           "long_title": "Θρήνοι του Ιερεμία",                  "short_title": "Θρην"},
+    26: {"title": "Ιεζεκιήλ",         "long_title": "Το Βιβλίο του Ιεζεκιήλ",              "short_title": "Ιζκ"},
+    27: {"title": "Δανιήλ",           "long_title": "Το Βιβλίο του Δανιήλ",                "short_title": "Δαν"},
+    28: {"title": "Ωσηέ",             "long_title": "Το Βιβλίο του Ωσηέ",                  "short_title": "Ωση"},
+    29: {"title": "Ιωήλ",             "long_title": "Το Βιβλίο του Ιωήλ",                  "short_title": "Ιλ"},
+    30: {"title": "Αμώς",             "long_title": "Το Βιβλίο του Αμώς",                  "short_title": "Αμ"},
+    31: {"title": "Αβδιού",           "long_title": "Το Βιβλίο του Αβδιού",                "short_title": "Αβδ"},
+    32: {"title": "Ιωνάς",            "long_title": "Το Βιβλίο του Ιωνά",                  "short_title": "Ιων"},
+    33: {"title": "Μιχαίας",          "long_title": "Το Βιβλίο του Μιχαία",                "short_title": "Μιχ"},
+    34: {"title": "Ναούμ",            "long_title": "Το Βιβλίο του Ναούμ",                 "short_title": "Ναμ"},
+    35: {"title": "Αββακούμ",         "long_title": "Το Βιβλίο του Αββακούμ",              "short_title": "Αββ"},
+    36: {"title": "Σοφονίας",         "long_title": "Το Βιβλίο του Σοφονία",               "short_title": "Σοφ"},
+    37: {"title": "Αγγαίος",          "long_title": "Το Βιβλίο του Αγγαίου",               "short_title": "Αγγ"},
+    38: {"title": "Ζαχαρίας",         "long_title": "Το Βιβλίο του Ζαχαρία",               "short_title": "Ζαχ"},
+    39: {"title": "Μαλαχίας",         "long_title": "Το Βιβλίο του Μαλαχία",               "short_title": "Μαλ"},
+    # NT: Gospels
+    40: {"title": "Ματθαίος",         "long_title": "Κατά Ματθαίον Ευαγγέλιο",             "short_title": "Ματθ"},
+    41: {"title": "Μάρκος",           "long_title": "Κατά Μάρκον Ευαγγέλιο",               "short_title": "Μαρκ"},
+    42: {"title": "Λουκάς",           "long_title": "Κατά Λουκάν Ευαγγέλιο",               "short_title": "Λουκ"},
+    43: {"title": "Ιωάννης",          "long_title": "Κατά Ιωάννην Ευαγγέλιο",              "short_title": "Ιωαν"},
+    # NT: Acts and Paul
+    44: {"title": "Πράξεις",          "long_title": "Πράξεις των Αποστόλων",               "short_title": "Πρξ"},
+    45: {"title": "Ρωμαίους",         "long_title": "Επιστολή προς Ρωμαίους",              "short_title": "Ρωμ"},
+    46: {"title": "Α' Κορινθίους",    "long_title": "Α' Επιστολή προς Κορινθίους",         "short_title": "Α'Κορ"},
+    47: {"title": "Β' Κορινθίους",    "long_title": "Β' Επιστολή προς Κορινθίους",         "short_title": "Β'Κορ"},
+    48: {"title": "Γαλάτας",          "long_title": "Επιστολή προς Γαλάτας",               "short_title": "Γαλ"},
+    49: {"title": "Εφεσίους",         "long_title": "Επιστολή προς Εφεσίους",              "short_title": "Εφ"},
+    50: {"title": "Φιλιππησίους",     "long_title": "Επιστολή προς Φιλιππησίους",          "short_title": "Φιλ"},
+    51: {"title": "Κολοσσαείς",       "long_title": "Επιστολή προς Κολοσσαείς",            "short_title": "Κολ"},
+    52: {"title": "Α' Θεσσαλονικείς", "long_title": "Α' Επιστολή προς Θεσσαλονικείς",     "short_title": "Α'Θεσ"},
+    53: {"title": "Β' Θεσσαλονικείς", "long_title": "Β' Επιστολή προς Θεσσαλονικείς",     "short_title": "Β'Θεσ"},
+    54: {"title": "Α' Τιμόθεο",       "long_title": "Α' Επιστολή προς Τιμόθεο",            "short_title": "Α'Τιμ"},
+    55: {"title": "Β' Τιμόθεο",       "long_title": "Β' Επιστολή προς Τιμόθεο",            "short_title": "Β'Τιμ"},
+    56: {"title": "Τίτο",             "long_title": "Επιστολή προς Τίτο",                  "short_title": "Τιτ"},
+    57: {"title": "Φιλήμονα",         "long_title": "Επιστολή προς Φιλήμονα",              "short_title": "Φλμ"},
+    # NT: Hebrews and other epistles
+    58: {"title": "Εβραίους",         "long_title": "Επιστολή προς Εβραίους",              "short_title": "Εβρ"},
+    59: {"title": "Ιάκωβος",          "long_title": "Επιστολή Ιακώβου",                    "short_title": "Ιακ"},
+    60: {"title": "Α' Πέτρου",        "long_title": "Α' Επιστολή Πέτρου",                  "short_title": "Α'Πετ"},
+    61: {"title": "Β' Πέτρου",        "long_title": "Β' Επιστολή Πέτρου",                  "short_title": "Β'Πετ"},
+    62: {"title": "Α' Ιωάννου",       "long_title": "Α' Επιστολή Ιωάννου",                 "short_title": "Α'Ιω"},
+    63: {"title": "Β' Ιωάννου",       "long_title": "Β' Επιστολή Ιωάννου",                 "short_title": "Β'Ιω"},
+    64: {"title": "Γ' Ιωάννου",       "long_title": "Γ' Επιστολή Ιωάννου",                 "short_title": "Γ'Ιω"},
+    65: {"title": "Ιούδας",           "long_title": "Επιστολή Ιούδα",                      "short_title": "Ιουδ"},
+    # NT: Revelation
+    66: {"title": "Αποκάλυψη",        "long_title": "Αποκάλυψη Ιωάννου",                   "short_title": "Απκ"},
+}
+
+# Volume-level display metadata.  Keyed by the lowercase --language argument.
+# When a language is present here it takes precedence over the generic fallback.
+VOLUME_META: Dict[str, Dict[str, str]] = {
+    "cebuano": {
+        "title":       "Cebuano Bible",
+        "long_title":  "The Cebuano Bible",
+        "subtitle":    "Cebuano",
+        "short_title": "Cebuano",
+    },
+    "tagalog": {
+        "title":       "Tagalog Bible",
+        "long_title":  "The Tagalog Bible",
+        "subtitle":    "Tagalog",
+        "short_title": "Tagalog",
+    },
+    "greek": {
+        "title":       "Ελληνική Βίβλος",
+        "long_title":  "Η Ελληνική Βίβλος",
+        "subtitle":    "Modern Greek",
+        "short_title": "GR",
+    },
+    "spanish": {
+        "title":       "Santa Biblia",
+        "long_title":  "La Santa Biblia (Reina-Valera)",
+        "subtitle":    "Spanish",
+        "short_title": "Esp.",
+    },
+}
+
+
 def get_book_names(book_num: int, language: str) -> Dict[str, str]:
     """
     Return the localized title, long_title, and short_title for a given book
     number and language.  Falls back to the English BIBLE_BOOKS entry when the
-    language is not Cebuano or Tagalog, or when the book number is not found.
+    language is not recognised, or when the book number is not found.
     """
     lang_key = language.strip().lower()
     if lang_key == "cebuano":
         names = CEBUANO_BOOK_NAMES.get(book_num)
     elif lang_key == "tagalog":
         names = TAGALOG_BOOK_NAMES.get(book_num)
+    elif lang_key == "spanish":
+        names = SPANISH_BOOK_NAMES.get(book_num)
+    elif lang_key == "greek":
+        names = GREEK_BOOK_NAMES.get(book_num)
     else:
         names = None
 
@@ -479,13 +672,18 @@ def migrate_data(input_db: str, output_db: str, language: str) -> None:
     conn = create_new_schema(output_db)
     cursor = conn.cursor()
     
-    # Insert volume (single volume for Bible)
-    volume_title = f"{language} Bible"
+    # Insert volume (single volume for Bible) — use VOLUME_META if available
+    lang_key = language.strip().lower()
+    vm = VOLUME_META.get(lang_key, {})
+    volume_title       = vm.get("title",       f"{language} Bible")
+    volume_long_title  = vm.get("long_title",  f"The {language} Bible")
+    volume_subtitle    = vm.get("subtitle",    language)
+    volume_short_title = vm.get("short_title", language)
     cursor.execute("""
     INSERT INTO volumes (id, volume_title, volume_long_title, volume_subtitle, volume_short_title)
     VALUES (1, ?, ?, ?, ?)
-    """, (volume_title, f"The {language} Bible", language, language))
-    
+    """, (volume_title, volume_long_title, volume_subtitle, volume_short_title))
+
     logger.info(f"Created volume: {volume_title}")
     
     # Insert books and chapters with sequential IDs (like LDS standard)
