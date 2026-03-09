@@ -780,12 +780,14 @@ const Presenter = () => {
     const handleConnectError = () => {
       setConnectionState('error');
     };
-    socket.on('search-results', ({ results, total }) => {
+    const handleSearchResults = ({ results, total }) => {
       setResults(results ?? []);
       setTotalResults(total ?? 0);
       // page is already set by the emitter — don't reset to 0 on paginated fetches
-    });
-    socket.on('update-verse',   data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); });
+    };
+    const handleUpdateVerse = data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); };
+    socket.on('search-results', handleSearchResults);
+    socket.on('update-verse',   handleUpdateVerse);
     socket.on('session-created', handleSessionJoined);
     socket.on('session-joined', handleSessionJoined);
     socket.on('session-error', handleSessionError);
@@ -805,8 +807,8 @@ const Presenter = () => {
       handleConnect();
     }
     return () => {
-      socket.off('search-results');
-      socket.off('update-verse');
+      socket.off('search-results', handleSearchResults);
+      socket.off('update-verse',   handleUpdateVerse);
       socket.off('session-created', handleSessionJoined);
       socket.off('session-joined', handleSessionJoined);
       socket.off('session-error', handleSessionError);
@@ -999,14 +1001,19 @@ const Presenter = () => {
   const saveSetlist = async () => {
     const name = setlistSaveName.trim();
     if (!name) return;
-    await fetch(`${API_URL}/setlists`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, items: setlist }),
-    });
-    setSetlistSaveOpen(false);
-    setSetlistSaveName('');
-    showToast(`Setlist "${name}" saved`);
+    try {
+      const r = await fetch(`${API_URL}/setlists`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, items: setlist }),
+      });
+      if (!r.ok) throw new Error(`Server error ${r.status}`);
+      setSetlistSaveOpen(false);
+      setSetlistSaveName('');
+      showToast(`Setlist "${name}" saved`);
+    } catch {
+      showToast(`Failed to save setlist "${name}" — check connection`);
+    }
   };
   const loadSetlist = (saved) => {
     if (!window.confirm(`Replace current setlist with "${saved.name}"?`)) return;
