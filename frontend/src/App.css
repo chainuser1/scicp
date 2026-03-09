@@ -2220,7 +2220,43 @@ button,
   color: var(--gold);
 }
 
-/* Icon buttons */
+/* ── Language select dropdowns (replaces pill buttons) ───────────────────── */
+.popover-lang-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.popover-lang-swap-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.lang-select {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(201,168,76,0.25);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-family: 'Inter', sans-serif;
+  padding: 0.3rem 0.5rem;
+  width: 100%;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.lang-select:hover,
+.lang-select:focus {
+  border-color: rgba(201,168,76,0.5);
+  background: rgba(255,255,255,0.1);
+}
+.lang-select option {
+  background: #1e1a12;   /* matches dark popover */
+  color: var(--text-primary);
+}
+.lang-select--mobile {
+  flex: 1;
+  min-width: 0;
+}
 .hdr-btn {
   display: flex;
   align-items: center;
@@ -4159,6 +4195,20 @@ button,
   background: rgba(139,58,26,0.1);
   border-color: rgba(139,58,26,0.4);
   color: #8b3a1a;
+}
+.presenter-container--light .lang-select {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(139,58,26,0.22);
+  color: #5c2e1a;
+}
+.presenter-container--light .lang-select:hover,
+.presenter-container--light .lang-select:focus {
+  border-color: rgba(139,58,26,0.4);
+  background: rgba(0,0,0,0.07);
+}
+.presenter-container--light .lang-select option {
+  background: #faf7f2;
+  color: #5c2e1a;
 }
 
 .presenter-container--light .popover-label { color: #9a7b68; }
