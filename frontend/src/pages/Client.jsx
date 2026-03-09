@@ -812,7 +812,7 @@ function Client() {
                   {isShowingVotd && (
                     <span className="client-votd-label">✦ Verse of the Day</span>
                   )}
-                  {isKioskMode && !isShowingVotd && (
+                  {isKioskMode && !presenterJoined && !isShowingVotd && (
                     <span className="client-votd-label">✦ Now Reading</span>
                   )}
                 </div>
