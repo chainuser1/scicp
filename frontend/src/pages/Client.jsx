@@ -17,7 +17,7 @@ const generateQrDataUrl = async (text) => {
     const QRCode = await import('qrcode').catch(() => null);
     if (!QRCode) return null;
     return await QRCode.toDataURL(text, {
-      width: 280,
+      width: 512,          // generous bitmap so clamp()-sized display stays sharp on 4K TVs
       margin: 2,
       color: { dark: '#0a0a0f', light: '#f0ece0' },
       errorCorrectionLevel: 'H',
@@ -722,7 +722,7 @@ function Client() {
 
   const fittingRem       = fontSizeThatFits * 0.95;
   const rawFloor         = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
-  const computedRem      = Math.min(maxCap, Math.max(Math.min(rawFloor, fittingRem), fittingRem));
+  const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
   // F9 — Canon volume accent classes
