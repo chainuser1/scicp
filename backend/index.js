@@ -229,12 +229,9 @@ const SERVICE_CONFIG = {
 
   // How long after the last socket leaves a session before its state is
   // garbage-collected (ms).  30 min covers a typical sacrament meeting
-  // intermission or a presenter whose laptop went to sleep.
+  // intermission or a presenter whose laptop went to sleep.  TV displays
+  // can also be gone for this long during a power-save cycle.
   SESSION_GRACE_MS: 30 * 60 * 1000,
-
-  // How long the server waits for a client-session reconnect specifically.
-  // TV browsers can take 2–3 min to recover from a power-save disconnect.
-  CLIENT_SESSION_GRACE_MS: 5 * 60 * 1000,
 
   // Maximum number of concurrent named sessions (prevents memory exhaustion
   // if the server is left running across multiple weeks of service).
