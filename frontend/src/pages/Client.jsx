@@ -790,9 +790,9 @@ function Client() {
               {verse.book_title && verse.chapter_number && verse.verse_number && (
                 <div className="verse-caption">
                   {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
-                  {/* F10 — volume short title */}
-                  {verse.volume_short_title && (
-                    <span className="verse-caption-volume">&ensp;· {verse.volume_short_title}</span>
+                  {/* F10 — full volume name as subtitle line, replaces short abbrev */}
+                  {verse.volume_title && (
+                    <span className="verse-caption-volume">{verse.volume_title}</span>
                   )}
                   {isShowingVotd && (
                     <span className="client-votd-label">✦ Verse of the Day</span>
