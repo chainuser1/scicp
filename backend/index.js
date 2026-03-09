@@ -235,6 +235,17 @@ const SERVICE_CONFIG = {
   // can also be gone for this long during a power-save cycle.
   SESSION_GRACE_MS: 30 * 60 * 1000,
 
+  // Shorter grace for sessions that never had a TV viewer (e.g. a presenter
+  // who opened the app but never connected a display, or a stale test session).
+  // These have no QR code displayed anywhere, so nobody is coming back for them.
+  SESSION_NO_VIEWER_GRACE_MS: 2 * 60 * 1000,
+
+  // How long to wait before broadcasting presenter-left after a socket drop.
+  // Absorbs brief WiFi blips and phone screen-locks without the TV ever seeing
+  // the presenter as gone.  If the presenter reconnects and re-joins within this
+  // window the timer is cancelled and the TV display is never disturbed.
+  PRESENTER_LEFT_DEBOUNCE_MS: 5_000,
+
   // Maximum number of concurrent named sessions (prevents memory exhaustion
   // if the server is left running across multiple weeks of service).
   MAX_SESSIONS: 50,
@@ -1640,7 +1651,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
   // Use the service config defined at module level; allow env override for testing.
-  const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || SERVICE_CONFIG.SESSION_GRACE_MS);
+  const SESSION_GRACE_MS          = Number(process.env.SESSION_GRACE_MS          || SERVICE_CONFIG.SESSION_GRACE_MS);
+  const SESSION_NO_VIEWER_GRACE_MS = Number(process.env.SESSION_NO_VIEWER_GRACE_MS || SERVICE_CONFIG.SESSION_NO_VIEWER_GRACE_MS);
+  const PRESENTER_LEFT_DEBOUNCE_MS = Number(process.env.PRESENTER_LEFT_DEBOUNCE_MS || SERVICE_CONFIG.PRESENTER_LEFT_DEBOUNCE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
   // Track viewer counts per session so the Presenter can see "N displays connected"
@@ -1660,6 +1673,11 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         presenterSocketId: null,
         pinHash: null,
         updatedAt: Date.now(),
+        // true once a TV/viewer socket has joined — used to pick the right grace period
+        hadViewer: false,
+        // pending setTimeout handle: emitting presenter-left is deferred so brief
+        // WiFi drops can be cancelled before the TV ever sees the event
+        _presenterLeftTimer: null,
       });
     }
     return sessionState.get(sessionId);
@@ -1744,9 +1762,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       return;
     }
     cancelCleanup(normalized);
+    // Sessions that have hosted a TV screen get the full 30-min grace so they can
+    // come back to the same QR code after a power-save cycle.  Sessions that only
+    // ever had a presenter (e.g. someone opened the app but never connected a TV)
+    // are cleaned up quickly — nobody is scanning that QR code.
+    const state = sessionState.get(normalized);
+    const graceMs = (state && state.hadViewer) ? SESSION_GRACE_MS : SESSION_NO_VIEWER_GRACE_MS;
     const timer = setTimeout(() => {
       cleanupSessionIfUnused(normalized);
-    }, SESSION_GRACE_MS);
+    }, graceMs);
     cleanupTimers.set(normalized, timer);
   }
 
@@ -1800,6 +1824,24 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     return true;
   }
 
+  // ── Idle session sweep ────────────────────────────────────────────────────────
+  // Safety-net garbage collector: every 5 minutes, delete any session whose room
+  // is empty AND whose cleanup timer has already fired or was never scheduled.
+  // This catches sessions that slipped through the normal cleanup path (e.g. the
+  // cleanup timer ran and deleted the Map entry but a new one was recreated by
+  // an errant getSessionState call, or a very old presenter-left debounce timer
+  // left a ghost entry).  Sessions that still have an active TV socket in their
+  // room are left alone — getRoomSize() > 0 for them.
+  const _idleSweep = setInterval(() => {
+    for (const [sessionId] of sessionState) {
+      if (sessionId === DEFAULT_SESSION_ID) continue;
+      if (getRoomSize(sessionId) === 0 && !cleanupTimers.has(sessionId)) {
+        sessionState.delete(sessionId);
+        fastify.log.info(`[idle-sweep] Removed ghost session ${sessionId}`);
+      }
+    }
+  }, 5 * 60 * 1000);
+
   io.on('connection', (socket) => {
     console.log('a user connected');
     let activeSessionId = DEFAULT_SESSION_ID;
@@ -1844,8 +1886,21 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       cancelCleanup(activeSessionId);
       const state = getSessionState(activeSessionId);
       if (role === 'presenter') {
+        // Cancel any pending presenter-left debounce — this can happen when the
+        // presenter reconnects within PRESENTER_LEFT_DEBOUNCE_MS of a socket drop.
+        // In that case the TV never receives presenter-left and the display stays
+        // completely stable.
+        if (state._presenterLeftTimer) {
+          clearTimeout(state._presenterLeftTimer);
+          state._presenterLeftTimer = null;
+        }
         state.presenterSocketId = socket.id;
       } else {
+        // Mark that a TV/viewer has joined this session at least once.
+        // This triggers the longer SESSION_GRACE_MS on cleanup instead of
+        // the quick SESSION_NO_VIEWER_GRACE_MS, preserving the QR code for
+        // power-save reconnects.
+        state.hadViewer = true;
         incrementViewerCount(activeSessionId);
       }
       // Tell the joining socket it's in the session (include pinSet so the
@@ -1860,13 +1915,23 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         count: sessionViewerCounts.get(activeSessionId) || 0,
       });
       if (role === 'presenter') {
-        // Tell the TV (and any secondary screens) a presenter is now live
-        socket.to(activeSessionId).emit('presenter-joined', { sessionId: activeSessionId });
+        // Tell the TV (and any secondary screens) a presenter is now live.
+        // Include the session's current live verse + theme so the TV can
+        // restore the display immediately on reconnect without waiting for go-live.
+        socket.to(activeSessionId).emit('presenter-joined', {
+          sessionId: activeSessionId,
+          verse: state.liveVerse || null,
+          theme: state.theme     || null,
+        });
       } else {
         // When a viewer (TV) joins and a presenter is already active, notify that
         // viewer immediately so it exits kiosk mode and shows the correct QR label
         if (state.presenterSocketId && io.sockets.sockets.get(state.presenterSocketId)) {
-          socket.emit('presenter-joined', { sessionId: activeSessionId });
+          socket.emit('presenter-joined', {
+            sessionId: activeSessionId,
+            verse: state.liveVerse || null,
+            theme: state.theme     || null,
+          });
         }
       }
       return { sessionId: activeSessionId, pinSet: !!state.pinHash };
@@ -2282,7 +2347,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             // During `disconnecting` the socket is still in its rooms, so
             // socket.to() can still reach the TV/viewers before the lock is released.
             if (activeRole === 'presenter') {
-              socket.to(roomId).emit('presenter-left', { sessionId: roomId });
+              // Debounce presenter-left so brief WiFi blips (< PRESENTER_LEFT_DEBOUNCE_MS)
+              // are invisible to the TV.  If the presenter reconnects and calls join-session
+              // within that window the timer is cancelled and the TV display is never disturbed.
+              const state = getSessionState(roomId);
+              if (state) {
+                if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer);
+                const capturedRoomId = roomId;
+                state._presenterLeftTimer = setTimeout(() => {
+                  state._presenterLeftTimer = null;
+                  io.to(capturedRoomId).emit('presenter-left', { sessionId: capturedRoomId });
+                }, PRESENTER_LEFT_DEBOUNCE_MS);
+              }
             }
             releasePresenterLock(roomId, socket.id);
             if (activeRole !== 'presenter') decrementViewerCount(roomId);
@@ -2291,7 +2367,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         });
       } else {
         if (activeRole === 'presenter') {
-          socket.to(activeSessionId).emit('presenter-left', { sessionId: activeSessionId });
+          const state = getSessionState(activeSessionId);
+          if (state) {
+            if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer);
+            const capturedSessionId = activeSessionId;
+            state._presenterLeftTimer = setTimeout(() => {
+              state._presenterLeftTimer = null;
+              io.to(capturedSessionId).emit('presenter-left', { sessionId: capturedSessionId });
+            }, PRESENTER_LEFT_DEBOUNCE_MS);
+          }
         }
         releasePresenterLock(activeSessionId, socket.id);
         if (activeRole !== 'presenter') decrementViewerCount(activeSessionId);
