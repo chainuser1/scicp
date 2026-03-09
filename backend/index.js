@@ -238,10 +238,9 @@ const SERVICE_CONFIG = {
   PING_TIMEOUT_MS: 90_000,
 
   // How long after the last socket leaves a session before its state is
-  // garbage-collected (ms).  30 min covers a typical sacrament meeting
-  // intermission or a presenter whose laptop went to sleep.  TV displays
-  // can also be gone for this long during a power-save cycle.
-  SESSION_GRACE_MS: 30 * 60 * 1000,
+  // garbage-collected (ms).  4 hours covers multi-hour worship services,
+  // intermissions, and sessions where the presenting device goes to sleep.
+  SESSION_GRACE_MS: 4 * 60 * 60 * 1000,
 
   // Shorter grace for sessions that never had a TV viewer (e.g. a presenter
   // who opened the app but never connected a display, or a stale test session).
@@ -257,14 +256,6 @@ const SERVICE_CONFIG = {
   // Maximum number of concurrent named sessions (prevents memory exhaustion
   // if the server is left running across multiple weeks of service).
   MAX_SESSIONS: 50,
-
-  // How long a presenter's socket can be DISCONNECTED before a different
-  // device is allowed to take over the presenter slot.  As long as the
-  // presenter's socket is still alive they retain the slot regardless of
-  // screen inactivity — a preacher can leave their device on a table for
-  // the entire sermon.  Set via PRESENTER_IDLE_MS env var for testing
-  // (e.g. PRESENTER_IDLE_MS=5000).
-  PRESENTER_IDLE_MS: 60 * 60 * 1000,
 };
 
 const io = new Server(fastify.server, {
@@ -1670,7 +1661,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const SESSION_GRACE_MS          = Number(process.env.SESSION_GRACE_MS          || SERVICE_CONFIG.SESSION_GRACE_MS);
   const SESSION_NO_VIEWER_GRACE_MS = Number(process.env.SESSION_NO_VIEWER_GRACE_MS || SERVICE_CONFIG.SESSION_NO_VIEWER_GRACE_MS);
   const PRESENTER_LEFT_DEBOUNCE_MS = Number(process.env.PRESENTER_LEFT_DEBOUNCE_MS || SERVICE_CONFIG.PRESENTER_LEFT_DEBOUNCE_MS);
-  const PRESENTER_IDLE_MS          = Number(process.env.PRESENTER_IDLE_MS          || SERVICE_CONFIG.PRESENTER_IDLE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
   // Track viewer counts per session so the Presenter can see "N displays connected"
@@ -1695,10 +1685,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         // Unix timestamp of the last presenter action (go-live, update-verse, etc.).
         presenterLastActivityAt: null,
         // Unix timestamp of when the presenter's socket last disconnected.
-        // Eviction of an absent presenter is based on this value, NOT on
-        // presenterLastActivityAt — a preacher can leave their device on a table
-        // for the entire sermon without losing their presenter slot, as long as
-        // their socket reconnects within PRESENTER_IDLE_MS.
+        // The presenter slot is held indefinitely until voluntary leave — this
+        // timestamp is tracked for informational purposes only.
         presenterDisconnectedAt: null,
         // Set of presenterTokens that were evicted from this session.  Barred
         // from re-entering until the current presenter voluntarily leaves.
@@ -1913,14 +1901,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         clearStalePresenterLock(state);   // clear dead-socket reference first
 
         const incomingToken = String(presenterToken || '').trim();
-        const now           = Date.now();
-        // "Idle" means the presenter's socket has been DISCONNECTED for longer
-        // than PRESENTER_IDLE_MS — not merely that they haven't tapped the screen.
-        // A preacher can leave their device on a table for an entire sermon and
-        // remain the presenter as long as the socket is still alive.  Only after
-        // their device is truly offline for >30 min can a newcomer take over.
-        const isIdle        = !!state.presenterDisconnectedAt &&
-                              (now - state.presenterDisconnectedAt) > PRESENTER_IDLE_MS;
 
         // ── Step 1: Lockout check ─────────────────────────────────────────────
         // A token that was evicted stays barred until the current presenter
@@ -1956,15 +1936,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             return { error: 'Another presenter is active in this session' };
           } else {
             // ── Step 5: holder's socket is gone (disconnected) ─────────────
-            if (!isIdle) {
-              // Disconnected but within the reconnect window — reject so the
-              // preacher can return after a brief WiFi drop or screen-lock.
-              return { error: 'Another presenter is active in this session' };
-            }
-            // Disconnected + idle > PRESENTER_IDLE_MS — evict the ghost
-            if (state.presenterToken) state.lockedOutTokens.add(state.presenterToken);
-            state.presenterToken          = incomingToken || generateToken();
-            state.presenterDisconnectedAt = null;
+            // Presenter lock is permanent until they explicitly hit "Leave Session".
+            // A disconnected device (sleeping phone, WiFi blip, mid-sermon) does
+            // not open the slot — the preacher's place is always held for them.
+            return { error: 'presenter-session-in-progress' };
           }
         }
 
@@ -2050,7 +2025,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (activeRole === 'presenter') {
         // Tell the TV (and any secondary screens) the presenter has left so they
         // can reset state and switch the QR back to the presenter-join URL.
-        socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId });
+        socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId, voluntary: true });
         releasePresenterLock(previousSessionId, socket.id, true /* voluntary */);
       } else {
         decrementViewerCount(previousSessionId);
@@ -2516,8 +2491,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
               // within that window the timer is cancelled and the TV display is never disturbed.
               const state = getSessionState(roomId);
               if (state) {
-                // Start the eviction clock — if they don't reconnect within
-                // PRESENTER_IDLE_MS a new presenter can take the slot.
+                // Track disconnect time — slot stays held until voluntary leave.
                 if (state.presenterSocketId === socket.id) {
                   state.presenterDisconnectedAt = Date.now();
                 }
@@ -2525,7 +2499,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
                 const capturedRoomId = roomId;
                 state._presenterLeftTimer = setTimeout(() => {
                   state._presenterLeftTimer = null;
-                  io.to(capturedRoomId).emit('presenter-left', { sessionId: capturedRoomId });
+                  io.to(capturedRoomId).emit('presenter-left', { sessionId: capturedRoomId, locked: true });
                 }, PRESENTER_LEFT_DEBOUNCE_MS);
               }
             }
@@ -2545,7 +2519,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             const capturedSessionId = activeSessionId;
             state._presenterLeftTimer = setTimeout(() => {
               state._presenterLeftTimer = null;
-              io.to(capturedSessionId).emit('presenter-left', { sessionId: capturedSessionId });
+              io.to(capturedSessionId).emit('presenter-left', { sessionId: capturedSessionId, locked: true });
             }, PRESENTER_LEFT_DEBOUNCE_MS);
           }
         }

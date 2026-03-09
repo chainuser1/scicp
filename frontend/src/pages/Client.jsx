@@ -125,7 +125,8 @@ function Client() {
   // The TV always creates its own session and shows QR.
   // presenterJoined flips to true when the server broadcasts presenter-joined.
   const [clientSessionId, setClientSessionId]   = useState('');
-  const [presenterJoined, setPresenterJoined]   = useState(false);
+  const [presenterJoined, setPresenterJoined]         = useState(false);
+  const [presenterSessionLocked, setPresenterSessionLocked] = useState(false); // presenter disconnected but slot still held
   const [qrDataUrl, setQrDataUrl]               = useState('');       // /presenter?session= — for operator
   const [clientQrDataUrl, setClientQrDataUrl]   = useState('');       // /client?session=    — for audience
   const [qrError, setQrError]                   = useState(false);
@@ -519,7 +520,28 @@ function Client() {
       }, 400);
     };
 
-    const handlePresenterLeft = () => {
+    const handlePresenterLeft = (data = {}) => {
+      if (data.locked) {
+        // Presenter's device disconnected (WiFi blip, phone sleep, mid-sermon) but
+        // their slot is still held — do NOT revert QR to "Scan to present".
+        // The audience should see "Service in progress" rather than an invitation
+        // for someone else to accidentally grab the presenter role.
+        setPresenterJoined(false);
+        presenterJoinedRef.current = false;
+        setPresenterSessionLocked(true);
+        setHighlightedText('');
+        clearTimeout(presenterLeftTimer.current);
+        presenterLeftTimer.current = setTimeout(() => setPresenterLeft(false), 8000);
+        setPresenterLeft(true);
+        clearTimeout(presenterGraceTimerRef.current);
+        presenterGraceTimerRef.current = setTimeout(() => {
+          setIsKioskMode(true);
+          setKioskRestart(n => n + 1);
+        }, 15 * 60 * 1000);
+        return;
+      }
+      // Voluntary leave — presenter explicitly ended the session.  Open the slot.
+      setPresenterSessionLocked(false);
       // Reset so the next presenter join is treated as fresh
       setPresenterJoined(false);
       presenterJoinedRef.current = false;
@@ -543,6 +565,8 @@ function Client() {
     const handlePresenterJoined = ({ verse, theme } = {}) => {
       // Cancel any pending kiosk grace timer — presenter is back
       clearTimeout(presenterGraceTimerRef.current);
+      // Presenter is reconnecting — clear the locked state
+      setPresenterSessionLocked(false);
       // Stop kiosk cycling unconditionally — no leftover timer should fire after join
       setIsKioskMode(false);
       if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
@@ -895,12 +919,15 @@ function Client() {
            Live mode     → /client URL so audience can mirror on their own device.
            Hidden on secondary screens (they are the audience device). */}
       {clientSessionId && !isSecondaryScreen && (() => {
-        const isLive = presenterJoined && !showQrOverlay;
-        const activeQr    = isLive ? clientQrDataUrl : qrDataUrl;
+        const isLive   = presenterJoined && !showQrOverlay;
+        const isLocked = !isLive && presenterSessionLocked;
+        const activeQr    = isLive ? clientQrDataUrl : (isLocked ? null : qrDataUrl);
         const activeLabel = isLive
           ? `Follow on your device · ${clientSessionId}`
-          : `Scan to present · ${clientSessionId}`;
-        const activeAlt   = isLive ? 'Open on your device' : 'Scan to join as presenter';
+          : isLocked
+            ? `Service in progress · ${clientSessionId}`
+            : `Scan to present · ${clientSessionId}`;
+        const activeAlt   = isLive ? 'Open on your device' : isLocked ? 'Service in progress' : 'Scan to join as presenter';
         return (
           <div
             className={`client-votd-qr-overlay${isLive ? ' client-votd-qr-overlay--live' : ''}`}
