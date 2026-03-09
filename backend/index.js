@@ -1,6 +1,7 @@
 const fastify = require('fastify')({ logger: true });
 const { Server } = require("socket.io");
 const path = require('path');
+const crypto = require('crypto');
 
 const DB_DIR = path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = path.resolve(__dirname, '../frontend/dist');
@@ -11,6 +12,9 @@ const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptur
 const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'), { fileMustExist: true });
 
 const fastifyStatic = require('@fastify/static');
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+const hashPin = (pin) => crypto.createHash('sha256').update(String(pin)).digest('hex');
 
 fastify.register(require('@fastify/cors'), {
   origin: "*",
@@ -1655,6 +1659,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         liveVerse: null,
         highlightedText: '',
         presenterSocketId: null,
+        pinHash: null,
         updatedAt: Date.now(),
       });
     }
@@ -1803,7 +1808,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.join(activeSessionId);
     getSessionState(activeSessionId);
 
-    const joinSession = (candidateSessionId, role = 'viewer') => {
+    const joinSession = (candidateSessionId, role = 'viewer', pin = '') => {
       const normalized = normalizeSessionId(candidateSessionId);
       if (!normalized) return null;
       const previousSessionId = activeSessionId;
@@ -1816,6 +1821,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             message: 'Another device attempted to join your session as presenter',
           });
           return { error: 'Another presenter is active in this session' };
+        }
+        // PIN gate: require PIN if one has been set for this session
+        if (state.pinHash) {
+          const provided = String(pin || '').trim();
+          if (!provided) return { requiresPin: true };
+          if (hashPin(provided) !== state.pinHash) return { pinIncorrect: true };
         }
       }
       if (activeSessionId && activeSessionId !== normalized) {
@@ -1838,8 +1849,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       } else {
         incrementViewerCount(activeSessionId);
       }
-      // Tell the joining socket it's in the session
-      socket.emit('session-joined', { sessionId: activeSessionId });
+      // Tell the joining socket it's in the session (include pinSet so the
+      // presenter UI can show the correct lock state on reconnect)
+      socket.emit('session-joined', { sessionId: activeSessionId, pinSet: !!state.pinHash });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
       if (state.customMode) socket.emit('custom-text', { ...state.customMode, theme: state.theme });
@@ -1848,12 +1860,17 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         sessionId: activeSessionId,
         count: sessionViewerCounts.get(activeSessionId) || 0,
       });
-      // If a Presenter just joined, tell everyone else in the room (i.e. the
-      // Client/TV) so it can close the QR screen and enter display mode.
       if (role === 'presenter') {
+        // Tell the TV (and any secondary screens) a presenter is now live
         socket.to(activeSessionId).emit('presenter-joined', { sessionId: activeSessionId });
+      } else {
+        // When a viewer (TV) joins and a presenter is already active, notify that
+        // viewer immediately so it exits kiosk mode and shows the correct QR label
+        if (state.presenterSocketId && io.sockets.sockets.get(state.presenterSocketId)) {
+          socket.emit('presenter-joined', { sessionId: activeSessionId });
+        }
       }
-      return { sessionId: activeSessionId };
+      return { sessionId: activeSessionId, pinSet: !!state.pinHash };
     };
 
     const leaveActiveSession = () => {
@@ -1943,13 +1960,23 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.on('join-session', (payload, callback) => {
       const requested = normalizeSessionId(payload && payload.sessionId);
       const role = payload && payload.role === 'presenter' ? 'presenter' : 'viewer';
+      const pin  = payload && payload.pin ? String(payload.pin).trim() : '';
       if (!sessionExists(requested)) {
         const error = { message: 'Session not found' };
         socket.emit('session-error', error);
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      const joined = joinSession(requested, role);
+      const joined = joinSession(requested, role, pin);
+      // PIN-related rejections — do NOT emit session-error (they're expected flows)
+      if (joined && joined.requiresPin) {
+        if (typeof callback === 'function') callback({ ok: false, requiresPin: true });
+        return;
+      }
+      if (joined && joined.pinIncorrect) {
+        if (typeof callback === 'function') callback({ ok: false, pinIncorrect: true, message: 'Incorrect PIN — try again' });
+        return;
+      }
       if (!joined || joined.error) {
         const error = { message: joined && joined.error ? joined.error : 'Valid session code is required' };
         socket.emit('session-error', error);
@@ -1962,12 +1989,38 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, pinSet: joined.pinSet });
     });
 
     socket.on('leave-session', (payload, callback) => {
       const left = leaveActiveSession();
       if (typeof callback === 'function') callback({ ok: true, sessionId: left.sessionId });
+    });
+
+    // ── Session PIN management (presenter-only) ────────────────────────────────
+    socket.on('set-session-pin', (payload, callback) => {
+      if (!ensurePresenterAccess(activeSessionId, socket)) {
+        if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' });
+        return;
+      }
+      const pin = payload && payload.pin ? String(payload.pin).trim() : '';
+      if (!/^\d{4,8}$/.test(pin)) {
+        if (typeof callback === 'function') callback({ ok: false, message: 'PIN must be 4–8 digits' });
+        return;
+      }
+      const state = getSessionState(activeSessionId);
+      state.pinHash = hashPin(pin);
+      if (typeof callback === 'function') callback({ ok: true });
+    });
+
+    socket.on('clear-session-pin', (_payload, callback) => {
+      if (!ensurePresenterAccess(activeSessionId, socket)) {
+        if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' });
+        return;
+      }
+      const state = getSessionState(activeSessionId);
+      state.pinHash = null;
+      if (typeof callback === 'function') callback({ ok: true });
     });
 
     socket.on('search', (payload) => {
