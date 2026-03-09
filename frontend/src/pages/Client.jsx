@@ -30,6 +30,25 @@ const generateQrDataUrl = async (text) => {
 // ─── sessionStorage key — keeps QR code stable across browser restarts ───────
 const TV_SESSION_KEY = 'siv.tv_session_id';
 
+// ─── Module-level display constants ───────────────────────────────────────────
+const DEFAULT_BG =
+  "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
+
+const DEFAULT_THEME = {
+  background_url: DEFAULT_BG,
+  font_family: "'Cormorant Garamond', Georgia, serif",
+  font_size: '4.1rem',
+  layout: 'centered',
+  tone: 'dark',
+};
+
+// Reading pace: 160 wpm — floor 5 s, ceiling 15 s.
+// VOTD gets 2× so it lingers as the featured verse before kiosk cycling begins.
+const kioskDisplayMs = (text, multiplier = 1) => {
+  const words = (text || '').trim().split(/\s+/).filter(Boolean).length;
+  return Math.min(15000, Math.max(5000, (words / 160) * 60 * 1000)) * multiplier;
+};
+
 function Client() {
   // ─── Utilities ───────────────────────────────────────────────────────────────
   const extractImageUrl = (value) => {
@@ -73,8 +92,6 @@ function Client() {
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
 
-  const DEFAULT_BG = "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
-
   const [verse, setVerse] = useState({
     scripture_text: '',
     segments: [],
@@ -116,6 +133,11 @@ function Client() {
   const [sessionExpired, setSessionExpired]     = useState(false);
   const [presenterLeft, setPresenterLeft]       = useState(false); // shows subtle notice on idle screen
   const [votd, setVotd]                         = useState(null);  // verse of the day — shown while presenter is live but idle
+
+  // ─── Kiosk mode — cycles verses while no presenter is connected ──────────
+  const [isKioskMode, setIsKioskMode] = useState(true); // true until first presenter join
+  const kioskTimerRef    = useRef(null);
+  const kioskCurVerseRef = useRef(null); // verse_id of the verse currently on-screen in kiosk
 
   // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
@@ -322,13 +344,6 @@ function Client() {
     if (!votdPending || !votd || !presenterJoinedRef.current) return;
     if (displayVerse) return; // a real verse is already showing — don't overwrite
     setVotdPending(false);
-    const DEFAULT_THEME = {
-      background_url: DEFAULT_BG,
-      font_family: "'Cormorant Garamond', Georgia, serif",
-      font_size: '4.1rem',
-      layout: 'centered',
-      tone: 'dark',
-    };
     const votdData = {
       ...votd,
       segments: [votd.scripture_text],
@@ -346,6 +361,72 @@ function Client() {
       );
     }, 400);
   }, [votd, votdPending, displayVerse]);
+
+  // ─── Kiosk: advance to the next sequential verse ──────────────────────────
+  // Reads from /verse/adjacent so the progression follows canonical book order.
+  // Stable identity (empty deps) — all mutable values accessed via refs.
+  const advanceKiosk = useCallback((fromVerseId) => {
+    if (presenterJoinedRef.current) return;
+    fetch(`/verse/adjacent?verse_id=${encodeURIComponent(fromVerseId)}&direction=next`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.verse_id || presenterJoinedRef.current) return;
+        const nextVerse = {
+          ...data,
+          segments: [data.scripture_text],
+          currentSegment: 0,
+          totalSegments: 1,
+          theme: DEFAULT_THEME,
+        };
+        kioskCurVerseRef.current = data.verse_id;
+        setTextVisible(false);
+        setTimeout(() => {
+          if (presenterJoinedRef.current) return;
+          setVerse(nextVerse);
+          setDisplayVerse(nextVerse);
+          setIsIdle(false);
+          requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
+          kioskTimerRef.current = setTimeout(
+            () => advanceKiosk(data.verse_id),
+            kioskDisplayMs(data.scripture_text),
+          );
+        }, 400);
+      })
+      .catch(() => {
+        // Network hiccup — retry the same verse after 8 s
+        if (!presenterJoinedRef.current) {
+          kioskTimerRef.current = setTimeout(() => advanceKiosk(fromVerseId), 8000);
+        }
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Kiosk: start from VOTD the moment it loads (no presenter yet) ────────
+  useEffect(() => {
+    if (!votd || presenterJoinedRef.current) return;
+    if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
+    const votdVerse = {
+      ...votd,
+      segments: [votd.scripture_text],
+      currentSegment: 0,
+      totalSegments: 1,
+      theme: DEFAULT_THEME,
+    };
+    kioskCurVerseRef.current = votd.verse_id;
+    setTextVisible(false);
+    const initTimer = setTimeout(() => {
+      if (presenterJoinedRef.current) return;
+      setVerse(votdVerse);
+      setDisplayVerse(votdVerse);
+      setIsIdle(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
+      // VOTD lingers at 2× reading time — it's the featured verse
+      kioskTimerRef.current = setTimeout(
+        () => advanceKiosk(votd.verse_id),
+        kioskDisplayMs(votd.scripture_text, 2),
+      );
+    }, 400);
+    return () => clearTimeout(initTimer);
+  }, [votd, advanceKiosk]);
 
   // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -430,12 +511,17 @@ function Client() {
     };
 
     const handlePresenterJoined = () => {
+      // Stop kiosk cycling unconditionally — no leftover timer should fire after join
+      setIsKioskMode(false);
+      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
       setShowQrOverlay(false); // hide QR regardless — a presenter is in the room
       if (presenterJoinedRef.current) return; // rest only runs on first join
       setPresenterJoined(true);
       presenterJoinedRef.current = true;
       setPresenterJoining(true);
       setTimeout(() => setPresenterJoining(false), 1800);
+      // Clear kiosk's displayVerse so the votdPending effect can write VOTD cleanly
+      setDisplayVerse(null);
       // Show VOTD immediately so TV is never blank while presenter finds first verse.
       // If server sends a real verse shortly after, handleVerse overwrites this gracefully.
       setVotdAsDisplay();
@@ -565,97 +651,6 @@ function Client() {
     tune();
     return () => { active = false; };
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
-
-  // ─── QR waiting screen ────────────────────────────────────────────────────
-  // Shown until the Presenter joins. No interaction needed from the TV side.
-  if (!presenterJoined) {
-    const origin = publicOrigin || window.location.origin;
-    const presenterUrl = clientSessionId ? `${origin}/presenter?session=${clientSessionId}` : '';
-
-    return (
-      <div className="home-page client-qr-screen">
-
-        {/* "Presenter connected" transition overlay */}
-        {presenterJoining && (
-          <div className="client-qr-joining-overlay" aria-live="assertive">
-            <div className="client-qr-joining-check">✓</div>
-            <div className="client-qr-joining-text">Presenter connected</div>
-          </div>
-        )}
-
-        <div className="client-qr-card">
-          <div className="client-qr-header">
-            <div className="client-qr-cross" aria-hidden="true">
-              <div className="idle-cross-v" />
-              <div className="idle-cross-h" />
-            </div>
-            <h1 className="client-qr-title">Scriptures in View</h1>
-            <p className="client-qr-subtitle">
-              {sessionExpired
-                ? 'Session refreshed — new code ready'
-                : connectionState === 'connecting' || connectionState === 'reconnecting'
-                  ? 'Connecting…'
-                  : 'Waiting for Presenter'}
-            </p>
-          </div>
-
-          <div className="client-qr-body">
-
-            {/* QR code — or raw-URL fallback */}
-            <div className="client-qr-box">
-              {qrDataUrl ? (
-                <img
-                  src={qrDataUrl}
-                  alt={`QR code for session ${clientSessionId}`}
-                  className="client-qr-image"
-                  draggable={false}
-                />
-              ) : qrError && presenterUrl ? (
-                <div className="client-qr-url-fallback">
-                  <span className="client-qr-url-label">Open on Presenter device:</span>
-                  <span className="client-qr-url-text" role="textbox" aria-readonly="true">
-                    {presenterUrl}
-                  </span>
-                </div>
-              ) : (
-                <div className="client-qr-placeholder" aria-label="Generating QR code">
-                  <div className="client-qr-spinner" />
-                </div>
-              )}
-            </div>
-
-            {/* Large session code — readable from across the room */}
-            {clientSessionId && (
-              <div className="client-qr-code-row">
-                <span className="client-qr-code-label">Session Code</span>
-                <span
-                  className="client-qr-code-value"
-                  aria-label={`Session code: ${clientSessionId.split('').join(' ')}`}
-                >
-                  {clientSessionId}
-                </span>
-              </div>
-            )}
-
-            <p className="client-qr-instruction">
-              Scan the QR code or enter the session code in the Presenter app to connect.
-            </p>
-
-          </div>
-
-          <div className="client-qr-footer">
-            <span className={`client-qr-conn client-qr-conn--${connectionState}`}>
-              {connectionState === 'connected'
-                ? '● Connected'
-                : connectionState === 'connecting'
-                  ? '○ Connecting…'
-                  : '⚠ Reconnecting…'}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // ─── Derived display props ────────────────────────────────────────────────
   // True when currently displaying the VOTD (no real verse has been sent yet)
@@ -809,6 +804,9 @@ function Client() {
                   {isShowingVotd && (
                     <span className="client-votd-label">✦ Verse of the Day</span>
                   )}
+                  {isKioskMode && !isShowingVotd && (
+                    <span className="client-votd-label">✦ Now Reading</span>
+                  )}
                 </div>
               )}
               {/* F7 — segment dots replacing single › indicator */}
@@ -850,12 +848,20 @@ function Client() {
       )}
       {/* QR overlay — visible only when the room is vacant (clear-screen or presenter left);
            hidden while any presenter is actively connected or projecting */}
-      {showQrOverlay && clientSessionId && !isSecondaryScreen && (
+      {(!presenterJoined || showQrOverlay) && clientSessionId && !isSecondaryScreen && (
         <div className="client-votd-qr-overlay" aria-label={`Scan to present · session ${clientSessionId}`}>
           {qrDataUrl && (
             <img src={qrDataUrl} alt="Scan to join as presenter" className="client-votd-qr-img" />
           )}
           <span className="client-votd-qr-label">Scan to present · {clientSessionId}</span>
+        </div>
+      )}
+
+      {/* "✓ Presenter connected" flash — shown briefly when a presenter scans in */}
+      {presenterJoining && (
+        <div className="client-qr-joining-overlay" aria-live="assertive">
+          <div className="client-qr-joining-check">✓</div>
+          <div className="client-qr-joining-text">Presenter connected</div>
         </div>
       )}
     </div>
