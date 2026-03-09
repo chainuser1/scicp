@@ -4328,6 +4328,7 @@ button,
     box-shadow: none;         /* no shadow on persistent column */
     border-right: 1px solid var(--gold-border);
     display: flex;
+    z-index: auto;            /* no floating stacking context — prevents painting over main panel */
   }
 
   /* Close button is irrelevant — drawer never closes */
@@ -4348,11 +4349,12 @@ button,
 
 /* Large desktop: more breathing room, full width always */
 @media (min-width: 1200px) {
+  /* Widen sidebar column and keep drawer width in sync — avoids overflow into main panel */
+  .presenter-container { grid-template-columns: 360px 1fr; }
   .main-panel { padding: 1.75rem 2rem; gap: 1.1rem; }
   .card { padding: 1.5rem 1.75rem; }
   .staged-text { font-size: 1.3rem; }
   .preview-box { max-height: 220px; }
-  .search-drawer { width: 460px; }
   .go-live-button { font-size: 0.9rem; letter-spacing: 0.22em; }
 }
 
