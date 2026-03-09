@@ -59,9 +59,10 @@ describe('Backend API Tests', () => {
 
   describe('searchScripture function', () => {
     test('should return results for valid scripture reference', () => {
-      // Test with a general search term that should yield results
-      const results = searchScripture('God created');
+      // searchScripture returns { results, total } for paginated queries
+      const { results, total } = searchScripture('God created');
       expect(Array.isArray(results)).toBe(true);
+      expect(typeof total).toBe('number');
       if (results.length > 0) {
         expect(results[0]).toHaveProperty('book_title');
         expect(results[0]).toHaveProperty('chapter_number');
@@ -71,8 +72,9 @@ describe('Backend API Tests', () => {
     });
 
     test('should return results for book and chapter reference', () => {
-      const results = searchScripture('Genesis 1');
+      const { results, total } = searchScripture('Genesis 1');
       expect(Array.isArray(results)).toBe(true);
+      expect(typeof total).toBe('number');
       if (results.length > 0) {
         expect(results[0]).toHaveProperty('book_title');
         expect(results[0]).toHaveProperty('chapter_number');
@@ -82,8 +84,10 @@ describe('Backend API Tests', () => {
     });
 
     test('should handle empty or invalid search input', () => {
-      const results = searchScripture('');
+      const { results, total } = searchScripture('');
       expect(Array.isArray(results)).toBe(true);
+      expect(results).toHaveLength(0);
+      expect(total).toBe(0);
     });
   });
 
