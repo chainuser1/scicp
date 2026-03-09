@@ -2095,9 +2095,19 @@ const Presenter = () => {
       {/* Sticky Go Live bar — mobile only, appears when a verse is staged */}
       {(staged || liveVerse) && (
         <div className="mobile-golive-bar">
+          <button
+            className="mobile-nav-btn"
+            onClick={() => fetchAdjacent('prev', !liveVerse)}
+            aria-label="Previous verse"
+          >‹</button>
           <div className="mobile-golive-ref">
             {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
           </div>
+          <button
+            className="mobile-nav-btn"
+            onClick={() => fetchAdjacent('next', !liveVerse)}
+            aria-label="Next verse"
+          >›</button>
           <div className="mobile-golive-actions">
             {liveVerse && (
               <>
