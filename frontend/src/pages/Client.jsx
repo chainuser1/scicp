@@ -523,9 +523,13 @@ function Client() {
   }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
-  const displayText = verse.segments?.length > 0
-    ? (verse.segments[verse.currentSegment] || verse.scripture_text)
-    : (verse.scripture_text || '');
+  // When announcement mode is active, calibrate against the announcement text
+  // so it gets the same font-fitting treatment as scripture.
+  const displayText = customData
+    ? (customData.text || '')
+    : verse.segments?.length > 0
+      ? (verse.segments[verse.currentSegment] || verse.scripture_text)
+      : (verse.scripture_text || '');
 
   useEffect(() => {
     let active = true;
@@ -648,7 +652,7 @@ function Client() {
   // ─── Derived display props ────────────────────────────────────────────────
   // True when currently displaying the VOTD (no real verse has been sent yet)
   const isShowingVotd   = votd && displayVerse && displayVerse.verse_id === votd.verse_id && !votdPending;
-  const hasMoreSegments = verse.segments && verse.currentSegment < verse.segments.length - 1;
+  const hasMoreSegments = !customData && verse.segments && verse.currentSegment < verse.segments.length - 1;
   const layout          = verse.theme?.layout || 'centered';
   const tone            = verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark';
   const isDisconnected  = connectionState === 'disconnected' || connectionState === 'error';
@@ -675,9 +679,9 @@ function Client() {
   const maxCap        = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
-  const lowerThirdPad = layout === 'lower-third'
+  const lowerThirdPad = !customData && layout === 'lower-third'
     ? Math.min(6 * PX_PER_REM, Math.max(2.4 * PX_PER_REM, vh * 0.07)) : 0;
-  const captionH = (verse.book_title && verse.chapter_number && verse.verse_number)
+  const captionH = (!customData && verse.book_title && verse.chapter_number && verse.verse_number)
     ? Math.min(1.1 * PX_PER_REM, Math.max(0.55 * PX_PER_REM, vh * 0.014))
     + Math.min(0.52 * PX_PER_REM, Math.max(0.28 * PX_PER_REM, vh * 0.006))
     + PX_PER_REM : 0;

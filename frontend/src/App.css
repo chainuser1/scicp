@@ -5527,6 +5527,8 @@ button, [role="button"] {
   opacity: 0.52;
   margin-top: 0.3em;
 }
+/* Light theme: dark-brown text at 52% nearly disappears on ivory — lift it */
+.client-view.client-theme-light .verse-caption-volume { opacity: 0.82; }
 /* Hidden on small screens where vertical space is tight */
 @media (max-width: 640px) { .verse-caption-volume { display: none; } }
 
