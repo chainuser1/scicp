@@ -1356,6 +1356,7 @@ const Presenter = () => {
                     onChange={handleLanguageChange}
                   >
                     <option value="en">English</option>
+                    <option value="nrsvue">English (NRSVUE)</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -1377,6 +1378,7 @@ const Presenter = () => {
                     >
                       <option value="">Off</option>
                       <option value="en">English</option>
+                      <option value="nrsvue">English (NRSVUE)</option>
                       <option value="tl">Tagalog</option>
                       <option value="ceb">Cebuano</option>
                       <option value="es">Español</option>
@@ -1540,6 +1542,7 @@ const Presenter = () => {
                     onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
                   >
                     <option value="en">English</option>
+                    <option value="nrsvue">English (NRSVUE)</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -1560,6 +1563,7 @@ const Presenter = () => {
                   >
                     <option value="">Off</option>
                     <option value="en">English</option>
+                    <option value="nrsvue">English (NRSVUE)</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
