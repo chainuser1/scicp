@@ -389,6 +389,19 @@ const Presenter = () => {
   const [viewerCount, setViewerCount]       = useState(0);
   // Phase 1: show alert when a second device tried to take the presenter role
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
+
+  // ── Session PIN gate ─────────────────────────────────────────────────────────
+  const [sessionPinActive, setSessionPinActive]     = useState(false);
+  // PIN entry modal — shown when joining a PIN-protected session
+  const [pinEntryOpen, setPinEntryOpen]             = useState(false);
+  const [pinInput, setPinInput]                     = useState('');
+  const [pinError, setPinError]                     = useState('');
+  const [pendingPinSession, setPendingPinSession]   = useState('');
+  // PIN management modal — accessible from the session popover
+  const [pinManageOpen, setPinManageOpen]           = useState(false);
+  const [pinManageInput, setPinManageInput]         = useState('');
+  const [pinManageConfirm, setPinManageConfirm]     = useState('');
+  const [pinManageError, setPinManageError]         = useState('');
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
@@ -601,15 +614,33 @@ const Presenter = () => {
 
   // ── The one and only way to connect: join the session the TV created ──────
   // Presenter types or scans the code shown on the TV/projector screen.
-  const joinTvSession = (codeOverride) => {
+  const joinTvSession = (codeOverride, pin) => {
     const normalized = normalizeSessionId(codeOverride || tvSessionInput);
     if (!normalized) {
       setSessionMessage('Enter the code shown on the TV screen');
       return;
     }
     setSessionMessage('Connecting…');
-    socket.emit('join-session', { sessionId: normalized, role: 'presenter' }, (response) => {
+    const payload = { sessionId: normalized, role: 'presenter' };
+    if (pin) payload.pin = pin;
+    socket.emit('join-session', payload, (response) => {
+      if (response?.requiresPin) {
+        setPendingPinSession(normalized);
+        setPinInput('');
+        setPinError('');
+        setPinEntryOpen(true);
+        setSessionMessage('PIN required');
+        return;
+      }
+      if (response?.pinIncorrect) {
+        setPinError('Incorrect PIN — try again');
+        return;
+      }
       if (response?.ok && response.sessionId) {
+        setPinEntryOpen(false);
+        setPinInput('');
+        setPendingPinSession('');
+        setSessionPinActive(!!response.pinSet);
         setSessionId(response.sessionId);
         setTvSessionInput('');
         setSessionMessage(`Connected — session ${response.sessionId}`);
@@ -645,6 +676,34 @@ const Presenter = () => {
     });
   };
 
+  const handleSetPin = () => {
+    if (!/^\d{4,8}$/.test(pinManageInput)) { setPinManageError('PIN must be 4–8 digits'); return; }
+    if (pinManageInput !== pinManageConfirm) { setPinManageError('PINs do not match'); return; }
+    socket.emit('set-session-pin', { sessionId, pin: pinManageInput }, (res) => {
+      if (res?.ok) {
+        setSessionPinActive(true);
+        setPinManageOpen(false);
+        setPinManageInput('');
+        setPinManageConfirm('');
+        setPinManageError('');
+      } else {
+        setPinManageError(res?.message || 'Failed to set PIN');
+      }
+    });
+  };
+
+  const handleClearPin = () => {
+    socket.emit('clear-session-pin', { sessionId }, (res) => {
+      if (res?.ok) {
+        setSessionPinActive(false);
+        setPinManageOpen(false);
+        setPinManageError('');
+      } else {
+        setPinManageError(res?.message || 'Failed to remove PIN');
+      }
+    });
+  };
+
   const closeTour = () => {
     setTourOpen(false);
     try {
@@ -666,6 +725,7 @@ const Presenter = () => {
       setSessionId(data.sessionId);
       setTvSessionInput(data.sessionId);
       setSessionMessage(`Session ${data.sessionId} ready`);
+      if (data.pinSet !== undefined) setSessionPinActive(!!data.pinSet);
       setHighlightedText('');
       setSessionPopover(false);
     };
@@ -1170,6 +1230,19 @@ const Presenter = () => {
                 {sessionId && (
                   <div className="popover-row">
                     <button className="theme-btn" style={{ width: '100%' }} onClick={leaveSession}>Leave Session</button>
+                  </div>
+                )}
+                {sessionId && (
+                  <div className="popover-row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                    <span className="pin-status-label">
+                      {sessionPinActive ? '🔒 PIN enabled' : '🔓 No PIN set'}
+                    </span>
+                    <button
+                      className="pin-manage-btn"
+                      onClick={() => { setPinManageOpen(true); setPinManageInput(''); setPinManageConfirm(''); setPinManageError(''); setSessionPopover(false); }}
+                    >
+                      {sessionPinActive ? 'Change / Remove' : 'Set PIN'}
+                    </button>
                   </div>
                 )}
                 <div className="session-message">{sessionMessage}</div>
@@ -2022,6 +2095,76 @@ const Presenter = () => {
                 ● Go Live
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* PIN Entry Modal — shown when a password-protected session requires a PIN */}
+      {pinEntryOpen && (
+        <div className="pin-modal-backdrop" onClick={() => { setPinEntryOpen(false); setSessionMessage(''); }}>
+          <div className="pin-modal" onClick={e => e.stopPropagation()}>
+            <div className="pin-modal-title">Session PIN Required</div>
+            <div className="pin-modal-hint">This session is protected. Ask the operator for the PIN.</div>
+            <input
+              className="pin-modal-input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              value={pinInput}
+              autoFocus
+              onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setPinError(''); }}
+              onKeyDown={e => e.key === 'Enter' && joinTvSession(pendingPinSession, pinInput)}
+              placeholder="••••"
+              aria-label="Session PIN"
+            />
+            {pinError && <div className="pin-modal-error">{pinError}</div>}
+            <div className="pin-modal-row">
+              <button className="pin-modal-btn" onClick={() => joinTvSession(pendingPinSession, pinInput)}>Unlock</button>
+              <button className="pin-modal-btn pin-modal-btn--cancel" onClick={() => { setPinEntryOpen(false); setSessionMessage(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Management Modal — set / change / remove the PIN for this session */}
+      {pinManageOpen && (
+        <div className="pin-modal-backdrop" onClick={() => setPinManageOpen(false)}>
+          <div className="pin-modal" onClick={e => e.stopPropagation()}>
+            <div className="pin-modal-title">{sessionPinActive ? 'Change Session PIN' : 'Set Session PIN'}</div>
+            <div className="pin-modal-hint">4–8 digit PIN. Required for future presenters joining this session.</div>
+            <input
+              className="pin-modal-input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              value={pinManageInput}
+              autoFocus
+              onChange={e => { setPinManageInput(e.target.value.replace(/\D/g, '')); setPinManageError(''); }}
+              onKeyDown={e => e.key === 'Enter' && pinManageInput === pinManageConfirm && handleSetPin()}
+              placeholder="New PIN"
+              aria-label="New PIN"
+            />
+            <input
+              className="pin-modal-input"
+              type="password"
+              inputMode="numeric"
+              maxLength={8}
+              value={pinManageConfirm}
+              onChange={e => { setPinManageConfirm(e.target.value.replace(/\D/g, '')); setPinManageError(''); }}
+              onKeyDown={e => e.key === 'Enter' && pinManageInput === pinManageConfirm && handleSetPin()}
+              placeholder="Confirm PIN"
+              aria-label="Confirm PIN"
+            />
+            {pinManageError && <div className="pin-modal-error">{pinManageError}</div>}
+            <div className="pin-modal-row">
+              <button className="pin-modal-btn" onClick={handleSetPin}>
+                {sessionPinActive ? 'Update PIN' : 'Set PIN'}
+              </button>
+              {sessionPinActive && (
+                <button className="pin-modal-btn pin-modal-btn--danger" onClick={handleClearPin}>Remove PIN</button>
+              )}
+              <button className="pin-modal-btn pin-modal-btn--cancel" onClick={() => setPinManageOpen(false)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}
