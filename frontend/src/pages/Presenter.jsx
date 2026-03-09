@@ -124,7 +124,7 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
 // Pip dots are capped at MAX_PIPS to avoid rendering 300 dots for broad queries.
 const MAX_PIPS = 7;
 
-const SearchResults = ({ results, currentPage, totalPages, totalResults, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId }) => {
+const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId }) => {
   if (results.length === 0) return null;
 
   // Build a compact pip sequence around the current page
@@ -228,7 +228,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
       try {
         const mod = await import('jsqr');
         jsQR = mod.default || mod;
-      } catch (_e) {
+      } catch {
         if (active) setError('QR scanner not available. Install jsqr: npm install jsqr');
         return;
       }
@@ -238,7 +238,7 @@ const QrScannerModal = ({ onCode, onClose }) => {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-      } catch (_e) {
+      } catch {
         if (active) setError('Camera access denied. Please allow camera permission and try again.');
         return;
       }
@@ -392,7 +392,6 @@ const Presenter = () => {
   });
   const [tourStep, setTourStep]             = useState(0);
 
-  const [goLiveBarVisible, setGoLiveBarVisible] = useState(false);
   const [setlist, setSetlist]                   = useState(() => {
     try {
       const raw = window.localStorage.getItem('scicp.presenter_setlist_v1');
@@ -400,7 +399,6 @@ const Presenter = () => {
     } catch { /* ignore */ }
     return [];
   });
-  const [setlistOpen, setSetlistOpen]           = useState(false);
 
   // Persist setlist to localStorage
   useEffect(() => {
@@ -566,7 +564,7 @@ const Presenter = () => {
         setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
         setMobileMenuOpen(false);
-        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch (_e) { /* storage unavailable */ }
+        try { window.localStorage.setItem(PRESENTER_LAST_SESSION_KEY, response.sessionId); } catch { /* storage unavailable */ }
       } else {
         setSessionMessage(response?.message || 'TV session not found — check the code');
       }
@@ -652,7 +650,7 @@ const Presenter = () => {
             setSessionMessage(`Reconnected — session ${response.sessionId}`);
           } else {
             // Last session is gone — clear it and wait for the presenter to scan/type
-            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch (_e) { /* ignore */ }
+            try { window.localStorage.removeItem(PRESENTER_LAST_SESSION_KEY); } catch { /* ignore */ }
             setSessionMessage('Scan the QR code on the TV screen, or type the session code');
           }
         });
@@ -671,7 +669,7 @@ const Presenter = () => {
     const handleConnectError = () => {
       setConnectionState('error');
     };
-    socket.on('search-results', ({ results, total, page }) => {
+    socket.on('search-results', ({ results, total }) => {
       setResults(results ?? []);
       setTotalResults(total ?? 0);
       // page is already set by the emitter — don't reset to 0 on paginated fetches
@@ -735,58 +733,6 @@ const Presenter = () => {
       document.removeEventListener('touchstart', handler);
     };
   }, [drawerOpen, themePopover, sessionPopover, mobileMenuOpen]);
-
-  /* ── Keyboard shortcuts ─────────────────────────────────────────────────
-     Active only when no input / textarea is focused so typing in search
-     doesn't accidentally trigger navigation.
-     Space  → next segment (or next verse if single-segment)
-     →      → next verse
-     ←      → previous verse
-     L      → go live (if staged)
-     E      → end live (if live)
-     Esc    → clear highlight
-     ────────────────────────────────────────────────────────────────────── */
-  useEffect(() => {
-    const handler = (e) => {
-      const tag = document.activeElement?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      switch (e.key) {
-        case ' ':
-        case 'ArrowRight':
-          e.preventDefault();
-          if (e.key === ' ' && liveVerse?.segments?.length > 1) {
-            navigateSegment('next');
-          } else {
-            fetchAdjacent('next');
-          }
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          fetchAdjacent('prev');
-          break;
-        case 'l':
-        case 'L':
-          if (staged) { e.preventDefault(); goLive(); }
-          break;
-        case 'e':
-        case 'E':
-          if (liveVerse) { e.preventDefault(); endLive(); }
-          break;
-        case 'Escape':
-          if (highlightedText) { e.preventDefault(); clearHighlight(); }
-          else if (drawerOpen) { e.preventDefault(); setDrawerOpen(false); }
-          break;
-        case '/':
-          e.preventDefault();
-          openDrawer('search');
-          break;
-        default: break;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
@@ -886,6 +832,12 @@ const Presenter = () => {
     setCurrentLanguage(lang);
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang });
+    // Re-run the current search in the new language so results update immediately
+    if (query.trim()) {
+      clearTimeout(searchDebounce.current);
+      setCurrentPage(0);
+      emitWithSession('search', { query, page: 0, pageSize: PAGE_SIZE, language: lang });
+    }
   };
 
   const renderPreviewText = () => {
@@ -906,6 +858,58 @@ const Presenter = () => {
     setDrawerTab(tab);
     setDrawerOpen(open => drawerTab === tab ? !open : true);
   };
+
+  /* ── Keyboard shortcuts ─────────────────────────────────────────────────
+     Active only when no input / textarea is focused so typing in search
+     doesn't accidentally trigger navigation.
+     Space  → next segment (or next verse if single-segment)
+     →      → next verse
+     ←      → previous verse
+     L      → go live (if staged)
+     E      → end live (if live)
+     Esc    → clear highlight
+     ────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    const handler = (e) => {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case ' ':
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.key === ' ' && liveVerse?.segments?.length > 1) {
+            navigateSegment('next');
+          } else {
+            fetchAdjacent('next');
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          fetchAdjacent('prev');
+          break;
+        case 'l':
+        case 'L':
+          if (staged) { e.preventDefault(); goLive(); }
+          break;
+        case 'e':
+        case 'E':
+          if (liveVerse) { e.preventDefault(); endLive(); }
+          break;
+        case 'Escape':
+          if (highlightedText) { e.preventDefault(); clearHighlight(); }
+          else if (drawerOpen) { e.preventDefault(); setDrawerOpen(false); }
+          break;
+        case '/':
+          e.preventDefault();
+          openDrawer('search');
+          break;
+        default: break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
 
   const hasSegments = liveVerse?.segments?.length > 1;
   const totalPages  = totalResults > 0 ? Math.ceil(totalResults / PAGE_SIZE) : (results.length > 0 ? 1 : 0);

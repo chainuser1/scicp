@@ -212,6 +212,7 @@ const BOOK_ABBREVIATIONS = {
   // Old Testament
   'gen': 'Genesis',
   'ex': 'Exodus',
+  'exo': 'Exodus',
   'lev': 'Leviticus',
   'num': 'Numbers',
   'deut': 'Deuteronomy',
@@ -261,8 +262,11 @@ const BOOK_ABBREVIATIONS = {
   // New Testament
   'matt': 'Matthew',
   'mark': 'Mark',
+  'mk': 'Mark',
   'luke': 'Luke',
+  'lk': 'Luke',
   'john': 'John',
+  'jn': 'John',
   'acts': 'Acts',
   'rom': 'Romans',
   '1 cor': '1 Corinthians',
@@ -285,6 +289,7 @@ const BOOK_ABBREVIATIONS = {
   'philem': 'Philemon',
   'heb': 'Hebrews',
   'james': 'James',
+  'jas': 'James',
   '1 pet': '1 Peter',
   '1pet': '1 Peter',
   '2 pet': '2 Peter',
@@ -320,6 +325,10 @@ const BOOK_ABBREVIATIONS = {
   
   // Doctrine and Covenants — all common spellings and abbreviations
   'd and c': 'Doctrine and Covenants',
+  'd. & c.': 'Doctrine and Covenants',
+  'd.&c.': 'Doctrine and Covenants',
+  'lds d&c': 'Doctrine and Covenants',
+  'doctrine covenants': 'Doctrine and Covenants',
   'd&c': 'Doctrine and Covenants',
   'dc': 'Doctrine and Covenants',
   'doc': 'Doctrine and Covenants',
@@ -339,6 +348,7 @@ const BOOK_ABBREVIATIONS = {
   'js-h': 'Joseph Smith—History',
   'jsh-h': 'Joseph Smith—History',
   'js-m': 'Joseph Smith—Matthew',
+  'jsm': 'Joseph Smith—Matthew',
   'aof': 'Articles of Faith',
   'articles of faith': 'Articles of Faith',
 
@@ -1028,9 +1038,9 @@ const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
 // We cap the internal scan at MAX_COUNT_SCAN to avoid full-table scans on
 // very broad OR queries (e.g. "faith" OR "love" OR "hope" = tens of thousands).
 const MAX_COUNT_SCAN = 2000;
-const runFTSCount = (matchQuery) => {
+const runFTSCount = (matchQuery, targetDb = db) => {
   try {
-    const stmt = db.prepare(`
+    const stmt = targetDb.prepare(`
       SELECT COUNT(*) AS total
       FROM (
         SELECT verse_id
@@ -1048,14 +1058,14 @@ const runFTSCount = (matchQuery) => {
 // runFTSQuery — fetch one page of results ranked by BM25 relevance.
 // offset allows true server-side pagination: the DB does the skipping,
 // nothing unnecessary is loaded into memory or sent over the socket.
-const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0) => {
+const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, targetDb = db) => {
   const literalPattern = rawPhrase
     ? `%${rawPhrase.trim().toLowerCase()}%`
     : null;
 
   // The inner subquery fetches limit+offset rows so BM25 ranking is stable
   // across pages — the same query plan is used each time, offsets are cheap.
-  const stmt = db.prepare(`
+  const stmt = targetDb.prepare(`
     SELECT
       s.volume_id, s.book_id, s.chapter_id, s.verse_id,
       s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
@@ -1085,7 +1095,9 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0) => {
 // phraseSearch — paginated, returns { results: [...], total: N }
 // page is 0-based. pageSize controls rows returned. total is capped at
 // MAX_COUNT_SCAN so the count query stays fast on broad OR searches.
-const phraseSearch = (phrase, page = 0, pageSize = 10) => {
+// targetDb defaults to the English db; pass db_tagalog or db_cebuano for
+// multilingual searches. FTS5 is tried first; LIKE is the fallback.
+const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
   if (!phrase || !phrase.trim()) return { results: [], total: 0 };
 
   const raw    = phrase.trim();
@@ -1093,7 +1105,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10) => {
   const alias  = applyDoctrineAliases(raw);
 
   try {
-    const ftsExists = db.prepare(
+    const ftsExists = targetDb.prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'`
     ).get();
 
@@ -1101,30 +1113,27 @@ const phraseSearch = (phrase, page = 0, pageSize = 10) => {
 
       if (alias) {
         // Pass 0 — exact FTS5 phrase match on each alias phrase.
-        // For aliases we build a combined OR-of-phrases query so we can
-        // paginate cleanly with a single LIMIT/OFFSET rather than merging
-        // multiple result sets across page boundaries.
         const phraseQueries = (alias.phrases || []).map(buildFTSPhraseQuery);
         if (phraseQueries.length > 0) {
           const combined = phraseQueries.join(' OR ');
-          const total   = runFTSCount(combined);
-          const results = runFTSQuery(combined, raw, pageSize, offset);
+          const total   = runFTSCount(combined, targetDb);
+          const results = runFTSQuery(combined, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 1 — AND on alias terms
         const andQ = buildFTSTermQuery(alias.terms || [], 'and');
         if (andQ) {
-          const total   = runFTSCount(andQ);
-          const results = runFTSQuery(andQ, raw, pageSize, offset);
+          const total   = runFTSCount(andQ, targetDb);
+          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 2 — OR on alias terms
         const orQ = buildFTSTermQuery(alias.terms || [], 'or');
         if (orQ) {
-          const total   = runFTSCount(orQ);
-          const results = runFTSQuery(orQ, raw, pageSize, offset);
+          const total   = runFTSCount(orQ, targetDb);
+          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
@@ -1134,32 +1143,32 @@ const phraseSearch = (phrase, page = 0, pageSize = 10) => {
         // Pass 0 — exact phrase on raw input (multi-word only)
         if (raw.split(/\s+/).length > 1) {
           const exactQ  = buildFTSPhraseQuery(raw);
-          const total   = runFTSCount(exactQ);
-          const results = runFTSQuery(exactQ, raw, pageSize, offset);
+          const total   = runFTSCount(exactQ, targetDb);
+          const results = runFTSQuery(exactQ, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 1 — AND on raw terms
         const andQ = buildFTSMatchQuery(raw);
         if (andQ) {
-          const total   = runFTSCount(andQ);
-          const results = runFTSQuery(andQ, raw, pageSize, offset);
+          const total   = runFTSCount(andQ, targetDb);
+          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 2 — OR on raw terms
         const orQ = buildFTSMatchQuery(raw, { orFallback: true });
         if (orQ) {
-          const total   = runFTSCount(orQ);
-          const results = runFTSQuery(orQ, raw, pageSize, offset);
+          const total   = runFTSCount(orQ, targetDb);
+          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
 
         // Pass 3 — prefix wildcard for single-word input
         if (raw.split(/\s+/).length === 1) {
           const wq      = `${raw}*`;
-          const total   = runFTSCount(wq);
-          const results = runFTSQuery(wq, raw, pageSize, offset);
+          const total   = runFTSCount(wq, targetDb);
+          const results = runFTSQuery(wq, raw, pageSize, offset, targetDb);
           if (results.length > 0 || total > 0) return { results, total };
         }
       }
@@ -1175,12 +1184,12 @@ const phraseSearch = (phrase, page = 0, pageSize = 10) => {
   const likeParams = [];
   fallbackTerms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
 
-  const countRow = db.prepare(`
+  const countRow = targetDb.prepare(`
     SELECT COUNT(*) AS total FROM scriptures WHERE ${clauses.join(' AND ')}
   `).get(...likeParams);
   const total = Math.min(countRow?.total ?? 0, MAX_COUNT_SCAN);
 
-  const results = db.prepare(`
+  const results = targetDb.prepare(`
     SELECT book_id, book_title, chapter_number, verse_number,
            scripture_text, verse_title, verse_id
     FROM scriptures
@@ -1282,27 +1291,9 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, targetDb) => {
     } catch (_e) { /* fall through to LIKE */ }
   }
 
-  // LIKE fallback for non-English DBs (may not have FTS tables)
-  const terms  = input.trim().split(/\s+/).filter(Boolean);
-  const clause = terms.map(() => 'scripture_text LIKE ?').join(' AND ');
-  const params = terms.map(t => `%${t}%`);
-
-  try {
-    const total = Math.min(
-      targetDb.prepare(`SELECT COUNT(*) AS total FROM scriptures WHERE ${clause}`).get(...params)?.total ?? 0,
-      MAX_COUNT_SCAN
-    );
-    const results = targetDb.prepare(`
-      SELECT book_title, chapter_number, verse_number,
-             scripture_text, verse_title, verse_id
-      FROM scriptures
-      WHERE ${clause}
-      ORDER BY verse_id LIMIT ? OFFSET ?
-    `).all(...params, pageSize, offset);
-    return { results, total };
-  } catch (_e) {
-    return { results: [], total: 0 };
-  }
+  // Delegate to phraseSearch which tries FTS5 first, then LIKE as fallback.
+  // targetDb is threaded through so the correct database is used throughout.
+  return phraseSearch(input, page, pageSize, targetDb);
 };
 
 // direction should be 'next' or 'prev'
