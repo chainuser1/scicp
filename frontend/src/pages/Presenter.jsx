@@ -124,7 +124,7 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
 // Pip dots are capped at MAX_PIPS to avoid rendering 300 dots for broad queries.
 const MAX_PIPS = 7;
 
-const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId }) => {
+const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang }) => {
   if (results.length === 0) return null;
 
   // Build a compact pip sequence around the current page
@@ -153,11 +153,26 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
             <div className="result-item-top">
               <span className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
               <div className="result-item-btns">
+                {onToggleTranslation && (
+                  <button className="result-translation-toggle"
+                    onClick={e => { e.stopPropagation(); onToggleTranslation(verse.verse_id); }}
+                    title="Preview in another language">
+                    {srLang === 'en' ? 'TL' : srLang === 'tl' ? 'CEB' : 'EN'}
+                  </button>
+                )}
                 <button className="result-add-icon" onClick={e => { e.stopPropagation(); onAddToSetlist(verse); }} aria-label="Add to setlist" title="Add to setlist">+</button>
                 <button className="result-live-icon" onClick={e => { e.stopPropagation(); onGoLive(verse); }} aria-label="Go live" title="Go live">●</button>
               </div>
             </div>
             <div className="result-text">{verse.scripture_text}</div>
+            {expandedTranslations?.has(verse.verse_id) && (
+              <div className="result-translation-snippet">
+                {(() => {
+                  const tl = srLang === 'en' ? 'tl' : srLang === 'tl' ? 'ceb' : 'tl';
+                  return translationCache?.[`${verse.verse_id}_${tl}`] || 'Loading…';
+                })()}
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -398,23 +413,88 @@ const Presenter = () => {
     return [];
   });
 
+  // ── F1 — Browse ─────────────────────────────────────────────────────────────
+  const [browseLevel, setBrowseLevel]                     = useState('books');
+  const [browseBooks, setBrowseBooks]                     = useState([]);
+  const [browseChapters, setBrowseChapters]               = useState([]);
+  const [browseVerses, setBrowseVerses]                   = useState([]);
+  const [browseSelectedBook, setBrowseSelectedBook]       = useState(null);
+  const [browseSelectedChapter, setBrowseSelectedChapter] = useState(null);
+  const [browseBooksLoaded, setBrowseBooksLoaded]         = useState(false);
+
+  // ── F2 / F12 — Announcement / Custom Text ────────────────────────────────────
+  const [customText, setCustomText]       = useState('');
+  const [customSubtext, setCustomSubtext] = useState('');
+  const [isCustomLive, setIsCustomLive]   = useState(false);
+
+  // ── F3 — Saved Setlists ──────────────────────────────────────────────────────
+  const [savedSetlists, setSavedSetlists]     = useState([]);
+  const [setlistSaveOpen, setSetlistSaveOpen] = useState(false);
+  const [setlistSaveName, setSetlistSaveName] = useState('');
+  const [setlistLoadOpen, setSetlistLoadOpen] = useState(false);
+  const [setlistsLoading, setSetlistsLoading] = useState(false);
+
+  // ── F4 — Translation Preview ─────────────────────────────────────────────────
+  const [expandedTranslations, setExpandedTranslations] = useState(() => new Set());
+  const [translationCache, setTranslationCache]         = useState({});
+
+  // ── F6 — Verse Notes (private, never sent to TV) ─────────────────────────────
+  const [verseNotes, setVerseNotes] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('scicp.verse_notes_v1')) || {}; } catch { return {}; }
+  });
+  const [notesExpandedFor, setNotesExpandedFor] = useState(() => new Set());
+
+  // ── F8 — Secondary (dual) Language displayed on TV ───────────────────────────
+  const [secondaryLanguage, setSecondaryLanguage] = useState(() => {
+    try { return localStorage.getItem('scicp.secondary_language_v1') || ''; } catch { return ''; }
+  });
+
+  // ── F12 — Runsheet text-item draft ───────────────────────────────────────────
+  const [runsheetAddingText, setRunsheetAddingText]     = useState(false);
+  const [runsheetTextDraft, setRunsheetTextDraft]       = useState('');
+  const [runsheetSubtextDraft, setRunsheetSubtextDraft] = useState('');
+
   // Persist setlist to localStorage
   useEffect(() => {
     try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
     catch { /* ignore */ }
   }, [setlist]);
 
+  // F6 — persist verse notes
+  useEffect(() => {
+    try { localStorage.setItem('scicp.verse_notes_v1', JSON.stringify(verseNotes)); } catch { /* ignore */ }
+  }, [verseNotes]);
+
+  // F8 — persist secondary language choice
+  useEffect(() => {
+    try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
+  }, [secondaryLanguage]);
+
+  // F1 — reset book list when language changes
+  useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
+
+  // F1 — fetch books when Browse tab is opened
+  useEffect(() => {
+    if (drawerTab === 'browse' && !browseBooksLoaded) {
+      fetch(`${API_URL}/browse/books?language=${currentLanguage}`)
+        .then(r => r.ok ? r.json() : [])
+        .then(data => { setBrowseBooks(data); setBrowseBooksLoaded(true); })
+        .catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerTab, browseBooksLoaded, currentLanguage]);
+
   const addToSetlist = (verse) => {
     setSetlist(prev => {
-      if (prev.some(v => v.verse_id === verse.verse_id)) return prev; // no duplicates
+      if (prev.some(v => v.verse_id != null && v.verse_id === verse.verse_id)) return prev; // no duplicates
       const updated = [...prev, { ...verse, theme: currentTheme }];
       showToast(`Added to setlist`);
       return updated;
     });
   };
 
-  const removeFromSetlist = (verse_id) => {
-    setSetlist(prev => prev.filter(v => v.verse_id !== verse_id));
+  const removeFromSetlist = (itemKey) => {
+    setSetlist(prev => prev.filter(v => (v.verse_id ?? v.id) !== itemKey));
   };
 
   const moveSetlistItem = (fromIdx, toIdx) => {
@@ -427,8 +507,14 @@ const Presenter = () => {
     });
   };
 
-  const goLiveFromSetlist = (verse) => {
-    goLiveDirectly(verse);
+  const goLiveFromSetlist = (item) => {
+    if (item.type === 'text') {
+      emitWithSession('go-custom', { text: item.customText, subtext: item.customSubtext, theme: currentTheme });
+      setIsCustomLive(true);
+      showToast('Announcement sent to screen');
+    } else {
+      goLiveDirectly(item);
+    }
   };
 
   // Persist presenter history to localStorage so it survives page refresh
@@ -461,6 +547,7 @@ const Presenter = () => {
     setLiveVerse(null);
     setHighlightedText('');
     setCurrentSegment(0);
+    setIsCustomLive(false);
     showToast('Screen cleared — TV showing QR code');
   };
 
@@ -725,13 +812,18 @@ const Presenter = () => {
 
   const selectVerse = verse => {
     setStaged({ ...verse, theme: currentTheme });
+    // F11 — preload background into TV browser cache before go-live
+    if (currentTheme?.background_url) {
+      const match = String(currentTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
+      if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
+    }
     // Drawer stays open so presenter can keep browsing.
     // Go Live button / double-click / ● icon still sends live immediately.
   };
 
   const goLiveDirectly = verse => {
     const v = { ...verse, theme: currentTheme };
-    emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
+    emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(v);
     setCurrentSegment(0);
     setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
@@ -740,7 +832,7 @@ const Presenter = () => {
 
   const goLive = () => {
     if (!staged) return;
-    emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage });
+    emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(staged);
     setCurrentSegment(0);
     setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
@@ -772,7 +864,7 @@ const Presenter = () => {
       if (preferStaged && staged) {
         setStaged(v);
       } else {
-        emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage });
+        emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
         setLiveVerse(v);
         setCurrentSegment(0);
         setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
@@ -791,7 +883,7 @@ const Presenter = () => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     emitWithSession('update-language', { language: lang });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang, secondaryLanguage: secondaryLanguage || null });
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
@@ -812,6 +904,99 @@ const Presenter = () => {
         ? <span key={i} className="highlight-yellow preview-highlight">{part}</span>
         : part
     );
+  };
+
+  // ── F1 — Browse handlers ───────────────────────────────────────────────────
+  const handleBrowseBook = async (book) => {
+    setBrowseSelectedBook(book);
+    const res = await fetch(`${API_URL}/browse/chapters?book_id=${book.book_id}&language=${currentLanguage}`).catch(() => null);
+    if (res?.ok) setBrowseChapters(await res.json());
+    setBrowseLevel('chapters');
+  };
+  const handleBrowseChapter = async (chapter) => {
+    setBrowseSelectedChapter(chapter);
+    const res = await fetch(`${API_URL}/browse/verses?chapter_id=${chapter.chapter_id}&language=${currentLanguage}`).catch(() => null);
+    if (res?.ok) setBrowseVerses(await res.json());
+    setBrowseLevel('verses');
+  };
+
+  // ── F2 — Send announcement to screen ──────────────────────────────────────
+  const sendCustomToScreen = () => {
+    if (!customText.trim()) return;
+    emitWithSession('go-custom', { text: customText.trim(), subtext: customSubtext.trim(), theme: currentTheme });
+    setIsCustomLive(true);
+    showToast('Announcement sent to screen');
+  };
+
+  // ── F3 — Named setlist persistence ────────────────────────────────────────
+  const fetchSavedSetlists = async () => {
+    setSetlistsLoading(true);
+    try {
+      const r = await fetch(`${API_URL}/setlists`);
+      if (r.ok) setSavedSetlists(await r.json());
+    } finally { setSetlistsLoading(false); }
+  };
+  const saveSetlist = async () => {
+    const name = setlistSaveName.trim();
+    if (!name) return;
+    await fetch(`${API_URL}/setlists`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, items: setlist }),
+    });
+    setSetlistSaveOpen(false);
+    setSetlistSaveName('');
+    showToast(`Setlist "${name}" saved`);
+  };
+  const loadSetlist = (saved) => {
+    if (!window.confirm(`Replace current setlist with "${saved.name}"?`)) return;
+    setSetlist(saved.items);
+    setSetlistLoadOpen(false);
+    showToast(`Loaded "${saved.name}"`);
+  };
+  const deleteSavedSetlist = async (id) => {
+    await fetch(`${API_URL}/setlists/${id}`, { method: 'DELETE' });
+    setSavedSetlists(prev => prev.filter(s => s.id !== id));
+  };
+
+  // ── F4 — Translation preview in search results ────────────────────────────
+  const toggleTranslation = async (verse_id) => {
+    const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'tl';
+    const cacheKey = `${verse_id}_${targetLang}`;
+    setExpandedTranslations(prev => {
+      const next = new Set(prev);
+      next.has(verse_id) ? next.delete(verse_id) : next.add(verse_id);
+      return next;
+    });
+    if (!translationCache[cacheKey]) {
+      const res = await fetch(`${API_URL}/verse/${verse_id}/translation?language=${targetLang}`).catch(() => null);
+      if (res?.ok) {
+        const d = await res.json();
+        setTranslationCache(c => ({ ...c, [cacheKey]: d.scripture_text }));
+      }
+    }
+  };
+
+  // ── F6 — Verse notes ──────────────────────────────────────────────────────
+  const updateVerseNote = (key, text) =>
+    setVerseNotes(prev => ({ ...prev, [key]: text }));
+  const toggleNotesExpanded = (key) =>
+    setNotesExpandedFor(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+
+  // ── F12 — Add text/announcement item to service order ────────────────────
+  const addTextItem = () => {
+    if (!runsheetTextDraft.trim()) return;
+    setSetlist(prev => [...prev, {
+      type: 'text',
+      id: `text_${Date.now()}`,
+      customText: runsheetTextDraft.trim(),
+      customSubtext: runsheetSubtextDraft.trim(),
+      theme: currentTheme,
+    }]);
+    setRunsheetTextDraft('');
+    setRunsheetSubtextDraft('');
+    setRunsheetAddingText(false);
+    showToast('Text item added to service order');
   };
 
   const openDrawer = tab => {
@@ -999,6 +1184,19 @@ const Presenter = () => {
             <option value="tl">TL</option>
             <option value="ceb">CEB</option>
           </select>
+          {/* F8 — secondary language displayed on TV below main text */}
+          <select
+            className="hdr-lang-select hdr-lang-secondary"
+            value={secondaryLanguage}
+            onChange={e => setSecondaryLanguage(e.target.value)}
+            title="Also show this translation on the TV screen"
+            aria-label="Secondary display language"
+          >
+            <option value="">+Lang</option>
+            <option value="tl">+TL</option>
+            <option value="ceb">+CEB</option>
+            <option value="en">+EN</option>
+          </select>
 
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
@@ -1144,6 +1342,17 @@ const Presenter = () => {
                     >{lang.toUpperCase()}</button>
                   ))}
                 </div>
+                {/* F8 — secondary language */}
+                <div className="mobile-menu-row" style={{ marginTop: '0.35rem' }}>
+                  <span className="mobile-menu-label" style={{ margin: 0, marginRight: '0.4rem' }}>+Screen</span>
+                  {['', 'tl', 'ceb', 'en'].map(lang => (
+                    <button
+                      key={`sec-${lang}`}
+                      className={`theme-btn${secondaryLanguage === lang ? ' active' : ''}`}
+                      onClick={() => setSecondaryLanguage(lang)}
+                    >{lang ? `+${lang.toUpperCase()}` : 'Off'}</button>
+                  ))}
+                </div>
               </div>
 
               <div className="mobile-menu-divider" />
@@ -1247,6 +1456,9 @@ const Presenter = () => {
             <button className={`drawer-tab${drawerTab === 'setlist' ? ' active' : ''}`} onClick={() => setDrawerTab('setlist')}>
               ☰ Setlist{setlist.length > 0 ? ` (${setlist.length})` : ''}
             </button>
+            <button className={`drawer-tab${drawerTab === 'browse' ? ' active' : ''}`} onClick={() => setDrawerTab('browse')}>
+              ☷ Browse
+            </button>
           </div>
           {staged && (
             <span className="drawer-staged-badge" title="Verse staged — press Go Live">
@@ -1299,6 +1511,10 @@ const Presenter = () => {
                         emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE, language: currentLanguage });
                       }}
                       stagedVerseId={staged?.verse_id}
+                      onToggleTranslation={toggleTranslation}
+                      expandedTranslations={expandedTranslations}
+                      translationCache={translationCache}
+                      currentLanguage={currentLanguage}
                     />
                   : <div className="empty-state">
                       {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin…</>}
@@ -1351,34 +1567,142 @@ const Presenter = () => {
                 <div className="empty-state">Verses you display<br />will appear here</div>
               )}
             </div>
-          ) : (
+          ) : drawerTab === 'setlist' ? (
             <div className="drawer-setlist">
+              {/* ── F3/F12 toolbar ── */}
+              <div className="setlist-toolbar">
+                <button className="setlist-toolbar-btn" onClick={() => setSetlistSaveOpen(o => !o)}>↓ Save</button>
+                <button className="setlist-toolbar-btn" onClick={() => { setSetlistLoadOpen(o => !o); if (!setlistLoadOpen) fetchSavedSetlists(); }}>↑ Load</button>
+                <button className="setlist-toolbar-btn" onClick={() => setRunsheetAddingText(o => !o)}>+ Text</button>
+              </div>
+              {setlistSaveOpen && (
+                <div className="setlist-save-row">
+                  <input className="popover-input" placeholder="Setlist name…" value={setlistSaveName}
+                    onChange={e => setSetlistSaveName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveSetlist()} />
+                  <button className="popover-apply" onClick={saveSetlist}>Save</button>
+                </div>
+              )}
+              {setlistLoadOpen && (
+                <div className="setlist-load-list">
+                  {setlistsLoading ? <div className="empty-state">Loading…</div>
+                  : savedSetlists.length === 0 ? <div className="empty-state">No saved setlists</div>
+                  : savedSetlists.map(s => (
+                    <div key={s.id} className="setlist-load-item">
+                      <div className="setlist-load-item-info" onClick={() => loadSetlist(s)}>
+                        <span className="setlist-load-item-name">{s.name}</span>
+                        <span className="setlist-load-item-count">{s.items.length} item{s.items.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <button className="setlist-remove-btn" onClick={() => deleteSavedSetlist(s.id)}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {runsheetAddingText && (
+                <div className="setlist-text-draft-area">
+                  <input className="popover-input" placeholder="Announcement text…" value={runsheetTextDraft}
+                    onChange={e => setRunsheetTextDraft(e.target.value)} />
+                  <input className="popover-input" placeholder="Subtext (optional)" value={runsheetSubtextDraft}
+                    onChange={e => setRunsheetSubtextDraft(e.target.value)} />
+                  <div className="setlist-draft-actions">
+                    <button className="popover-apply" onClick={addTextItem}>Add</button>
+                    <button className="theme-btn" onClick={() => setRunsheetAddingText(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
               {setlist.length > 0 ? (
                 <>
                   <div className="setlist-hint">Tap ● to go live · ↑↓ to reorder · × to remove</div>
                   <ul className="setlist-list">
-                    {setlist.map((verse, i) => (
-                      <li key={verse.verse_id} className={`setlist-item${liveVerse?.verse_id === verse.verse_id ? ' setlist-item--live' : ''}`}>
-                        <div className="setlist-order">
-                          <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i - 1)} disabled={i === 0} aria-label="Move up">↑</button>
-                          <span className="setlist-num">{i + 1}</span>
-                          <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i + 1)} disabled={i === setlist.length - 1} aria-label="Move down">↓</button>
-                        </div>
-                        <div className="setlist-verse-info" onClick={() => setStaged(verse)}>
-                          <span className="setlist-ref">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-                          <span className="setlist-text">{verse.scripture_text?.slice(0, 60)}…</span>
-                        </div>
-                        <div className="setlist-actions">
-                          <button className="setlist-live-btn" onClick={() => goLiveFromSetlist(verse)}>●</button>
-                          <button className="setlist-remove-btn" onClick={() => removeFromSetlist(verse.verse_id)}>×</button>
-                        </div>
-                      </li>
-                    ))}
+                    {setlist.map((item, i) => {
+                      const isTextItem = item.type === 'text';
+                      const itemKey = item.verse_id ?? item.id;
+                      return (
+                        <li key={itemKey} className={`setlist-item${isTextItem ? ' setlist-item--text' : ''}${liveVerse?.verse_id === item.verse_id ? ' setlist-item--live' : ''}`}>
+                          <div className="setlist-order">
+                            <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i - 1)} disabled={i === 0} aria-label="Move up">↑</button>
+                            <span className="setlist-num">{i + 1}</span>
+                            <button className="setlist-move-btn" onClick={() => moveSetlistItem(i, i + 1)} disabled={i === setlist.length - 1} aria-label="Move down">↓</button>
+                          </div>
+                          <div className="setlist-verse-info" onClick={() => !isTextItem && setStaged(item)}>
+                            {isTextItem ? (
+                              <>
+                                <span className="setlist-ref">📢 {item.customText?.slice(0, 40)}{item.customText?.length > 40 ? '…' : ''}</span>
+                                {item.customSubtext && <span className="setlist-text">{item.customSubtext}</span>}
+                              </>
+                            ) : (
+                              <>
+                                <span className="setlist-ref">{item.book_title} {item.chapter_number}:{item.verse_number}</span>
+                                <span className="setlist-text">{item.scripture_text?.slice(0, 60)}…</span>
+                              </>
+                            )}
+                            <button className="setlist-notes-btn" onClick={e => { e.stopPropagation(); toggleNotesExpanded(itemKey); }} title="Notes">
+                              {notesExpandedFor.has(itemKey) ? '▴' : '✎'}
+                            </button>
+                            {notesExpandedFor.has(itemKey) && (
+                              <textarea className="setlist-notes-area" placeholder="Private notes (not shown on TV)…"
+                                value={verseNotes[itemKey] || ''} onClick={e => e.stopPropagation()}
+                                onChange={e => updateVerseNote(itemKey, e.target.value)} rows={2} />
+                            )}
+                          </div>
+                          <div className="setlist-actions">
+                            <button className="setlist-live-btn" onClick={() => goLiveFromSetlist(item)}>●</button>
+                            <button className="setlist-remove-btn" onClick={() => removeFromSetlist(itemKey)}>×</button>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                   <button className="setlist-clear-btn" onClick={() => { if (window.confirm('Clear entire setlist?')) setSetlist([]); }}>Clear Setlist</button>
                 </>
               ) : (
-                <div className="empty-state">No verses in setlist yet.<br />Search and tap + to add.</div>
+                <div className="empty-state">No items yet.<br />Search and tap + to add,<br />or use + Text for announcements.</div>
+              )}
+            </div>
+          ) : (
+            <div className="drawer-browse">
+              {browseLevel !== 'books' && (
+                <button className="browse-back-btn" onClick={() => setBrowseLevel(browseLevel === 'verses' ? 'chapters' : 'books')}>
+                  <IconChevronLeft />
+                  {browseLevel === 'verses'
+                    ? `${browseSelectedBook?.book_title} ${browseSelectedChapter?.chapter_number}`
+                    : browseSelectedBook?.book_title}
+                </button>
+              )}
+              {browseLevel === 'books' && (
+                browseBooks.length === 0
+                  ? <div className="empty-state">Loading…</div>
+                  : <ul className="browse-book-list">
+                      {browseBooks.map(b => (
+                        <li key={b.book_id} className="browse-book-item" onClick={() => handleBrowseBook(b)}>
+                          <div className="browse-book-info">
+                            <span className="browse-book-title">{b.book_title}</span>
+                            <span className="browse-book-meta">{b.volume_short_title} · {b.chapter_count} ch</span>
+                          </div>
+                          <IconChevronRight />
+                        </li>
+                      ))}
+                    </ul>
+              )}
+              {browseLevel === 'chapters' && (
+                <div className="browse-chapter-grid">
+                  {browseChapters.map(c => (
+                    <button key={c.chapter_id} className="browse-chapter-btn" onClick={() => handleBrowseChapter(c)}>
+                      {c.chapter_number}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {browseLevel === 'verses' && (
+                <ul className="browse-verse-list">
+                  {browseVerses.map(v => (
+                    <li key={v.verse_id}
+                      className={`browse-verse-item${Number(v.verse_id) === Number(staged?.verse_id) ? ' browse-verse-item--staged' : ''}`}
+                      onClick={() => { selectVerse(v); setDrawerOpen(false); }}>
+                      <span className="browse-verse-num">{v.verse_number}</span>
+                      <span className="browse-verse-text">{v.scripture_text}</span>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}
@@ -1530,6 +1854,24 @@ const Presenter = () => {
           </section>
         )}
 
+        {/* ── F2 / F12 — Announcement card ── */}
+        <section className="card card--custom">
+          <div className="card-header">
+            <span className="card-label">📢 Announcement</span>
+            {isCustomLive && <button className="end-live-btn" onClick={endLive}>◼ End Custom</button>}
+          </div>
+          <div className="custom-text-form">
+            <textarea className="custom-text-area" placeholder="Text shown large on screen…"
+              value={customText} onChange={e => setCustomText(e.target.value)} rows={3} />
+            <input className="custom-subtext-input" type="text" placeholder="Subtext / attribution (optional)"
+              value={customSubtext} onChange={e => setCustomSubtext(e.target.value)} />
+          </div>
+          <button className={`go-live-button${!customText.trim() ? ' go-live-button--disabled' : ''}`}
+            disabled={!customText.trim()} onClick={sendCustomToScreen}>
+            ▶ Send to Screen
+          </button>
+        </section>
+
         {/* ── Live preview card ── */}
         {liveVerse && (
           <section className="card card--preview">
@@ -1565,7 +1907,13 @@ const Presenter = () => {
               </button>
               <div className="preview-nav-meta">
                 <span>{liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}</span>
-                {hasSegments && <span>{currentSegment + 1}/{liveVerse.segments.length}</span>}
+                {hasSegments && (
+                  <div className="segment-dots-presenter">
+                    {liveVerse.segments.map((_, idx) => (
+                      <span key={idx} className={`seg-dot${idx === currentSegment ? ' seg-dot--active' : idx < currentSegment ? ' seg-dot--past' : ''}`} />
+                    ))}
+                  </div>
+                )}
               </div>
               <button className="preview-nav-btn" onClick={() => navigateSegment('next')}
                 disabled={!hasSegments || currentSegment === liveVerse.segments.length - 1}

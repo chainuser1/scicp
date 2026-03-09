@@ -193,7 +193,21 @@ function Client() {
 
   // Eager call on mount so QR appears immediately
   useEffect(() => {
-    createClientSession();
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionParam = urlParams.get('session');
+    if (sessionParam) {
+      // F13 — Secondary screen: join an existing session directly
+      const sid = sessionParam.toUpperCase();
+      setClientSessionId(sid);
+      clientSessionIdRef.current = sid;
+      joinedSessionRef.current = sid;
+      setPresenterJoined(true);
+      presenterJoinedRef.current = true;
+      setIsSecondaryScreen(true);
+      socket.emit('join-session', { sessionId: sid, role: 'viewer' }, () => {});
+    } else {
+      createClientSession();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -269,6 +283,14 @@ function Client() {
     }, 1400);
   }, [bgUrl]);
 
+  // F14 — Reset (or start) the screensaver countdown
+  const resetScreensaver = useCallback(() => {
+    setIsScreensaver(false);
+    if (screensaverTimerRef.current) clearTimeout(screensaverTimerRef.current);
+    screensaverTimerRef.current = setTimeout(() => setIsScreensaver(true), SCREENSAVER_DELAY);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ─── Show VOTD on the TV display while presenter is connected but idle ──────
   // This is called the moment the presenter joins, so the TV never shows a blank
   // background. The verse fades in with the same animation as a real live verse.
@@ -281,6 +303,17 @@ function Client() {
 
   // ─── When votd arrives (or when pending flag is set), push it to the display ─
   const [votdPending, setVotdPending] = useState(false);
+
+  // F2 — Custom text / announcement mode
+  const [customData, setCustomData] = useState(null);
+
+  // F13 — Secondary screen (URL ?session= param)
+  const [isSecondaryScreen, setIsSecondaryScreen] = useState(false);
+
+  // F14 — Idle screensaver
+  const screensaverTimerRef = useRef(null);
+  const [isScreensaver, setIsScreensaver] = useState(false);
+  const SCREENSAVER_DELAY = 10 * 60 * 1000; // 10 min
 
   useEffect(() => {
     if (!votdPending || !votd || !presenterJoinedRef.current) return;
@@ -325,6 +358,8 @@ function Client() {
 
     const handleVerse = (data) => {
       setHighlightedText('');
+      setCustomData(null);
+      resetScreensaver();
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
       // Step 1 — fade text out
@@ -342,6 +377,7 @@ function Client() {
     };
 
     const handleTheme = (theme) => {
+      resetScreensaver();
       if (theme.background_url) crossfadeBackground(theme.background_url);
       // Theme change: just crossfade the background, keep text visible
       setVerse((v) => ({ ...v, theme }));
@@ -370,6 +406,8 @@ function Client() {
     const handleClearScreen = () => {
       // Presenter ended live — return to connected-idle and show VOTD again.
       // Do NOT go back to the QR screen — presenter is still connected.
+      setCustomData(null);
+      resetScreensaver();
       setTextVisible(false);
       setTimeout(() => {
         setDisplayVerse(null);
@@ -426,37 +464,63 @@ function Client() {
     const handleReconnect    = () => setConnectionState('reconnecting');
     const handleConnectError = () => setConnectionState('error');
 
-    socket.on('update-verse',      handleVerse);
-    socket.on('update-theme',      handleTheme);
-    socket.on('highlight-text',    handleHighlight);
-    socket.on('session-joined',    handleSessionJoined);
-    socket.on('clear-screen',      handleClearScreen);
-    socket.on('presenter-left',    handlePresenterLeft);
-    socket.on('presenter-joined',  handlePresenterJoined);
-    socket.on('session-error',     handleSessionError);
-    socket.on('connect',           handleConnect);
-    socket.on('disconnect',        handleDisconnect);
-    socket.on('reconnect_attempt', handleReconnect);
-    socket.on('connect_error',     handleConnectError);
+    // F2 — custom-text: announcement / free-text mode
+    const handleCustomText = (data) => {
+      if (data.theme) crossfadeBackground(data.theme.background_url || bgUrl);
+      resetScreensaver();
+      setTextVisible(false);
+      setTimeout(() => {
+        setCustomData(data);
+        setDisplayVerse(null);
+        setIsIdle(false);
+        requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));
+      }, TEXT_FADE_MS);
+    };
+
+    // F11 — preload-background: warm up the image cache before go-live
+    const handlePreloadBackground = ({ background_url }) => {
+      if (!background_url) return;
+      const img = new Image();
+      img.referrerPolicy = 'no-referrer';
+      img.src = background_url;
+    };
+
+    socket.on('update-verse',         handleVerse);
+    socket.on('update-theme',         handleTheme);
+    socket.on('highlight-text',       handleHighlight);
+    socket.on('session-joined',       handleSessionJoined);
+    socket.on('clear-screen',         handleClearScreen);
+    socket.on('presenter-left',       handlePresenterLeft);
+    socket.on('presenter-joined',     handlePresenterJoined);
+    socket.on('session-error',        handleSessionError);
+    socket.on('connect',              handleConnect);
+    socket.on('disconnect',           handleDisconnect);
+    socket.on('reconnect_attempt',    handleReconnect);
+    socket.on('connect_error',        handleConnectError);
+    socket.on('custom-text',          handleCustomText);
+    socket.on('preload-background',   handlePreloadBackground);
 
     if (socket.connected) handleConnect();
 
     return () => {
-      socket.off('update-verse',      handleVerse);
-      socket.off('update-theme',      handleTheme);
-      socket.off('highlight-text',    handleHighlight);
-      socket.off('session-joined',    handleSessionJoined);
-      socket.off('clear-screen',      handleClearScreen);
-      socket.off('presenter-left',    handlePresenterLeft);
-      socket.off('presenter-joined',  handlePresenterJoined);
-      socket.off('session-error',     handleSessionError);
-      socket.off('connect',           handleConnect);
-      socket.off('disconnect',        handleDisconnect);
-      socket.off('reconnect_attempt', handleReconnect);
-      socket.off('connect_error',     handleConnectError);
+      socket.off('update-verse',         handleVerse);
+      socket.off('update-theme',         handleTheme);
+      socket.off('highlight-text',       handleHighlight);
+      socket.off('session-joined',       handleSessionJoined);
+      socket.off('clear-screen',         handleClearScreen);
+      socket.off('presenter-left',       handlePresenterLeft);
+      socket.off('presenter-joined',     handlePresenterJoined);
+      socket.off('session-error',        handleSessionError);
+      socket.off('connect',              handleConnect);
+      socket.off('disconnect',           handleDisconnect);
+      socket.off('reconnect_attempt',    handleReconnect);
+      socket.off('connect_error',        handleConnectError);
+      socket.off('custom-text',          handleCustomText);
+      socket.off('preload-background',   handlePreloadBackground);
+      if (screensaverTimerRef.current) clearTimeout(screensaverTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fontsReady, crossfadeBackground, createClientSession]);
+  }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);
 
   // ─── Auto readability ─────────────────────────────────────────────────────
   const displayText = verse.segments?.length > 0
@@ -646,6 +710,16 @@ function Client() {
   const computedRem      = Math.min(maxCap, Math.max(Math.min(rawFloor, fittingRem), fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
+  // F9 — Canon volume accent classes
+  const VOLUME_CLASS_MAP = {
+    'Old Testament':          'volume-ot',
+    'New Testament':          'volume-nt',
+    'Book of Mormon':         'volume-bom',
+    'Doctrine and Covenants': 'volume-dc',
+    'Pearl of Great Price':   'volume-pgp',
+  };
+  const volumeClass = VOLUME_CLASS_MAP[verse?.volume_title] || '';
+
   // ─── CSS class composition ────────────────────────────────────────────────
   const viewClass = [
     'client-view',
@@ -654,15 +728,21 @@ function Client() {
     dyslexiaMode   ? 'readability-dyslexia' : '',
     noMotion       ? 'reduce-motion-auto'   : '',
     layout,
+    volumeClass,
 
     isIdle         ? 'client-idle'          : '',
     isDisconnected ? 'client-disconnected'  : '',
     isReconnecting ? 'client-reconnecting'  : '',
+    isScreensaver  ? 'client-screensaver'   : '',
   ].filter(Boolean).join(' ');
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className={viewClass} style={{ fontSize: computedFontSize }}>
+    <div className={viewClass} style={{ fontSize: computedFontSize }}
+      onClick={isScreensaver ? resetScreensaver : undefined}
+      onKeyDown={isScreensaver ? resetScreensaver : undefined}
+      tabIndex={isScreensaver ? 0 : undefined}
+    >
 
       <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
       {bgFading && prevBgUrl && (
@@ -684,22 +764,49 @@ function Client() {
         </div>
       )}
 
-      {!isIdle && (
+      {/* F2 — custom text / announcement mode */}
+      {!isIdle && customData && (
+        <div className="verse-content">
+          <div className="verse-backdrop custom-text-backdrop">
+            <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
+              <p className="custom-text-main">{customData.text}</p>
+              {customData.subtext && <p className="custom-text-sub">{customData.subtext}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isIdle && !customData && (
         <div className="verse-content">
           <div className="verse-backdrop">
             {/* verse-text-body is the ONLY thing that fades.
                 The backdrop box itself never animates. */}
             <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
               <p>{renderHighlightedText()}</p>
+              {/* F8 — secondary language text */}
+              {verse.secondary_text && (
+                <p className="verse-secondary-text">{verse.secondary_text}</p>
+              )}
               {verse.book_title && verse.chapter_number && verse.verse_number && (
                 <div className="verse-caption">
                   {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
+                  {/* F10 — volume short title */}
+                  {verse.volume_short_title && (
+                    <span className="verse-caption-volume">&ensp;· {verse.volume_short_title}</span>
+                  )}
                   {isShowingVotd && (
                     <span className="client-votd-label">✦ Verse of the Day</span>
                   )}
                 </div>
               )}
-              {hasMoreSegments && <div className="cont-indicator">›</div>}
+              {/* F7 — segment dots replacing single › indicator */}
+              {verse.segments?.length > 1 && (
+                <div className="segment-dots-client" aria-hidden="true">
+                  {verse.segments.map((_, i) => (
+                    <span key={i} className={`seg-dot-tv${i === verse.currentSegment ? ' seg-dot-tv--active' : ''}`} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -724,6 +831,19 @@ function Client() {
             <span className="connection-dot" aria-label={connectionState} />
           )}
         </span>
+      )}
+      {/* F13 — secondary screen badge */}
+      {isSecondaryScreen && clientSessionId && (
+        <span className="secondary-screen-badge">Mirroring {clientSessionId}</span>
+      )}
+      {/* QR overlay — shown over the VOTD so the next presenter can scan to join */}
+      {isShowingVotd && clientSessionId && !isSecondaryScreen && (
+        <div className="client-votd-qr-overlay" aria-label={`Scan to present · session ${clientSessionId}`}>
+          {qrDataUrl && (
+            <img src={qrDataUrl} alt="Scan to join as presenter" className="client-votd-qr-img" />
+          )}
+          <span className="client-votd-qr-label">Scan to present · {clientSessionId}</span>
+        </div>
       )}
     </div>
   );
