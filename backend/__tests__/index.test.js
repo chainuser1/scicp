@@ -285,4 +285,156 @@ describe('Backend API Tests', () => {
       expect(response.statusCode).toBe(400);
     });
   });
+
+  describe('New routes — F1/F3/F4', () => {
+    let server;
+    let db;
+    let db_tagalog;
+
+    beforeAll(async () => {
+      server = require('fastify')({ logger: false });
+      server.register(require('@fastify/cors'), { origin: '*' });
+
+      db = require('better-sqlite3')('../resources/db/lds-scriptures-sqlite.db', { fileMustExist: true });
+      db_tagalog = require('better-sqlite3')('../resources/db/tagalog-scriptures-sqlite.db', { fileMustExist: true });
+
+      // F3 — /setlists CRUD
+      server.get('/setlists', async () => {
+        const rows = db.prepare('SELECT id, name, items, created_at FROM setlists ORDER BY created_at DESC').all();
+        return rows.map(r => ({ id: r.id, name: r.name, items: JSON.parse(r.items), created_at: r.created_at }));
+      });
+      server.post('/setlists', async (req, reply) => {
+        const { name, items } = req.body;
+        if (!name) { reply.code(400); return { error: 'name is required' }; }
+        const info = db.prepare('INSERT INTO setlists (name, items) VALUES (?, ?)').run(name, JSON.stringify(items || []));
+        return { id: info.lastInsertRowid, name, items: items || [] };
+      });
+      server.delete('/setlists/:id', async (req, reply) => {
+        db.prepare('DELETE FROM setlists WHERE id = ?').run(req.params.id);
+        return { success: true };
+      });
+
+      // F1 — browse routes
+      server.get('/browse/books', async (req) => {
+        const language = req.query.language || 'en';
+        const targetDb = language === 'tl' ? db_tagalog : db;
+        return targetDb.prepare(
+          `SELECT b.id AS book_id, b.book_title, b.book_short_title,
+                  v.id AS volume_id, v.volume_title, v.volume_short_title,
+                  COUNT(DISTINCT c.id) AS chapter_count
+           FROM books b
+           JOIN volumes v ON v.id = b.volume_id
+           JOIN chapters c ON c.book_id = b.id
+           GROUP BY b.id ORDER BY b.id`
+        ).all();
+      });
+      server.get('/browse/chapters', async (req) => {
+        const { book_id, language } = req.query;
+        const targetDb = language === 'tl' ? db_tagalog : db;
+        return targetDb.prepare(
+          `SELECT c.id AS chapter_id, c.chapter_number, COUNT(vs.id) AS verse_count
+           FROM chapters c
+           JOIN verses vs ON vs.chapter_id = c.id
+           WHERE c.book_id = ? GROUP BY c.id ORDER BY c.chapter_number`
+        ).all(Number(book_id));
+      });
+      server.get('/browse/verses', async (req) => {
+        const { chapter_id, language } = req.query;
+        const targetDb = language === 'tl' ? db_tagalog : db;
+        return targetDb.prepare(
+          `SELECT verse_id, book_title, chapter_number, verse_number,
+                  scripture_text, verse_title, volume_title, volume_short_title
+           FROM scriptures WHERE chapter_id = ? ORDER BY verse_number`
+        ).all(Number(chapter_id));
+      });
+
+      // F4 — /verse/:id/translation
+      server.get('/verse/:verse_id/translation', async (req, reply) => {
+        const { verse_id } = req.params;
+        const language = (req.query.language || '').toLowerCase().trim();
+        if (!['tl', 'ceb'].includes(language)) {
+          reply.code(400);
+          return { error: 'language must be tl or ceb' };
+        }
+        const targetDb = language === 'tl' ? db_tagalog : db;
+        const row = targetDb.prepare('SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1').get(Number(verse_id));
+        if (!row) { reply.code(404); return { error: 'not found' }; }
+        return { verse_id: Number(verse_id), language, scripture_text: row.scripture_text };
+      });
+
+      await server.ready();
+    });
+
+    afterAll(async () => {
+      await server.close();
+    });
+
+    test('GET /setlists returns an array', async () => {
+      const res = await server.inject({ method: 'GET', url: '/setlists' });
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
+    });
+
+    test('POST /setlists creates a setlist and DELETE removes it', async () => {
+      const name = 'Test Setlist ' + Date.now();
+      const postRes = await server.inject({
+        method: 'POST', url: '/setlists',
+        payload: { name, items: [{ verse_id: 1 }] }
+      });
+      expect(postRes.statusCode).toBe(200);
+      const created = JSON.parse(postRes.payload);
+      expect(created).toHaveProperty('id');
+      expect(created.name).toBe(name);
+      expect(Array.isArray(created.items)).toBe(true);
+
+      const delRes = await server.inject({ method: 'DELETE', url: `/setlists/${created.id}` });
+      expect(delRes.statusCode).toBe(200);
+      expect(JSON.parse(delRes.payload)).toEqual({ success: true });
+    });
+
+    test('GET /browse/books returns books with chapter_count', async () => {
+      const res = await server.inject({ method: 'GET', url: '/browse/books?language=en' });
+      expect(res.statusCode).toBe(200);
+      const books = JSON.parse(res.payload);
+      expect(Array.isArray(books)).toBe(true);
+      expect(books.length).toBeGreaterThan(0);
+      expect(books[0]).toHaveProperty('book_id');
+      expect(books[0]).toHaveProperty('book_title');
+      expect(books[0]).toHaveProperty('chapter_count');
+    });
+
+    test('GET /browse/chapters returns chapters for book_id=1', async () => {
+      const res = await server.inject({ method: 'GET', url: '/browse/chapters?book_id=1&language=en' });
+      expect(res.statusCode).toBe(200);
+      const chapters = JSON.parse(res.payload);
+      expect(Array.isArray(chapters)).toBe(true);
+      expect(chapters.length).toBeGreaterThan(0);
+      expect(chapters[0]).toHaveProperty('chapter_id');
+      expect(chapters[0]).toHaveProperty('chapter_number');
+    });
+
+    test('GET /browse/verses returns verses for chapter_id=1', async () => {
+      const res = await server.inject({ method: 'GET', url: '/browse/verses?chapter_id=1&language=en' });
+      expect(res.statusCode).toBe(200);
+      const verses = JSON.parse(res.payload);
+      expect(Array.isArray(verses)).toBe(true);
+      expect(verses.length).toBeGreaterThan(0);
+      expect(verses[0]).toHaveProperty('verse_id');
+      expect(verses[0]).toHaveProperty('scripture_text');
+    });
+
+    test('GET /verse/1/translation?language=tl returns scripture_text', async () => {
+      const res = await server.inject({ method: 'GET', url: '/verse/1/translation?language=tl' });
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.payload);
+      expect(data).toHaveProperty('verse_id', 1);
+      expect(data).toHaveProperty('language', 'tl');
+      expect(data).toHaveProperty('scripture_text');
+    });
+
+    test('GET /verse/1/translation?language=xx returns 400', async () => {
+      const res = await server.inject({ method: 'GET', url: '/verse/1/translation?language=xx' });
+      expect(res.statusCode).toBe(400);
+    });
+  });
 });
