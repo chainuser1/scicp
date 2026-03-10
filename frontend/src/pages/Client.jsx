@@ -232,6 +232,19 @@ function Client() {
 
   // Eager call on mount so QR appears immediately
   useEffect(() => {
+    // Electron desktop mode: primary display — claim the fixed LOCAL session
+    if (window.electronAPI?.isElectron) {
+      socket.emit('create-client-session', { preferredSessionId: 'LOCAL' }, (res) => {
+        if (res?.ok && res.sessionId) {
+          setClientSessionId(res.sessionId);
+          clientSessionIdRef.current = res.sessionId;
+          storeTvSession(res.sessionId);
+          setSessionExpired(false);
+        }
+      });
+      return;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const sessionParam = urlParams.get('session');
     if (sessionParam) {
