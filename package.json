@@ -36,6 +36,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "electron": "^34.5.8",
     "electron-builder": "^25.0.0"
   },
   "keywords": [],
