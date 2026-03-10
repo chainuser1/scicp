@@ -44,6 +44,17 @@ const IconClock = () => (
     <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
   </svg>
 );
+const IconList = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+    <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+  </svg>
+);
+const IconBook = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+  </svg>
+);
 const IconClose = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -1196,17 +1207,22 @@ const MobilePresenter = () => {
       <div className={`search-drawer${drawerOpen ? ' search-drawer--open' : ''}`}>
         <div className="drawer-header">
           <div className="drawer-tabs">
-            <button className={`drawer-tab${drawerTab === 'search' ? ' active' : ''}`} onClick={() => setDrawerTab('search')}>
-              <IconSearch /> Search
+            <button className={`drawer-tab${drawerTab === 'search' ? ' active' : ''}`} onClick={() => setDrawerTab('search')} aria-label="Search" title="Search">
+              <span className="drawer-tab-icon"><IconSearch /></span>
+              <span className="drawer-tab-label">Search</span>
             </button>
-            <button className={`drawer-tab${drawerTab === 'history' ? ' active' : ''}`} onClick={() => setDrawerTab('history')}>
-              <IconClock /> Recent
+            <button className={`drawer-tab${drawerTab === 'history' ? ' active' : ''}`} onClick={() => setDrawerTab('history')} aria-label="Recent" title="Recent">
+              <span className="drawer-tab-icon"><IconClock /></span>
+              <span className="drawer-tab-label">Recent</span>
             </button>
-            <button className={`drawer-tab${drawerTab === 'setlist' ? ' active' : ''}`} onClick={() => setDrawerTab('setlist')}>
-              Setlist{setlist.length > 0 ? ` (${setlist.length})` : ''}
+            <button className={`drawer-tab${drawerTab === 'setlist' ? ' active' : ''}`} onClick={() => setDrawerTab('setlist')} aria-label={`Setlist${setlist.length > 0 ? ` (${setlist.length})` : ''}`} title="Setlist">
+              <span className="drawer-tab-icon"><IconList /></span>
+              <span className="drawer-tab-label">Setlist</span>
+              {setlist.length > 0 && <span className="drawer-tab-count" aria-hidden="true">{setlist.length}</span>}
             </button>
-            <button className={`drawer-tab${drawerTab === 'browse' ? ' active' : ''}`} onClick={() => setDrawerTab('browse')}>
-              Browse
+            <button className={`drawer-tab${drawerTab === 'browse' ? ' active' : ''}`} onClick={() => setDrawerTab('browse')} aria-label="Browse" title="Browse">
+              <span className="drawer-tab-icon"><IconBook /></span>
+              <span className="drawer-tab-label">Browse</span>
             </button>
           </div>
           {staged && (
