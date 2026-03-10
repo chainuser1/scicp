@@ -2007,7 +2007,7 @@ const Presenter = () => {
                 <>
                   <p className="votd-text">"{verseOfDay.scripture_text}"</p>
                   <div className="votd-footer">
-                    <span className="votd-ref">— {verseOfDay.book_title} {verseOfDay.chapter_number}:{verseOfDay.verse_number}</span>
+                    <span className="votd-ref">— {verseOfDay.book_title} {verseOfDay.chapter_number}:{verseOfDay.verse_number}{verseOfDay.version_citation ? ` (${verseOfDay.version_citation})` : ''}</span>
                     <div className="votd-actions">
                       <button className="votd-btn" title="Copy verse text" onClick={() => {
                         copyVerseText(verseOfDay, '');
