@@ -19,7 +19,12 @@ const { app, BrowserWindow, screen, shell, dialog, ipcMain } = require('electron
 const path = require('path');
 const http = require('http');
 const fs   = require('fs');
-const { autoUpdater } = require('electron-updater');
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch (err) {
+  console.warn('electron-updater unavailable; auto-update disabled:', err.message);
+}
 
 const isDev = !app.isPackaged;
 
@@ -210,7 +215,7 @@ ipcMain.handle('get-displays', () => {
 
 // ─── Auto-updater (only in packaged builds) ─────────────────────────────────
 function setupAutoUpdater() {
-  if (isDev) return;
+  if (isDev || !autoUpdater) return;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
