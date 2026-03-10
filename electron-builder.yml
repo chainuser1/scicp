@@ -24,7 +24,7 @@ files:
   - electron/**
   - backend/**
   - shared/**
-  - "electron/node_modules/better-sqlite3/**"
+  - "electron/node_modules/**"
   - "!node_modules/better-sqlite3/**"
   - "!backend/.env"
   - "!backend/logs"
