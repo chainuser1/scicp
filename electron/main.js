@@ -6,11 +6,25 @@
 ;(function patchBetterSqlite3() {
   const Module = require('module');
   const path   = require('path');
+  const fs     = require('fs');
   const orig   = Module._resolveFilename.bind(Module);
-  Module._resolveFilename = (req, ...rest) =>
-    req === 'better-sqlite3'
-      ? orig(path.join(__dirname, 'node_modules/better-sqlite3'), ...rest)
-      : orig(req, ...rest);
+  Module._resolveFilename = (req, ...rest) => {
+    if (req !== 'better-sqlite3') return orig(req, ...rest);
+
+    const candidates = [
+      path.join(__dirname, 'node_modules/better-sqlite3'),
+      path.join(__dirname, '../node_modules/better-sqlite3'),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked/electron/node_modules/better-sqlite3'),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules/better-sqlite3'),
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        return orig(candidate, ...rest);
+      }
+    }
+    return orig(req, ...rest);
+  };
 })();
 
 'use strict';
