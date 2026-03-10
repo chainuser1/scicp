@@ -2189,8 +2189,10 @@ const Presenter = () => {
             </div>
             <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
               <div className="preview-text">{renderPreviewText()}</div>
-              {liveVerse.secondary_text && (
-                <p className="preview-secondary-text">{liveVerse.secondary_text}</p>
+              {(liveVerse.secondary_segments?.[currentSegment] || liveVerse.secondary_text) && (
+                <p className="preview-secondary-text">
+                  {liveVerse.secondary_segments?.[currentSegment] || liveVerse.secondary_text}
+                </p>
               )}
               {hasSegments && currentSegment < liveVerse.segments.length - 1 && (
                 <div className="preview-cont">cont…</div>
