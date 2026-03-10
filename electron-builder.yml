@@ -24,7 +24,10 @@ files:
   - electron/**
   - backend/**
   - shared/**
-  - "electron/node_modules/**"
+  - from: "electron/node_modules"
+    to: "electron/node_modules"
+    filter:
+      - "**/*"
   - "!node_modules/better-sqlite3/**"
   - "!backend/.env"
   - "!backend/logs"
