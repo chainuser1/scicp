@@ -1,3 +1,18 @@
+// ─── Redirect require('better-sqlite3') to electron/node_modules ────────────
+// backend/index.js resolves better-sqlite3 from root/node_modules (hoisted from
+// the backend workspace, compiled for system Node ABI). This override ensures the
+// Electron-ABI build in electron/node_modules is used instead — in both dev mode
+// (electron/ dir) and the packaged app (app.asar root where node_modules lives).
+;(function patchBetterSqlite3() {
+  const Module = require('module');
+  const path   = require('path');
+  const orig   = Module._resolveFilename.bind(Module);
+  Module._resolveFilename = (req, ...rest) =>
+    req === 'better-sqlite3'
+      ? orig(path.join(__dirname, 'node_modules/better-sqlite3'), ...rest)
+      : orig(req, ...rest);
+})();
+
 'use strict';
 
 const { app, BrowserWindow, screen, shell, dialog, ipcMain } = require('electron');
