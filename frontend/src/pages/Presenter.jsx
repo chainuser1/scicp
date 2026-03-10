@@ -5,20 +5,68 @@ const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3
 
 const themes = {
   light: {
-    background_url: "url('https://dg.imgix.net/why-memorize-scripture-en/landscape/why-memorize-scripture-9c50cf27ce0decfef9f72808328627ac.jpg?ts=1530629306&ixlib=rails-4.3.1&auto=format%2Ccompress&fit=min&w=700&h=394&dpr=2&ch=Width%2CDPR')",
+    background_url: "url('https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.1rem",
     layout: "centered",
     tone: "light"
   },
   dark: {
-    background_url: "url('https://content.churchofjesuschrist.org/acp/bc/cp/Africa%20Southeast%20Area/Christ%20images/1200x675/christ-praying-in-gethsemane-dewey_1183667_inl.jpg')",
+    background_url: "url('https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
     layout: "centered",
     tone: "dark"
   }
 };
+
+const VOLUME_THEME_BACKGROUNDS = {
+  ot: {
+    light: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default',
+    dark: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default',
+  },
+  nt: {
+    light: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default',
+    dark: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default',
+  },
+  bom: {
+    light: 'https://www.churchofjesuschrist.org/imgs/c827eb43191d54ef97f880db05170ad2a31ad643/full/1080%2C/0/default',
+    dark: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default',
+  },
+  dc: {
+    light: 'https://www.churchofjesuschrist.org/imgs/d51970e2a6003156c90973409c0c94f44c0d9b64/full/1080%2C/0/default',
+    dark: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default',
+  },
+  pgp: {
+    light: 'https://www.churchofjesuschrist.org/imgs/4b344419a83be3d625e222be5c77c4453b0e0184/full/1080%2C/0/default',
+    dark: 'https://www.churchofjesuschrist.org/imgs/b4c6ca482db211efb2a5eeeeac1ea3e2eeb3cea8/full/1080%2C/0/default',
+  },
+};
+
+function resolveVolumeKey(verse) {
+  const rawVolume = `${verse?.volume_short_title || ''} ${verse?.volume_title || ''}`.toLowerCase();
+  if (/(^|\W)ot(\W|$)|old testament/.test(rawVolume)) return 'ot';
+  if (/(^|\W)nt(\W|$)|new testament/.test(rawVolume)) return 'nt';
+  if (/book of mormon|(^|\W)bom(\W|$)/.test(rawVolume)) return 'bom';
+  if (/doctrine and covenants|church history|d&c|(^|\W)dc(\W|$)/.test(rawVolume)) return 'dc';
+  if (/pearl of great price|(^|\W)pgp(\W|$)/.test(rawVolume)) return 'pgp';
+
+  const book = String(verse?.book_title || '').toLowerCase();
+  if (/(^|\W)[1-4]\s*nephi|jacob|enos|jarom|omni|words of mormon|mosiah|alma|helaman|mormon|ether|moroni/.test(book)) return 'bom';
+  if (/doctrine and covenants|official declaration/.test(book)) return 'dc';
+  if (/moses|abraham|joseph smith|articles of faith/.test(book)) return 'pgp';
+  if (/matthew|mark|luke|john|acts|romans|corinthians|galatians|ephesians|philippians|colossians|thessalonians|timothy|titus|philemon|hebrews|james|peter|jude|revelation/.test(book)) return 'nt';
+  if (/genesis|exodus|leviticus|numbers|deuteronomy|joshua|judges|ruth|samuel|kings|chronicles|ezra|nehemiah|esther|job|psalm|proverbs|ecclesiastes|song of solomon|isaiah|jeremiah|lamentations|ezekiel|daniel|hosea|joel|amos|obadiah|jonah|micah|nahum|habakkuk|zephaniah|haggai|zechariah|malachi/.test(book)) return 'ot';
+  return null;
+}
+
+function themeForVerse(baseTheme, verse) {
+  const volumeKey = resolveVolumeKey(verse);
+  const tone = baseTheme?.tone === 'dark' ? 'dark' : 'light';
+  const imageUrl = volumeKey ? VOLUME_THEME_BACKGROUNDS[volumeKey]?.[tone] : null;
+  if (!imageUrl) return baseTheme;
+  return { ...baseTheme, background_url: `url('${imageUrl}')` };
+}
 
 /* ─── Emblem ─── */
 const EmblemSVG = ({ size = 26 }) => (
@@ -550,7 +598,7 @@ const Presenter = () => {
   const addToSetlist = (verse) => {
     setSetlist(prev => {
       if (prev.some(v => v.verse_id != null && v.verse_id === verse.verse_id)) return prev; // no duplicates
-      const updated = [...prev, { ...verse, theme: currentTheme }];
+      const updated = [...prev, { ...verse, theme: themeForVerse(currentTheme, verse) }];
       showToast(`Added to setlist`);
       return updated;
     });
@@ -932,7 +980,7 @@ const Presenter = () => {
   /* ── Handlers ── */
   const handleThemeChange = theme => {
     setCurrentTheme(theme);
-    if (staged) setStaged(prev => ({ ...prev, theme }));
+    if (staged) setStaged(prev => ({ ...prev, theme: themeForVerse(theme, prev) }));
     emitWithSession('update-theme', { theme });
     // Keep fontSizeRem slider in sync when theme is changed externally
     if (theme.font_size) {
@@ -959,10 +1007,11 @@ const Presenter = () => {
   };
 
   const selectVerse = verse => {
-    setStaged({ ...verse, theme: currentTheme });
+    const verseTheme = themeForVerse(currentTheme, verse);
+    setStaged({ ...verse, theme: verseTheme });
     // F11 — preload background into TV browser cache before go-live
-    if (currentTheme?.background_url) {
-      const match = String(currentTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
+    if (verseTheme?.background_url) {
+      const match = String(verseTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
       if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
     }
     // Drawer stays open so presenter can keep browsing.
@@ -970,7 +1019,7 @@ const Presenter = () => {
   };
 
   const goLiveDirectly = verse => {
-    const v = { ...verse, theme: currentTheme };
+    const v = { ...verse, theme: themeForVerse(currentTheme, verse) };
     emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(v);
     setCurrentSegment(0);
@@ -1015,7 +1064,7 @@ const Presenter = () => {
       const res = await fetch(`${API_URL}/verse/adjacent?${params}`, { signal: controller.signal });
       if (!res.ok) return;
       const data = await res.json();
-      const v = { ...data, theme: currentTheme };
+      const v = { ...data, theme: themeForVerse(currentTheme, data) };
       if (preferStaged && staged) {
         setStaged(v);
       } else {
@@ -1040,7 +1089,7 @@ const Presenter = () => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     emitWithSession('update-language', { language: lang });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: lang, secondaryLanguage: secondaryLanguage || null });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
@@ -1051,7 +1100,7 @@ const Presenter = () => {
 
   const handleSecondaryLanguageChange = (lang) => {
     setSecondaryLanguage(lang);
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: currentLanguage, secondaryLanguage: lang || null });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
   };
 
   const handleSwapLanguages = () => {
@@ -1061,7 +1110,7 @@ const Presenter = () => {
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
     emitWithSession('update-language', { language: newPrimary });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: currentTheme, language: newPrimary, secondaryLanguage: newSecondary });
+    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
@@ -2079,10 +2128,10 @@ const Presenter = () => {
                         setTimeout(() => setVotdCopied(false), 1800);
                       }}>{votdCopied ? '✓ Copied' : 'Copy'}</button>
                       <button className="votd-btn" title="Stage this verse" onClick={() => {
-                        setStaged({ ...verseOfDay, theme: currentTheme });
+                        setStaged({ ...verseOfDay, theme: themeForVerse(currentTheme, verseOfDay) });
                       }}>Stage</button>
                       <button className="votd-btn votd-btn--live" title="Go live with this verse" onClick={() => {
-                        goLiveDirectly({ ...verseOfDay, theme: currentTheme });
+                        goLiveDirectly(verseOfDay);
                       }}>● Go Live</button>
                     </div>
                   </div>
