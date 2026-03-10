@@ -38,6 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Electron native dependencies
+        run: npm ci --prefix electron
+        # Runs postinstall: electron-rebuild compiles better-sqlite3 for Electron ABI
+        # in electron/node_modules — isolated from root/node_modules (system Node ABI)
+
       - name: Build frontend
         run: npm run build --workspace=frontend
 

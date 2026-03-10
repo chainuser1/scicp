@@ -1,0 +1,17 @@
+{
+  "name": "scicp-electron",
+  "private": true,
+  "description": "Electron desktop app — self-contained native deps",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "electron-rebuild"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "electron": "^34.0.0"
+  }
+}
