@@ -858,9 +858,11 @@ function Client() {
                 The backdrop box itself never animates. */}
             <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
               <p>{renderHighlightedText()}</p>
-              {/* F8 — secondary language text */}
-              {verse.secondary_text && (
-                <p className="verse-secondary-text">{verse.secondary_text}</p>
+              {/* F8 — secondary language text (paired segment when dual-seg active) */}
+              {(verse.secondary_segments?.[verse.currentSegment] || verse.secondary_text) && (
+                <p className="verse-secondary-text">
+                  {verse.secondary_segments?.[verse.currentSegment] || verse.secondary_text}
+                </p>
               )}
               {verse.book_title && verse.chapter_number && verse.verse_number && (
                 <div className="verse-caption">
