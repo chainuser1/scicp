@@ -17,10 +17,15 @@ directories:
 
 # ── Files included in the app bundle ──────────────────────────────────────────
 # electron/ and backend/ go into the ASAR; static assets go into extraResources.
+# electron/node_modules/better-sqlite3 is the Electron-ABI build (from electron/
+# package.json + postinstall electron-rebuild). The root node_modules version is
+# compiled for system Node and is explicitly excluded.
 files:
   - electron/**
   - backend/**
   - shared/**
+  - "electron/node_modules/better-sqlite3/**"
+  - "!node_modules/better-sqlite3/**"
   - "!backend/.env"
   - "!backend/logs"
   - "!backend/__tests__"
@@ -46,10 +51,9 @@ asarUnpack:
   - "**/*.node"
   - "**/better-sqlite3/**"
 
-# Rebuild native modules (e.g. better-sqlite3) for the target Electron ABI.
-# electron-builder uses @electron/rebuild internally in a staging directory
-# so the working tree's node_modules stays compiled for system Node.js.
-npmRebuild: true
+# electron/node_modules/better-sqlite3 is pre-compiled for Electron ABI by the
+# electron/ package.json postinstall hook (electron-rebuild). No rebuild needed.
+npmRebuild: false
 
 # ── Platform targets ──────────────────────────────────────────────────────────
 win:
