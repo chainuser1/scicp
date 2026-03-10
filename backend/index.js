@@ -1669,9 +1669,24 @@ const TRIPLE_CITATIONS = {
   5: 'Pearl of Great Price',
 };
 
+const LANGUAGE_NAMES = {
+  en:     'English',
+  nrsvue: 'English',
+  tl:     'Tagalog',
+  ceb:    'Cebuano',
+  ilo:    'Ilocano',
+  es:     'Spanish',
+  el:     'Greek',
+  ja:     'Japanese',
+};
+
 function getVersionCitation(language, volumeId) {
   const vid = Number(volumeId);
-  if (vid >= 3) return TRIPLE_CITATIONS[vid] || '';
+  if (vid >= 3) {
+    const book = TRIPLE_CITATIONS[vid] || '';
+    const lang = LANGUAGE_NAMES[language] || 'English';
+    return book ? `${book}, ${lang}` : '';
+  }
   return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
 }
 

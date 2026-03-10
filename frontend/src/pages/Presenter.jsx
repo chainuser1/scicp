@@ -220,9 +220,14 @@ const QUICK_TOPICS = [
 
 const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳' };
 const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
+const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese' };
 function getCitation(language, volumeId) {
   const vid = Number(volumeId);
-  if (vid >= 3) return TRIPLE_CITATIONS[vid] || '';
+  if (vid >= 3) {
+    const book = TRIPLE_CITATIONS[vid] || '';
+    const lang = LANGUAGE_NAMES[language] || 'English';
+    return book ? `${book}, ${lang}` : '';
+  }
   return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
 }
 
