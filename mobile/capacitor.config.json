@@ -1,0 +1,7 @@
+{
+  "appId": "com.scriptures.inview.mobile",
+  "appName": "Scriptures in View",
+  "webDir": "dist",
+  "server": {},
+  "plugins": {}
+}
