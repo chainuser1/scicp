@@ -218,9 +218,9 @@ const QUICK_TOPICS = [
   'holy ghost', 'resurrection', 'obedience', 'trials', 'gratitude',
 ];
 
-const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳' };
+const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳', war: 'Samarenyo Bible' };
 const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
-const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese' };
+const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese', war: 'Waray' };
 function getCitation(language, volumeId, secondaryLanguage) {
   const vid = Number(volumeId);
   if (secondaryLanguage) {
@@ -359,6 +359,9 @@ const QrScannerModal = ({ onCode, onClose }) => {
 
 /* ─── Main component ─── */
 const Presenter = () => {
+  // True when running inside the Electron desktop app; false in the web app.
+  const isElectronApp = !!window.electronAPI?.isElectron;
+
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
   const PRESENTER_LAST_SESSION_KEY = 'scicp.presenter_last_session_v1';
   const PRESENTER_TOKEN_KEY        = 'scicp.presenter_token_v1';
@@ -368,11 +371,11 @@ const Presenter = () => {
     try { return new URLSearchParams(window.location.search).get('session') || ''; } catch { return ''; }
   })();
   const presenterTourSteps = [
-    {
+    ...(!isElectronApp ? [{
       target: 'session',
       title: 'Connect to TV',
       description: 'Scan the QR code on the TV screen, or type the code shown below it.',
-    },
+    }] : []),
     {
       target: 'search',
       title: 'Search Scriptures',
@@ -575,6 +578,7 @@ const Presenter = () => {
   const toastTimer                             = React.useRef(null);
   const [themeCardOpen, setThemeCardOpen]     = useState(true);
   const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
+  const [electronDisplayCount, setElectronDisplayCount] = useState(0);
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
   const adjacentAbortRef = useRef(null); // cancels in-flight fetchAdjacent when a newer one fires
@@ -631,6 +635,12 @@ const Presenter = () => {
     document.title = 'Presenter | Scriptures in View';
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
+  }, []);
+
+  useEffect(() => {
+    if (window.electronAPI?.getDisplays) {
+      window.electronAPI.getDisplays().then(d => setElectronDisplayCount(d.length));
+    }
   }, []);
 
   useEffect(() => {
@@ -985,7 +995,7 @@ const Presenter = () => {
     adjacentAbortRef.current = controller;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
-      ...((['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(currentLanguage)) && { language: currentLanguage }),
+      ...((['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(currentLanguage)) && { language: currentLanguage }),
       ...(source.book_id        != null && { book_id:        source.book_id }),
       ...(source.chapter_number != null && { chapter_number: source.chapter_number }),
       ...(source.verse_number   != null && { verse_number:   source.verse_number }),
@@ -1333,9 +1343,23 @@ const Presenter = () => {
 
         {/* Right controls — desktop (hidden on narrow screens via CSS) */}
         <div className="hdr-right hdr-right--desktop">
+          {electronDisplayCount > 1 && (
+            <HdrBtn
+              onClick={() => window.electronAPI.changeProjectionDisplay()}
+              label="Change projection display"
+              title="Change projection display"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2"/>
+                <path d="M8 21h8M12 17v4"/>
+                <path d="M17 3h5v5M22 3l-7 7"/>
+              </svg>
+            </HdrBtn>
+          )}
           <HdrBtn onClick={openTour} label="Open walkthrough" title="Open walkthrough">
             <IconInfo />
           </HdrBtn>
+          {!isElectronApp && (
           <div className={`hdr-session-wrap${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
             <HdrBtn
               onClick={() => setSessionPopover(o => !o)}
@@ -1404,6 +1428,7 @@ const Presenter = () => {
               </div>
             )}
           </div>
+          )}
 
           {/* F8 — Language & secondary language popover */}
           <div className="hdr-lang-wrap">
@@ -1436,6 +1461,7 @@ const Presenter = () => {
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
                     <option value="ja">Japanese</option>
+                    <option value="war">Waray</option>
                   </select>
                 </div>
                 <div className="popover-divider" />
@@ -1457,6 +1483,7 @@ const Presenter = () => {
                       <option value="el">Greek</option>
                       <option value="ilo">Ilocano</option>
                       <option value="ja">Japanese</option>
+                      <option value="war">Waray</option>
                       <option value="zh">Chinese (Simplified)</option>
                     </select>
                     <button
@@ -1559,7 +1586,16 @@ const Presenter = () => {
           {/* Mobile dropdown panel */}
           {mobileMenuOpen && (
             <div className="hdr-mobile-menu">
-              {/* Session */}
+              {/* Session (web only) / Display status (Electron only) */}
+              {isElectronApp ? (
+                <div className="mobile-menu-section">
+                  <div className="mobile-menu-label">Local Display</div>
+                  <div className="idle-viewer-count">
+                    <span className={`idle-viewer-dot idle-viewer-dot--live`} />
+                    Display window active
+                  </div>
+                </div>
+              ) : (
               <div className={`mobile-menu-section${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
                 <div className="mobile-menu-label">
                   {sessionId ? `Session ${sessionId}` : 'Connect to TV'}
@@ -1601,6 +1637,7 @@ const Presenter = () => {
                 <div className="session-message">{sessionMessage}</div>
                 <div className="session-message">Connection: {connectionState}</div>
               </div>
+              )}
 
               <div className="mobile-menu-divider" />
 
@@ -1621,6 +1658,7 @@ const Presenter = () => {
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
                     <option value="ja">Japanese</option>
+                    <option value="war">Waray</option>
                   </select>
                 </div>
                 {/* F8 — secondary language */}
@@ -1641,6 +1679,7 @@ const Presenter = () => {
                     <option value="el">Greek</option>
                     <option value="ilo">Ilocano</option>
                     <option value="ja">Japanese</option>
+                    <option value="war">Waray</option>
                   </select>
                   <button
                     className="popover-swap-btn"
@@ -1693,6 +1732,12 @@ const Presenter = () => {
                   <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
                     <IconInfo /> Help
                   </button>
+                  {electronDisplayCount > 1 && (
+                    <button className="theme-btn" onClick={() => { window.electronAPI.changeProjectionDisplay(); setMobileMenuOpen(false); }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{display:'inline',verticalAlign:'middle',marginRight:'0.3em'}}><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M17 3h5v5M22 3l-7 7"/></svg>
+                      Change display
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

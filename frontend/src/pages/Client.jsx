@@ -50,6 +50,8 @@ const kioskDisplayMs = (text, multiplier = 1) => {
 };
 
 function Client() {
+  const isElectronApp = !!window.electronAPI?.isElectron;
+
   // ─── Utilities ───────────────────────────────────────────────────────────────
   const extractImageUrl = (value) => {
     const match = String(value || '').match(/url\((['"]?)(.*?)\1\)/i);
@@ -232,14 +234,21 @@ function Client() {
 
   // Eager call on mount so QR appears immediately
   useEffect(() => {
-    // Electron desktop mode: primary display — claim the fixed LOCAL session
+    // Electron desktop mode: primary display — claim the fixed LOCAL session.
+    // Set refs SYNCHRONOUSLY before the emit so that Effect B's handleConnect
+    // (which runs in the same render cycle) won't fire a second
+    // create-client-session with an empty preferredSessionId.
     if (window.electronAPI?.isElectron) {
+      setClientSessionId('LOCAL');
+      clientSessionIdRef.current = 'LOCAL';
+      joinedSessionRef.current = 'LOCAL';
+      storeTvSession('LOCAL');
+      setSessionExpired(false);
       socket.emit('create-client-session', { preferredSessionId: 'LOCAL' }, (res) => {
         if (res?.ok && res.sessionId) {
           setClientSessionId(res.sessionId);
           clientSessionIdRef.current = res.sessionId;
           storeTvSession(res.sessionId);
-          setSessionExpired(false);
         }
       });
       return;
@@ -706,6 +715,11 @@ function Client() {
       ? (verse.segments[verse.currentSegment] || verse.scripture_text)
       : (verse.scripture_text || '');
 
+  // Secondary (dual-language) text — needed for height budget in font sizing
+  const secondaryText = !customData
+    ? (verse.secondary_segments?.[verse.currentSegment] || verse.secondary_text || '')
+    : '';
+
   useEffect(() => {
     let active = true;
     const tune = async () => {
@@ -759,16 +773,21 @@ function Client() {
   // ─── Zoom-correct font sizing ─────────────────────────────────────────────
   const { w: vw, h: vh, rem: PX_PER_REM } = viewport;
   const length = displayText.length;
+  const secLength = secondaryText.length;
 
   const maxCap        = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = !customData && layout === 'lower-third'
     ? Math.min(6 * PX_PER_REM, Math.max(2.4 * PX_PER_REM, vh * 0.07)) : 0;
-  const captionH = (!customData && verse.book_title && verse.chapter_number && verse.verse_number)
-    ? Math.min(1.1 * PX_PER_REM, Math.max(0.55 * PX_PER_REM, vh * 0.014))
-    + Math.min(0.52 * PX_PER_REM, Math.max(0.28 * PX_PER_REM, vh * 0.006))
-    + PX_PER_REM : 0;
+  // Caption budget: main citation line + volume subtitle + margin/border
+  const hasCaption = !customData && verse.book_title && verse.chapter_number && verse.verse_number;
+  const hasVolume  = hasCaption && (verse.version_citation || verse.volume_title);
+  const captionH = hasCaption
+    ? Math.min(1.3 * PX_PER_REM, Math.max(0.7 * PX_PER_REM, vh * 0.018))   // citation text
+    + Math.min(0.6 * PX_PER_REM, Math.max(0.3 * PX_PER_REM, vh * 0.008))    // border + margin-top
+    + (hasVolume ? Math.min(0.9 * PX_PER_REM, Math.max(0.45 * PX_PER_REM, vh * 0.01)) : 0)  // volume subtitle
+    + PX_PER_REM : 0;  // bottom breathing room
   const contH    = hasMoreSegments ? 1.2 * PX_PER_REM : 0;
   const safetyPx = Math.max(14, PX_PER_REM * 0.9);
   const textAreaH = Math.max(60,
@@ -781,14 +800,28 @@ function Client() {
   const lh           = dyslexiaMode ? 1.58 : 1.52;
   const WRAP_FUDGE   = 1.13;
 
+  // Secondary text sizing constants (see .verse-secondary-text CSS)
+  const SEC_FONT_RATIO = vw <= 640 ? 0.48 : 0.58;   // em relative to primary
+  const SEC_LH         = 1.5;
+  const SEC_MARGIN_EM  = 0.55; // margin-top in em of primary font
+
   const fontSizeThatFits = (() => {
     let lo = 0.55, hi = maxCap;
     for (let i = 0; i < 36; i++) {
       const mid   = (lo + hi) / 2;
       const midPx = mid * PX_PER_REM;
+      // Primary text height
       const cpl   = textAreaW / (midPx * charW);
       const lines = Math.ceil((length / cpl) * WRAP_FUDGE) + (hasMoreSegments ? 1 : 0);
-      if (Math.max(1, lines) * lh * midPx <= textAreaH) lo = mid; else hi = mid;
+      let totalH  = Math.max(1, lines) * lh * midPx;
+      // Secondary (dual-language) text height
+      if (secLength > 0) {
+        const secPx   = midPx * SEC_FONT_RATIO;
+        const secCpl  = textAreaW / (secPx * charW);
+        const secLines = Math.ceil((secLength / secCpl) * WRAP_FUDGE);
+        totalH += Math.max(1, secLines) * SEC_LH * secPx + SEC_MARGIN_EM * midPx;
+      }
+      if (totalH <= textAreaH) lo = mid; else hi = mid;
     }
     return lo;
   })();
@@ -931,8 +964,8 @@ function Client() {
       {/* QR overlay — persistent bottom-right badge, always visible.
            Waiting mode  → /presenter URL so operator can scan to present.
            Live mode     → /client URL so audience can mirror on their own device.
-           Hidden on secondary screens (they are the audience device). */}
-      {clientSessionId && !isSecondaryScreen && (() => {
+           Hidden on secondary screens and in the Electron desktop app. */}
+      {clientSessionId && !isSecondaryScreen && !isElectronApp && (() => {
         const isLive   = presenterJoined && !showQrOverlay;
         const isLocked = !isLive && presenterSessionLocked;
         const activeQr    = isLive ? clientQrDataUrl : (isLocked ? null : qrDataUrl);
@@ -956,7 +989,7 @@ function Client() {
       })()}
 
       {/* "✓ Presenter connected" flash — shown briefly when a presenter scans in */}
-      {presenterJoining && (
+      {presenterJoining && !isElectronApp && (
         <div className="client-qr-joining-overlay" aria-live="assertive">
           <div className="client-qr-joining-check">✓</div>
           <div className="client-qr-joining-text">Presenter connected</div>
