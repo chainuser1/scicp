@@ -1426,7 +1426,7 @@ const Presenter = () => {
                     onChange={handleLanguageChange}
                   >
                     <option value="en">English</option>
-                    <option value="nrsvue">English (NRSVUE)</option>
+                    <option value="nrsvue">English w/ NRSVUE Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -1447,7 +1447,7 @@ const Presenter = () => {
                     >
                       <option value="">Off</option>
                       <option value="en">English</option>
-                      <option value="nrsvue">English (NRSVUE)</option>
+                      <option value="nrsvue">English w/ NRSVUE Bible</option>
                       <option value="tl">Tagalog</option>
                       <option value="ceb">Cebuano</option>
                       <option value="es">Español</option>
@@ -1611,7 +1611,7 @@ const Presenter = () => {
                     onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
                   >
                     <option value="en">English</option>
-                    <option value="nrsvue">English (NRSVUE)</option>
+                    <option value="nrsvue">English w/ NRSVUE Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -1631,7 +1631,7 @@ const Presenter = () => {
                   >
                     <option value="">Off</option>
                     <option value="en">English</option>
-                    <option value="nrsvue">English (NRSVUE)</option>
+                    <option value="nrsvue">English w/ NRSVUE Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -2121,33 +2121,19 @@ const Presenter = () => {
               </div>
             </div>
             <div className="staged-verse-display">
-              <h3 className="staged-title">
-                {staged.book_title} {staged.chapter_number}:{staged.verse_number}
-                <span className="staged-citation"> ({getCitation(currentLanguage, staged.volume_id, secondaryLanguage)})</span>
-              </h3>
               <p className="staged-text">{staged.scripture_text}</p>
+              <div className="staged-caption">
+                {staged.book_title}&ensp;{staged.chapter_number}:{staged.verse_number}
+                {getCitation(currentLanguage, staged.volume_id, secondaryLanguage) && (
+                  <span className="staged-caption-volume">
+                    {getCitation(currentLanguage, staged.volume_id, secondaryLanguage)}
+                  </span>
+                )}
+              </div>
             </div>
             <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
           </section>
         )}
-
-        {/* ── F2 / F12 — Announcement card ── */}
-        <section className="card card--custom">
-          <div className="card-header">
-            <span className="card-label">📢 Announcement</span>
-            {isCustomLive && <button className="end-live-btn" onClick={endLive}>◼ End Custom</button>}
-          </div>
-          <div className="custom-text-form">
-            <textarea className="custom-text-area" placeholder="Text shown large on screen…"
-              value={customText} onChange={e => setCustomText(e.target.value)} rows={3} />
-            <input className="custom-subtext-input" type="text" placeholder="Subtext / attribution (optional)"
-              value={customSubtext} onChange={e => setCustomSubtext(e.target.value)} />
-          </div>
-          <button className={`go-live-button${!customText.trim() ? ' go-live-button--disabled' : ''}`}
-            disabled={!customText.trim()} onClick={sendCustomToScreen}>
-            ▶ Send to Screen
-          </button>
-        </section>
 
         {/* ── Live preview card ── */}
         {liveVerse && (
@@ -2202,16 +2188,42 @@ const Presenter = () => {
               </button>
             </div>
             <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
-              <div className="preview-title">
-                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
-              </div>
               <div className="preview-text">{renderPreviewText()}</div>
+              {liveVerse.secondary_text && (
+                <p className="preview-secondary-text">{liveVerse.secondary_text}</p>
+              )}
               {hasSegments && currentSegment < liveVerse.segments.length - 1 && (
                 <div className="preview-cont">cont…</div>
+              )}
+              {liveVerse.book_title && liveVerse.chapter_number && liveVerse.verse_number && (
+                <div className="preview-caption">
+                  {liveVerse.book_title}&ensp;{liveVerse.chapter_number}:{liveVerse.verse_number}
+                  {liveVerse.version_citation && (
+                    <span className="preview-caption-volume">{liveVerse.version_citation}</span>
+                  )}
+                </div>
               )}
             </div>
           </section>
         )}
+
+        {/* ── F2 / F12 — Announcement card ── */}
+        <section className="card card--custom">
+          <div className="card-header">
+            <span className="card-label">📢 Announcement</span>
+            {isCustomLive && <button className="end-live-btn" onClick={endLive}>◼ End Custom</button>}
+          </div>
+          <div className="custom-text-form">
+            <textarea className="custom-text-area" placeholder="Text shown large on screen…"
+              value={customText} onChange={e => setCustomText(e.target.value)} rows={3} />
+            <input className="custom-subtext-input" type="text" placeholder="Subtext / attribution (optional)"
+              value={customSubtext} onChange={e => setCustomSubtext(e.target.value)} />
+          </div>
+          <button className={`go-live-button${!customText.trim() ? ' go-live-button--disabled' : ''}`}
+            disabled={!customText.trim()} onClick={sendCustomToScreen}>
+            ▶ Send to Screen
+          </button>
+        </section>
 
         {/* ── Theme card — collapsible ── */}
         <section className="card card--theme">
