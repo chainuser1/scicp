@@ -949,6 +949,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('search', (payload) => {
+      try {
         const query    = typeof payload === 'string' ? payload : payload?.query;
         const page     = Number(payload?.page)     || 0;
         const pageSize = Number(payload?.pageSize) || 10;
@@ -971,6 +972,11 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
         const { results, total } = searchResults;
         socket.emit('search-results', { results, total, page, pageSize, query, language });
+      } catch (err) {
+        fastify.log.error({ err }, 'search handler failed');
+        socket.emit('search-results', { results: [], total: 0, page: 0, pageSize: 10 });
+        socket.emit('session-error', 'Search failed for the selected language');
+      }
     });
 
     socket.on('update-verse', (payload) => {
