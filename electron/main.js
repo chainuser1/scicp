@@ -4,6 +4,7 @@ const { app, BrowserWindow, screen, shell, dialog, ipcMain } = require('electron
 const path = require('path');
 const http = require('http');
 const fs   = require('fs');
+const { autoUpdater } = require('electron-updater');
 
 const isDev = !app.isPackaged;
 
@@ -192,6 +193,80 @@ ipcMain.handle('get-displays', () => {
   }));
 });
 
+// ─── Auto-updater (only in packaged builds) ─────────────────────────────────
+function setupAutoUpdater() {
+  if (isDev) return;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err);
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    if (process.platform === 'linux' && process.env.APPIMAGE) {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Update Available',
+        message: `A new version (${info.version}) is available.`,
+        detail: 'Auto-update is not supported for AppImage builds.\n'
+             + 'Please download the latest version from GitHub Releases.',
+        buttons: ['Open Downloads Page', 'Later'],
+        defaultId: 0,
+      }).then(({ response }) => {
+        if (response === 0) {
+          shell.openExternal('https://github.com/chainuser1/scicp/releases/latest');
+        }
+      });
+      return;
+    }
+
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Update Available',
+      message: `A new version (${info.version}) is available.`,
+      detail: 'Would you like to download and install it now?\n'
+           + 'The app will restart after the update is installed.',
+      buttons: ['Download & Install', 'Later'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.downloadUpdate();
+      }
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('Auto-updater: app is up to date.');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    console.log(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Update Ready',
+      message: 'The update has been downloaded.',
+      detail: 'The application will restart to apply the update.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error('Auto-updater check failed:', err);
+    });
+  }, 5000);
+}
+
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
@@ -201,7 +276,10 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  waitForServer(createWindows);
+  waitForServer(() => {
+    createWindows();
+    setupAutoUpdater();
+  });
 });
 
 app.on('window-all-closed', () => { app.quit(); });
