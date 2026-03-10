@@ -1903,6 +1903,8 @@ const MobilePresenter = () => {
           <button
             className={`mobile-core-btn${drawerOpen && drawerTab === 'search' ? ' mobile-core-btn--active' : ''}`}
             onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }}
+            aria-label="Open search"
+            title="Search scriptures"
           >
             <IconSearch />
             <span>Search</span>
@@ -1910,20 +1912,24 @@ const MobilePresenter = () => {
           <button
             className={`mobile-core-btn${drawerOpen && drawerTab === 'setlist' ? ' mobile-core-btn--active' : ''}`}
             onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); }}
+            aria-label="Open setlist"
+            title="Open setlist"
           >
             <IconList />
             <span>Setlist</span>
           </button>
           <button
-            className={`mobile-core-btn${staged ? ' mobile-core-btn--live' : ''}`}
+            className={`mobile-core-btn${staged ? ' mobile-core-btn--live' : ''}${drawerOpen && drawerTab === 'history' && !staged ? ' mobile-core-btn--active' : ''}`}
             onClick={() => {
               if (staged) goLive();
               else if (!drawerOpen || drawerTab !== 'history') openDrawer('history');
               else setDrawerOpen(false);
             }}
+            aria-label={staged ? 'Go live now' : 'Open recent verses'}
+            title={staged ? 'Go Live' : 'Recent verses'}
           >
-            <IconBolt />
-            <span>{staged ? 'Go Live' : 'Live'}</span>
+            {staged ? <IconBolt /> : <IconClock />}
+            <span>{staged ? 'Go Live' : 'Recent'}</span>
           </button>
           <CastingControl className="mobile-core-btn mobile-core-btn--cast" label="Cast" />
         </div>
