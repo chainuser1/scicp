@@ -20,6 +20,7 @@ directories:
 files:
   - electron/**
   - backend/**
+  - shared/**
   - "!backend/.env"
   - "!backend/logs"
   - "!backend/__tests__"
@@ -45,7 +46,9 @@ asarUnpack:
   - "**/*.node"
   - "**/better-sqlite3/**"
 
-# Rebuild native modules (e.g. better-sqlite3) for the target Electron version
+# Rebuild native modules (e.g. better-sqlite3) for the target Electron ABI.
+# electron-builder uses @electron/rebuild internally in a staging directory
+# so the working tree's node_modules stays compiled for system Node.js.
 npmRebuild: true
 
 # ── Platform targets ──────────────────────────────────────────────────────────
