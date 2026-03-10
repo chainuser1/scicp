@@ -985,7 +985,10 @@ const Presenter = () => {
     adjacentAbortRef.current = controller;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
-      ...((['ceb', 'tl', 'es', 'el'].includes(currentLanguage)) && { language: currentLanguage })
+      ...((['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(currentLanguage)) && { language: currentLanguage }),
+      ...(source.book_id        != null && { book_id:        source.book_id }),
+      ...(source.chapter_number != null && { chapter_number: source.chapter_number }),
+      ...(source.verse_number   != null && { verse_number:   source.verse_number }),
     });
     try {
       const res = await fetch(`${API_URL}/verse/adjacent?${params}`, { signal: controller.signal });

@@ -1455,18 +1455,28 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, targetDb) => {
 };
 
 // direction should be 'next' or 'prev'
-function getAdjacentVerse({ verse_id, direction }, db) {
+function getAdjacentVerse({ verse_id, book_id, chapter_number, verse_number, direction }, targetDb) {
     const op = direction === 'next' ? '+' : '-';
-    const stmt = db.prepare(`
+
+    // If coordinates are provided, resolve the target DB's own verse_id first.
+    // This is essential for DBs with different versification (e.g. Japanese 口語訳).
+    let localVerseId = verse_id;
+    if (book_id != null && chapter_number != null && verse_number != null) {
+        const current = targetDb.prepare(
+            'SELECT verse_id FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1'
+        ).get(Number(book_id), Number(chapter_number), Number(verse_number));
+        if (current) localVerseId = current.verse_id;
+    }
+
+    const stmt = targetDb.prepare(`
       SELECT
+        book_id,
         book_title,
         chapter_number,
         verse_number,
         scripture_text,
         verse_title,
         verse_short_title,
-        chapter_number,
-        verse_number,
         verse_id,
         volume_id
       FROM scriptures
@@ -1474,7 +1484,7 @@ function getAdjacentVerse({ verse_id, direction }, db) {
       LIMIT 1
     `);
     try {
-        return stmt.get(verse_id);
+        return stmt.get(localVerseId);
     } catch (err) {
         fastify.log.error('adjacent query failed', err);
         return null;
@@ -1483,7 +1493,7 @@ function getAdjacentVerse({ verse_id, direction }, db) {
 
 // add HTTP route for adjacent verse
 fastify.get('/verse/adjacent', async (request, reply) => {
-    const { verse_id, direction, language } = request.query;
+    const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
     if (!verse_id || !direction) {
         reply.code(400);
         return { error: 'missing parameters' };
@@ -1496,6 +1506,9 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 
     const result = getAdjacentVerse({
         verse_id: Number(verse_id),
+        book_id:        book_id        ? Number(book_id)        : undefined,
+        chapter_number: chapter_number ? Number(chapter_number) : undefined,
+        verse_number:   verse_number   ? Number(verse_number)   : undefined,
         direction,
     }, targetDb);
 
@@ -1516,9 +1529,12 @@ fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   }
   const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db_ilocano;
   try {
-    const row = targetDb.prepare(
-      'SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1'
+    // Resolve coordinates from the KJV DB so non-KJV versification (e.g. Japanese) is handled correctly.
+    const coords = db.prepare(
+      'SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1'
     ).get(Number(verse_id));
+    if (!coords) { reply.code(404); return { error: 'verse not found' }; }
+    const row = fetchVerseByCoords(targetDb, coords, 'scripture_text');
     if (!row) { reply.code(404); return { error: 'verse not found in translation' }; }
     return { verse_id: Number(verse_id), language: language.toLowerCase(), scripture_text: row.scripture_text };
   } catch (err) {
