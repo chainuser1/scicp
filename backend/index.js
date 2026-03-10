@@ -532,15 +532,27 @@ function expandBookName(bookRef) {
 // Function to segment verse text into readable chunks (max 200 words per segment)
 function segmentVerseText(text, wordsPerSegment = 200) {
   if (!text) return [];
-  
+
   const words = text.split(/\s+/).filter(w => w.length > 0);
   const segments = [];
-  
+
   for (let i = 0; i < words.length; i += wordsPerSegment) {
     segments.push(words.slice(i, i + wordsPerSegment).join(' '));
   }
-  
+
   return segments.length > 0 ? segments : [text];
+}
+
+// Dual-language segmentation: segment both languages at a tighter word limit,
+// then zip into equal-length arrays so each slide shows one matched pair.
+function segmentVerseTextDual(primaryText, secondaryText, wordsPerSegment = 150) {
+  const primarySegs   = segmentVerseText(primaryText,   wordsPerSegment);
+  const secondarySegs = segmentVerseText(secondaryText, wordsPerSegment);
+  const len = Math.max(primarySegs.length, secondarySegs.length);
+  // Pad the shorter array so indices always match
+  while (primarySegs.length   < len) primarySegs.push('');
+  while (secondarySegs.length < len) secondarySegs.push('');
+  return { primarySegments: primarySegs, secondarySegments: secondarySegs };
 }
 
 
@@ -2491,9 +2503,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         // Always clear secondary fields so stale values from ...verse don't
         // bleed through when the presenter switches Off. The block below
         // re-populates them only when a secondary language is active.
-        secondary_text:       null,
-        secondary_book_title: null,
-        secondaryLanguage:    null,
+        secondary_text:        null,
+        secondary_book_title:  null,
+        secondary_segments:    null,
+        secondaryLanguage:     null,
         language:             normalizedLanguage || 'en',
         version_citation:     getVersionCitation(normalizedLanguage || 'en', verse.volume_id),
       };
@@ -2523,6 +2536,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           verse.volume_id,
           verseWithSegments.secondaryLanguage
         );
+      }
+
+      // Dual-language segmentation: re-segment both texts at a tighter word
+      // limit and pair them so every slide shows one matched chunk of each.
+      if (verseWithSegments.secondaryLanguage && verseWithSegments.secondary_text) {
+        const { primarySegments, secondarySegments } = segmentVerseTextDual(
+          scriptureText,
+          verseWithSegments.secondary_text
+        );
+        verseWithSegments.segments           = primarySegments;
+        verseWithSegments.totalSegments      = primarySegments.length;
+        verseWithSegments.secondary_segments = secondarySegments;
       }
 
       const state = getSessionState(sessionId);
@@ -2628,4 +2653,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { parseScriptureReference, searchScripture, segmentVerseText, fastify, registerSocketHandlers };
+module.exports = { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers };
