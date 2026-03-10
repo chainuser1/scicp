@@ -50,6 +50,15 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Apply custom Android launcher icon
+        run: |
+          SRC="mobile/public/emblem-512.png"
+          for d in mobile/android/app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}; do
+            cp "$SRC" "$d/ic_launcher.png"
+            cp "$SRC" "$d/ic_launcher_round.png"
+            cp "$SRC" "$d/ic_launcher_foreground.png"
+          done
+
       - name: Build Android APK (debug, installable)
         working-directory: mobile/android
         run: ./gradlew assembleDebug
