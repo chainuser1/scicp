@@ -19,8 +19,11 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci
+
+      - name: Install mobile dependencies (lockfile check)
+        run: npm ci --prefix mobile
 
       - name: Rebuild native modules for Node.js
         run: npm rebuild better-sqlite3
