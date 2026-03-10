@@ -24,6 +24,13 @@ const DB_FILES = {
 let SQL = null;
 const databases = new Map();
 let initPromise = null;
+const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
+const isFileScheme = typeof window !== 'undefined' && window.location?.protocol === 'file:';
+
+function resolveAssetUrl(file) {
+  if (isFileScheme) return new URL(file, window.location.href).toString();
+  return `${baseUrl}${String(file).replace(/^\/+/, '')}`;
+}
 
 /**
  * Initialize sql.js WASM engine (once).
@@ -32,7 +39,7 @@ async function initEngine() {
   if (SQL) return SQL;
   SQL = await initSqlJs({
     // sql-wasm.wasm is copied to public/ by scripts/copy-db.js for offline use
-    locateFile: (file) => `${import.meta.env.BASE_URL}${file}`,
+    locateFile: (file) => resolveAssetUrl(file),
   });
   return SQL;
 }
@@ -42,7 +49,7 @@ async function initEngine() {
  * Returns a sql.js Database instance.
  */
 async function loadDatabase(filename) {
-  const url = `${import.meta.env.BASE_URL}assets/db/${filename}`;
+  const url = resolveAssetUrl(`assets/db/${filename}`);
   const response = await fetch(url);
   if (!response.ok) {
     console.warn(`Failed to fetch DB: ${filename} (${response.status})`);
