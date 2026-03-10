@@ -18,5 +18,17 @@ backend/logs/
 
 # IDE-specific files
 .idea/
-.vscode/dist-electron/
+.vscode/
+
+# Electron build output
+dist-electron/
 build-resources/
+
+# Symlinks / npm workspace artifacts
+frontend@*
+scicp@*
+npm
+vite
+
+# Scraper caches
+resources/db/*_cache.json
