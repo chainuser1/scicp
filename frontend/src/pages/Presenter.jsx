@@ -1302,7 +1302,7 @@ const Presenter = () => {
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
                 {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
-                <span className="hdr-verse-citation"> · {getCitation(currentLanguage, liveVerse.volume_id)}</span>
+                <span className="hdr-verse-citation"> ({getCitation(currentLanguage, liveVerse.volume_id)})</span>
               </span>
               {hasSegments && (
                 <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
@@ -2108,7 +2108,7 @@ const Presenter = () => {
             <div className="staged-verse-display">
               <h3 className="staged-title">
                 {staged.book_title} {staged.chapter_number}:{staged.verse_number}
-                <span className="staged-citation"> · {getCitation(currentLanguage, staged.volume_id)}</span>
+                <span className="staged-citation"> ({getCitation(currentLanguage, staged.volume_id)})</span>
               </h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
