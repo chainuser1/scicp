@@ -1651,6 +1651,30 @@ fastify.get('/verse/of-the-day', async (request, reply) => {
   }
 });
 
+// ── Version citation helpers ──────────────────────────────────────────────────
+const BIBLE_CITATIONS = {
+  en:     'KJV',
+  nrsvue: 'NRSVUE',
+  tl:     'Ang Biblia',
+  ceb:    'Ang Biblia',
+  ilo:    'RIPV',
+  es:     'RVR',
+  el:     'Greek Bible',
+  ja:     '口語訳',
+};
+
+const TRIPLE_CITATIONS = {
+  3: 'Book of Mormon',
+  4: 'D&C',
+  5: 'Pearl of Great Price',
+};
+
+function getVersionCitation(language, volumeId) {
+  const vid = Number(volumeId);
+  if (vid >= 3) return TRIPLE_CITATIONS[vid] || '';
+  return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
+}
+
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -2444,6 +2468,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         secondary_text:       null,
         secondary_book_title: null,
         secondaryLanguage:    null,
+        language:             normalizedLanguage || 'en',
+        version_citation:     getVersionCitation(normalizedLanguage || 'en', verse.volume_id),
       };
 
       // F8 — dual language display: fetch secondary language text
