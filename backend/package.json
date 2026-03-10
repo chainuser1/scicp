@@ -16,7 +16,7 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/static": "^9.0.0",
     "better-sqlite3": "^12.6.2",
-    "fastify": "^5.7.4",
+    "fastify": "^5.8.2",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
