@@ -18,4 +18,5 @@ backend/logs/
 
 # IDE-specific files
 .idea/
-.vscode/
+.vscode/dist-electron/
+build-resources/
