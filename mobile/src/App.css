@@ -3946,6 +3946,38 @@ button,
   scrollbar-width: thin;
 }
 
+.mobile-conn-banner {
+  margin: 0.45rem 1rem 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(201, 168, 76, 0.35);
+  background: rgba(201, 168, 76, 0.12);
+  color: var(--gold-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.mobile-conn-banner--error,
+.mobile-conn-banner--disconnected {
+  border-color: rgba(255, 123, 123, 0.45);
+  background: rgba(255, 123, 123, 0.12);
+  color: #ffc1c1;
+}
+
+.mobile-conn-banner-btn {
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
 .mobile-menu-section {
   padding: 0.5rem 0.3rem;
 }
@@ -4329,6 +4361,11 @@ button,
   background: rgba(139, 58, 26, 0.15);
 }
 .presenter-container--light .mobile-menu-label { color: #9a7b68; }
+.presenter-container--light .mobile-conn-banner {
+  border-color: rgba(154, 123, 104, 0.35);
+  background: rgba(154, 123, 104, 0.14);
+  color: #7f5f4c;
+}
 
 .presenter-container--light .input-group input {
   background: #faf7f2;
