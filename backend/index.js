@@ -1713,6 +1713,21 @@ function getVersionCitation(language, volumeId, secondaryLanguage) {
   return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
 }
 
+// Fetch a verse row by canonical coordinates (book_id + chapter_number + verse_number).
+// book_id is consistent across ALL language databases; verse_id is NOT (e.g. Japanese
+// 口語訳 has a different total verse count from the KJV). Always prefer coordinates.
+function fetchVerseByCoords(targetDb, verse, cols) {
+  if (verse.book_id != null && verse.chapter_number != null && verse.verse_number != null) {
+    return targetDb.prepare(
+      `SELECT ${cols} FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1`
+    ).get(Number(verse.book_id), Number(verse.chapter_number), Number(verse.verse_number));
+  }
+  // Fallback: verse_id — only reliable within the same DB
+  return targetDb.prepare(
+    `SELECT ${cols} FROM scriptures WHERE verse_id = ? LIMIT 1`
+  ).get(Number(verse.verse_id));
+}
+
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -2408,12 +2423,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // If there's a live verse, re-fetch it in the new language and re-broadcast
       if (state.liveVerse) {
-        const verseId  = Number(state.liveVerse.verse_id);
         const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : lang === 'es' ? db_spanish : lang === 'el' ? db_greek : lang === 'ilo' ? db_ilocano : lang === 'ja' ? (db_japanese || db) : lang === 'nrsvue' ? (db_nrsvue || db) : db;
         try {
-          const row = targetDb.prepare(
-            `SELECT scripture_text, verse_title, book_title, volume_title, volume_short_title FROM scriptures WHERE verse_id = ? LIMIT 1`
-          ).get(verseId);
+          const row = fetchVerseByCoords(
+            targetDb,
+            state.liveVerse,
+            'scripture_text, verse_title, book_title, volume_title, volume_short_title'
+          );
           if (row) {
             const updated = {
               ...state.liveVerse,
@@ -2457,12 +2473,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
 
       if (targetDb) {
-        const verseId = Number(verse.verse_id);
-        const query = `SELECT scripture_text, verse_title, book_title, volume_title, volume_short_title FROM scriptures WHERE verse_id = ? LIMIT 1`;
-
         try {
-          const stmt = targetDb.prepare(query);
-          const result = stmt.get(verseId);
+          const result = fetchVerseByCoords(
+            targetDb,
+            verse,
+            'scripture_text, verse_title, book_title, volume_title, volume_short_title'
+          );
 
           if (result) {
             // Apply field validation only for translations per specification
@@ -2516,9 +2532,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
         const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : normSecLang === 'es' ? db_spanish : normSecLang === 'el' ? db_greek : normSecLang === 'ilo' ? db_ilocano : normSecLang === 'ja' ? (db_japanese || db) : normSecLang === 'nrsvue' ? (db_nrsvue || db) : db;
         try {
-          const secRow = secDb.prepare(
-            'SELECT scripture_text, book_title FROM scriptures WHERE verse_id = ? LIMIT 1'
-          ).get(Number(verse.verse_id));
+          const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title');
           if (secRow) {
             verseWithSegments.secondary_text       = secRow.scripture_text;
             verseWithSegments.secondary_book_title = secRow.book_title;
