@@ -1,19 +1,17 @@
 'use strict';
 
-const { app, BrowserWindow, screen, shell } = require('electron');
+const { app, BrowserWindow, screen, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
+const fs   = require('fs');
 
 const isDev = !app.isPackaged;
 
 // ─── Path resolution ──────────────────────────────────────────────────────────
-// Must be set BEFORE requiring the backend because the backend reads these
-// paths at module-load time (SQLite connections, static file serving).
 if (isDev) {
   process.env.DB_DIR             = path.resolve(__dirname, '../resources/db');
   process.env.FRONTEND_DIST_DIR  = path.resolve(__dirname, '../frontend/dist');
 } else {
-  // electron-builder copies resources into process.resourcesPath
   process.env.DB_DIR             = path.join(process.resourcesPath, 'db');
   process.env.FRONTEND_DIST_DIR  = path.join(process.resourcesPath, 'frontend-dist');
 }
@@ -31,72 +29,168 @@ function waitForServer(cb) {
   attempt();
 }
 
+// ─── Display preferences ──────────────────────────────────────────────────────
+const PREFS_PATH = path.join(app.getPath('userData'), 'display-prefs.json');
+
+function loadDisplayPrefs() {
+  try { return JSON.parse(fs.readFileSync(PREFS_PATH, 'utf8')); }
+  catch { return {}; }
+}
+
+function saveDisplayPrefs(prefs) {
+  try { fs.writeFileSync(PREFS_PATH, JSON.stringify(prefs), 'utf8'); }
+  catch { /* ignore */ }
+}
+
+// Show a dialog letting the user pick which display to project to.
+// Returns the chosen display object, or null if cancelled.
+async function pickProjectionDisplay(displays) {
+  const primary  = screen.getPrimaryDisplay();
+  const buttons  = displays.map((d, i) => {
+    const tag = d.id === primary.id ? ' (this screen)' : '';
+    return `Display ${i + 1}${tag}  —  ${d.bounds.width}×${d.bounds.height}`;
+  });
+  buttons.push('Cancel');
+
+  // Default to the first non-primary display, or 0 if only one display
+  const defaultId = displays.findIndex(d => d.id !== primary.id);
+
+  const { response, checkboxChecked } = await dialog.showMessageBox({
+    type:          'question',
+    title:         'Choose Projection Display',
+    message:       'Which screen should show the projected scripture?',
+    detail:        'The Presenter controls will always open on this screen.',
+    buttons,
+    defaultId:     defaultId >= 0 ? defaultId : 0,
+    cancelId:      buttons.length - 1,
+    checkboxLabel: 'Remember my choice',
+    checkboxChecked: true,
+  });
+
+  if (response === buttons.length - 1) return null;  // cancelled — no client window
+
+  const chosen = displays[response];
+  if (checkboxChecked) saveDisplayPrefs({ clientDisplayId: chosen.id });
+  return chosen;
+}
+
+// Resolve which display the client window should use.
+// Shows a picker if there are multiple displays and no saved preference.
+async function resolveClientDisplay(forceAsk = false) {
+  const displays = screen.getAllDisplays();
+  const primary  = screen.getPrimaryDisplay();
+
+  if (!forceAsk) {
+    const prefs = loadDisplayPrefs();
+    if (prefs.clientDisplayId) {
+      const saved = displays.find(d => d.id === prefs.clientDisplayId);
+      if (saved) return saved;
+    }
+  }
+
+  // Single display — no choice to make
+  if (displays.length === 1) return null;
+
+  return pickProjectionDisplay(displays);
+}
+
 // ─── Window management ────────────────────────────────────────────────────────
 let presenterWin = null;
 let clientWin    = null;
 
-function createWindows() {
-  const displays = screen.getAllDisplays();
-  const primary  = screen.getPrimaryDisplay();
-  const secondary = displays.find(d => d.id !== primary.id);
-
-  const preload = path.join(__dirname, 'preload.js');
-  const icon    = isDev
+function getIcon() {
+  return isDev
     ? path.resolve(__dirname, '../frontend/public/emblem.ico')
     : path.join(process.resourcesPath, 'emblem.ico');
+}
 
-  // ── Presenter window (control panel) ────────────────────────────────────
+function openClientWindow(display) {
+  if (clientWin) { clientWin.focus(); return; }
+
+  const primary = screen.getPrimaryDisplay();
+  const isSecondary = display && display.id !== primary.id;
+  const bounds = display
+    ? display.bounds
+    : { x: primary.bounds.x + 80, y: primary.bounds.y + 80, width: 1280, height: 720 };
+
+  clientWin = new BrowserWindow({
+    x:         bounds.x,
+    y:         bounds.y,
+    width:     bounds.width,
+    height:    bounds.height,
+    fullscreen: isSecondary,
+    title:     'Scriptures in View — Display',
+    icon:      getIcon(),
+    frame:     !isSecondary,
+    webPreferences: {
+      preload:          path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration:  false,
+      sandbox:          false,
+    },
+  });
+  clientWin.setMenuBarVisibility(false);
+  clientWin.loadURL('http://127.0.0.1:3000/client?electron=1');
+  clientWin.on('closed', () => { clientWin = null; });
+}
+
+async function createWindows() {
+  const preload = path.join(__dirname, 'preload.js');
+  const primary = screen.getPrimaryDisplay();
+
+  // ── Presenter window ──────────────────────────────────────────────────────
   presenterWin = new BrowserWindow({
     width:  1280,
     height: 820,
     x: primary.bounds.x + 40,
     y: primary.bounds.y + 40,
     title: 'Scriptures in View — Presenter',
-    icon,
+    icon:  getIcon(),
     webPreferences: {
       preload,
       contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
+      nodeIntegration:  false,
+      sandbox:          false,
     },
   });
   presenterWin.setMenuBarVisibility(false);
   presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL');
 
-  // Open external links in the system browser, not in Electron
   presenterWin.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
-
   presenterWin.on('closed', () => { presenterWin = null; });
 
-  // ── Client / display window (projected screen) ───────────────────────────
-  const clientBounds = secondary
-    ? secondary.bounds
-    : { x: primary.bounds.x + 80, y: primary.bounds.y + 80, width: 1280, height: 720 };
-
-  clientWin = new BrowserWindow({
-    x:         clientBounds.x,
-    y:         clientBounds.y,
-    width:     clientBounds.width,
-    height:    clientBounds.height,
-    fullscreen: !!secondary,   // fullscreen only when a real second display exists
-    title: 'Scriptures in View — Display',
-    icon,
-    frame:     !secondary,     // no chrome on secondary display
-    webPreferences: {
-      preload,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  });
-  clientWin.setMenuBarVisibility(false);
-  clientWin.loadURL('http://127.0.0.1:3000/client?electron=1');
-
-  clientWin.on('closed', () => { clientWin = null; });
+  // ── Client / projection window ────────────────────────────────────────────
+  const chosen = await resolveClientDisplay();
+  openClientWindow(chosen);
 }
+
+// ─── IPC: presenter can ask to change the projection display ─────────────────
+ipcMain.handle('change-projection-display', async () => {
+  const chosen = await resolveClientDisplay(true);  // force the picker
+  if (!chosen) return { cancelled: true };
+
+  if (clientWin) {
+    clientWin.destroy();
+    clientWin = null;
+  }
+  openClientWindow(chosen);
+  return { displayId: chosen.id, bounds: chosen.bounds };
+});
+
+ipcMain.handle('get-displays', () => {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((d, i) => ({
+    id:        d.id,
+    index:     i + 1,
+    primary:   d.id === primary.id,
+    width:     d.bounds.width,
+    height:    d.bounds.height,
+    label:     `Display ${i + 1}${d.id === primary.id ? ' (this screen)' : ''}  —  ${d.bounds.width}×${d.bounds.height}`,
+  }));
+});
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
@@ -110,11 +204,7 @@ app.whenReady().then(async () => {
   waitForServer(createWindows);
 });
 
-app.on('window-all-closed', () => {
-  // On macOS it is conventional to keep the app running, but for a
-  // presentation tool "close last window = quit" is the right behaviour.
-  app.quit();
-});
+app.on('window-all-closed', () => { app.quit(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {

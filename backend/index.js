@@ -5,19 +5,25 @@ const crypto = require('crypto');
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
+// Inside Electron the DBs live in the read-only ASAR archive — open them
+// without journal/WAL writes so SQLite never attempts filesystem mutations.
+const IS_ELECTRON_PKG = !!process.versions?.electron;
+const DB_OPTS = { fileMustExist: true, readonly: IS_ELECTRON_PKG };
 // english scriptures database (LDS standard works)
-const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), { fileMustExist: true });
+const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
 // additional language databases (optional)
-const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'),  { fileMustExist: true });
-const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'),  { fileMustExist: true });
-const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'),  { fileMustExist: true });
-const db_greek   = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'),    { fileMustExist: true });
-const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptures-sqlite.db'),  { fileMustExist: true });
+const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'),  DB_OPTS);
+const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'),  DB_OPTS);
+const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'),  DB_OPTS);
+const db_greek   = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'),    DB_OPTS);
+const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptures-sqlite.db'),  DB_OPTS);
 // Optional language databases (loaded when DB file exists; gracefully absent during scraping)
 let db_japanese = null;
-try { db_japanese = require('better-sqlite3')(path.join(DB_DIR, 'japanese-scriptures-sqlite.db'), { fileMustExist: true }); } catch (_) {}
+try { db_japanese = require('better-sqlite3')(path.join(DB_DIR, 'japanese-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
 let db_nrsvue = null;
-try { db_nrsvue   = require('better-sqlite3')(path.join(DB_DIR, 'nrsvue-scriptures-sqlite.db'),   { fileMustExist: true }); } catch (_) {}
+try { db_nrsvue   = require('better-sqlite3')(path.join(DB_DIR, 'nrsvue-scriptures-sqlite.db'),   DB_OPTS); } catch (_) {}
+let db_waray = null;
+try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'),    DB_OPTS); } catch (_) {}
 
 const fastifyStatic = require('@fastify/static');
 
@@ -158,7 +164,7 @@ fastify.delete('/setlists/:id', async (request, reply) => {
 // ── scripture browser endpoints (F1) ──────────────────────────────────────────
 fastify.get('/browse/books', async (request, reply) => {
   const { language } = request.query;
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
   try {
     const rows = targetDb.prepare(`
       SELECT b.id AS book_id, b.book_title, b.book_short_title,
@@ -181,7 +187,7 @@ fastify.get('/browse/books', async (request, reply) => {
 fastify.get('/browse/chapters', async (request, reply) => {
   const { book_id, language } = request.query;
   if (!book_id) { reply.code(400); return { error: 'book_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
   try {
     const rows = targetDb.prepare(`
       SELECT c.id AS chapter_id, c.chapter_number,
@@ -203,7 +209,7 @@ fastify.get('/browse/chapters', async (request, reply) => {
 fastify.get('/browse/verses', async (request, reply) => {
   const { chapter_id, language } = request.query;
   if (!chapter_id) { reply.code(400); return { error: 'chapter_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
   try {
     const rows = targetDb.prepare(`
       SELECT verse_id, book_title, chapter_number, verse_number,
@@ -1500,8 +1506,8 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     }
 
     let targetDb = db;
-    if (language && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(language)) {
-        targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db_ilocano;
+    if (language && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language)) {
+        targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db_ilocano;
     }
 
     const result = getAdjacentVerse({
@@ -1523,11 +1529,11 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
-  if (!language || !['tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(language.toLowerCase())) {
+  if (!language || !['tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language.toLowerCase())) {
     reply.code(400);
-    return { error: 'language must be tl, ceb, es, el, ilo, ja or nrsvue' };
+    return { error: 'language must be tl, ceb, es, el, ilo, ja, nrsvue or war' };
   }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : db_ilocano;
+  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db_ilocano;
   try {
     // Resolve coordinates from the KJV DB so non-KJV versification (e.g. Japanese) is handled correctly.
     const coords = db.prepare(
@@ -1690,6 +1696,7 @@ const BIBLE_CITATIONS = {
   es:     'RVR',
   el:     'Greek Bible',
   ja:     '口語訳',
+  war:    'Samarenyo',
 };
 
 const TRIPLE_CITATIONS = {
@@ -1707,6 +1714,7 @@ const LANGUAGE_NAMES = {
   es:     'Spanish',
   el:     'Greek',
   ja:     'Japanese',
+  war:    'Waray',
 };
 
 function getVersionCitation(language, volumeId, secondaryLanguage) {
@@ -1744,7 +1752,7 @@ function fetchVerseByCoords(targetDb, verse, cols) {
   ).get(Number(verse.verse_id));
 }
 
-function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue }) {
+function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
@@ -1796,6 +1804,20 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       });
     }
     return sessionState.get(sessionId);
+  }
+
+  // ── Electron standalone: pre-seed the LOCAL session ───────────────────────────
+  // When the app runs inside Electron both the Presenter window (?session=LOCAL)
+  // and the Client window (create-client-session{preferredSessionId:'LOCAL'}) must
+  // land in the SAME socket.io room.  If the Client socket fires first it would
+  // normally generate a random session ID instead of honouring 'LOCAL', because
+  // sessionExists('LOCAL') would be false.  Seeding the state map here guarantees
+  // sessionExists returns true from the very first connection, so both windows
+  // always converge on the same 'LOCAL' room without any race condition.
+  const IS_ELECTRON = !!process.versions?.electron;
+  if (IS_ELECTRON) {
+    getSessionState('LOCAL');   // creates the map entry; no token is set yet
+    fastify.log.info('Electron mode: LOCAL session pre-seeded');
   }
 
   function generateSessionId() {
@@ -2439,7 +2461,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // If there's a live verse, re-fetch it in the new language and re-broadcast
       if (state.liveVerse) {
-        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : lang === 'es' ? db_spanish : lang === 'el' ? db_greek : lang === 'ilo' ? db_ilocano : lang === 'ja' ? (db_japanese || db) : lang === 'nrsvue' ? (db_nrsvue || db) : db;
+        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : lang === 'es' ? db_spanish : lang === 'el' ? db_greek : lang === 'ilo' ? db_ilocano : lang === 'ja' ? (db_japanese || db) : lang === 'nrsvue' ? (db_nrsvue || db) : lang === 'war' ? (db_waray || db) : db;
         try {
           const row = fetchVerseByCoords(
             targetDb,
@@ -2483,9 +2505,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // Determine target database with streamlined mapping
       let targetDb = db;
-      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(normalizedLanguage);
+      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normalizedLanguage);
       if (isTranslation) {
-        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : normalizedLanguage === 'tl' ? db_tagalog : normalizedLanguage === 'es' ? db_spanish : normalizedLanguage === 'el' ? db_greek : normalizedLanguage === 'ja' ? (db_japanese || db) : normalizedLanguage === 'nrsvue' ? (db_nrsvue || db) : db_ilocano;
+        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : normalizedLanguage === 'tl' ? db_tagalog : normalizedLanguage === 'es' ? db_spanish : normalizedLanguage === 'el' ? db_greek : normalizedLanguage === 'ja' ? (db_japanese || db) : normalizedLanguage === 'nrsvue' ? (db_nrsvue || db) : normalizedLanguage === 'war' ? (db_waray || db) : db_ilocano;
       }
 
       if (targetDb) {
@@ -2545,8 +2567,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // F8 — dual language display: fetch secondary language text
       const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
-      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'nrsvue'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
-        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : normSecLang === 'es' ? db_spanish : normSecLang === 'el' ? db_greek : normSecLang === 'ilo' ? db_ilocano : normSecLang === 'ja' ? (db_japanese || db) : normSecLang === 'nrsvue' ? (db_nrsvue || db) : db;
+      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
+        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : normSecLang === 'es' ? db_spanish : normSecLang === 'el' ? db_greek : normSecLang === 'ilo' ? db_ilocano : normSecLang === 'ja' ? (db_japanese || db) : normSecLang === 'nrsvue' ? (db_nrsvue || db) : normSecLang === 'war' ? (db_waray || db) : db;
         try {
           const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title');
           if (secRow) {
@@ -2651,7 +2673,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
 // Only register handlers in production runtime
 if (require.main === module) {
-  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue });
+  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray });
 }
 
 const start = async () => {
@@ -2660,7 +2682,8 @@ const start = async () => {
     await fastify.listen({ port, host: '0.0.0.0' })
     console.log(`Server running on ${port}`)
     // Initialize FTS in background so health checks can pass immediately.
-    // All three DBs share the same schema, so the same FTS setup works for each.
+    // Skip in Electron — DBs are read-only (ASAR) and FTS tables are pre-built.
+    if (!IS_ELECTRON_PKG) {
     setImmediate(() => {
       initializeFts(db, 'English');
       initializeFts(db_tagalog, 'Tagalog');
@@ -2671,6 +2694,7 @@ const start = async () => {
       if (db_japanese) initializeFts(db_japanese, 'Japanese');
       if (db_nrsvue)   initializeFts(db_nrsvue,   'NRSVUE');
     });
+    } // end !IS_ELECTRON_PKG
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
