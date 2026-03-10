@@ -338,6 +338,7 @@ const MobilePresenter = () => {
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
   const [connectionState, setConnectionState] = useState('connecting');
+  const [pendingGoLive, setPendingGoLive]   = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
@@ -477,6 +478,7 @@ const MobilePresenter = () => {
   const toastTimer                             = React.useRef(null);
   const [themeCardOpen, setThemeCardOpen]     = useState(true);
   const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
+  const pendingGoLivePayload                   = useRef(null);
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
 
@@ -535,6 +537,7 @@ const MobilePresenter = () => {
       generatedAt: new Date().toISOString(),
       mode: 'offline-mobile',
       connectionState,
+      pendingGoLive,
       casting: {
         available: displayAvailable,
         active: isCasting(),
@@ -566,9 +569,45 @@ const MobilePresenter = () => {
     showToast('Diagnostics downloaded');
   };
 
+  const emitGoLiveWithRetry = (payload) => {
+    if (connectionState !== 'connected') {
+      pendingGoLivePayload.current = payload;
+      setPendingGoLive(true);
+      showToast('Go Live queued until reconnected');
+      return false;
+    }
+    try {
+      emitWithSession('go-live', payload);
+      pendingGoLivePayload.current = null;
+      setPendingGoLive(false);
+      return true;
+    } catch (err) {
+      console.error('[MobilePresenter] go-live failed:', err);
+      pendingGoLivePayload.current = payload;
+      setPendingGoLive(true);
+      setConnectionState('error');
+      showToast('Go Live queued until reconnected');
+      return false;
+    }
+  };
+
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
   }, []);
+
+  useEffect(() => {
+    if (connectionState !== 'connected' || !pendingGoLivePayload.current) return;
+    const payload = pendingGoLivePayload.current;
+    try {
+      emitWithSession('go-live', payload);
+      pendingGoLivePayload.current = null;
+      setPendingGoLive(false);
+      showToast('Queued Go Live sent');
+    } catch (err) {
+      console.error('[MobilePresenter] queued go-live failed:', err);
+      setConnectionState('error');
+    }
+  }, [connectionState]);
 
   // ── Verse of the Day (local) ─────────────────────────────────────────────
   useEffect(() => {
@@ -700,7 +739,7 @@ const MobilePresenter = () => {
 
   const goLiveDirectly = verse => {
     const v = { ...verse, theme: themeForVerse(currentTheme, verse) };
-    emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
+    emitGoLiveWithRetry({ verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(v);
     setCurrentSegment(0);
     setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
@@ -709,7 +748,7 @@ const MobilePresenter = () => {
 
   const goLive = () => {
     if (!staged) return;
-    emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
+    emitGoLiveWithRetry({ verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(staged);
     setCurrentSegment(0);
     setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
@@ -736,7 +775,7 @@ const MobilePresenter = () => {
       if (preferStaged && staged) {
         setStaged(v);
       } else {
-        emitWithSession('go-live', { verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
+        emitGoLiveWithRetry({ verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
         setLiveVerse(v);
         setCurrentSegment(0);
         setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
@@ -757,7 +796,7 @@ const MobilePresenter = () => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     emitWithSession('update-language', { language: lang });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
@@ -768,7 +807,7 @@ const MobilePresenter = () => {
 
   const handleSecondaryLanguageChange = (lang) => {
     setSecondaryLanguage(lang);
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
+    if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
   };
 
   const handleSwapLanguages = () => {
@@ -778,7 +817,7 @@ const MobilePresenter = () => {
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
     emitWithSession('update-language', { language: newPrimary });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
@@ -1283,6 +1322,7 @@ const MobilePresenter = () => {
         <div className={`mobile-conn-banner mobile-conn-banner--${connectionState}`} role="status" aria-live="polite">
           <span>
             {connectionState === 'connecting' ? 'Connecting offline services...' : 'Offline services disconnected.'}
+            {pendingGoLive ? ' Go Live is queued.' : ''}
           </span>
           {connectionState !== 'connecting' && (
             <button className="mobile-conn-banner-btn" onClick={retryConnection}>Retry</button>
@@ -1660,6 +1700,10 @@ const MobilePresenter = () => {
                   <li className={`idle-check ${connectionState === 'connected' ? 'idle-check--ok' : 'idle-check--wait'}`}>
                     <span className="idle-check-icon">{connectionState === 'connected' ? <IconCheck /> : 'O'}</span>
                     <span>Service: {connectionState}</span>
+                  </li>
+                  <li className={`idle-check ${pendingGoLive ? 'idle-check--wait' : 'idle-check--ok'}`}>
+                    <span className="idle-check-icon">{pendingGoLive ? 'O' : <IconCheck />}</span>
+                    <span>Go Live queue: {pendingGoLive ? '1 pending' : 'empty'}</span>
                   </li>
                   <li className="idle-check idle-check--tip">
                     <span className="idle-check-icon"><IconGlobe /></span>
