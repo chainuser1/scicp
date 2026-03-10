@@ -7,6 +7,7 @@
  *   const db = await getDb('tl');        // Tagalog
  */
 import initSqlJs from 'sql.js';
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 
 // Map language codes to DB filenames (matches resources/db/)
 const DB_FILES = {
@@ -38,8 +39,8 @@ function resolveAssetUrl(file) {
 async function initEngine() {
   if (SQL) return SQL;
   SQL = await initSqlJs({
-    // sql-wasm.wasm is copied to public/ by scripts/copy-db.js for offline use
-    locateFile: (file) => resolveAssetUrl(file),
+    // Use Vite-managed URL so packaged mobile builds resolve the WASM reliably.
+    locateFile: (file) => (file.endsWith('.wasm') ? sqlWasmUrl : resolveAssetUrl(file)),
   });
   return SQL;
 }
