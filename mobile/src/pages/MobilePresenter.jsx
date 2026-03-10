@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { socket } from '../socket-local';
+import { socket, isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
 import CastingControl from '../components/CastingControl';
 
@@ -527,6 +527,44 @@ const MobilePresenter = () => {
     }).catch(() => showToast('Copy failed -- clipboard not available'));
   };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
+
+  const exportDiagnostics = async () => {
+    let displayAvailable = false;
+    try { displayAvailable = await isDisplayAvailable(); } catch { /* ignore */ }
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      mode: 'offline-mobile',
+      connectionState,
+      casting: {
+        available: displayAvailable,
+        active: isCasting(),
+      },
+      language: {
+        primary: currentLanguage,
+        secondary: secondaryLanguage || null,
+        loaded: svc.getLoadedLanguages ? svc.getLoadedLanguages() : [],
+      },
+      runtime: {
+        online: navigator.onLine,
+        userAgent: navigator.userAgent,
+      },
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Diagnostics copied');
+      return;
+    } catch { /* fallback below */ }
+
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scicp-mobile-diagnostics-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Diagnostics downloaded');
+  };
 
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
@@ -1612,6 +1650,25 @@ const MobilePresenter = () => {
                     <span>Hit Go Live to project</span>
                   </li>
                 </ul>
+              </section>
+
+              <section className="card idle-checklist idle-diagnostics">
+                <div className="card-header">
+                  <span className="card-label">Offline Health</span>
+                </div>
+                <ul className="idle-checks">
+                  <li className={`idle-check ${connectionState === 'connected' ? 'idle-check--ok' : 'idle-check--wait'}`}>
+                    <span className="idle-check-icon">{connectionState === 'connected' ? <IconCheck /> : 'O'}</span>
+                    <span>Service: {connectionState}</span>
+                  </li>
+                  <li className="idle-check idle-check--tip">
+                    <span className="idle-check-icon"><IconGlobe /></span>
+                    <span>Primary: {currentLanguage.toUpperCase()}{secondaryLanguage ? `, +${secondaryLanguage.toUpperCase()}` : ''}</span>
+                  </li>
+                </ul>
+                <button className="theme-btn idle-diagnostics-btn" onClick={exportDiagnostics}>
+                  Export diagnostics
+                </button>
               </section>
 
             </div>
