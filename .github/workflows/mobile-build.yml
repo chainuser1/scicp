@@ -50,15 +50,15 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Build Android APK
+      - name: Build Android APK (debug, installable)
         working-directory: mobile/android
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: mobile/android/app/build/outputs/apk/release/*.apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
 
   # ── iOS Archive ─────────────────────────────────────────────────────────
