@@ -1,0 +1,55 @@
+name: Build Electron Installers
+
+on:
+  workflow_dispatch:          # Manual trigger from GitHub UI
+  push:
+    tags: [ 'v*' ]            # Auto-trigger on version tags (v1.0.0, v1.0.1, etc.)
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact: dist-electron/*.deb
+          - os: windows-latest
+            platform: win
+            artifact: dist-electron/*.exe
+          - os: macos-latest
+            platform: mac
+            artifact: dist-electron/*.dmg
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build --workspace=frontend
+
+      - name: Build Electron (${{ matrix.platform }})
+        run: npx electron-builder --${{ matrix.platform }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: |
+            dist-electron/*.exe
+            dist-electron/*.deb
+            dist-electron/*.AppImage
+            dist-electron/*.dmg
+          if-no-files-found: ignore
