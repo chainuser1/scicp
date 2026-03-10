@@ -3745,6 +3745,12 @@ button,
   flex-direction: column;
 }
 
+.idle-diagnostics-btn {
+  width: 100%;
+  margin-top: 0.35rem;
+  justify-content: center;
+}
+
 .idle-checks {
   list-style: none;
   margin: 0;
