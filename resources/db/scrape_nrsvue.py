@@ -7,15 +7,27 @@ Triple Combination rows (Book of Mormon / D&C / Pearl of Great Price)
 from the existing KJV LDS database so the schema stays complete and all
 verse_ids remain consistent with every other language DB in this project.
 
+verse_id alignment
+------------------
+NRSVUE omits ~18 NT verses that KJV includes (Matthew 17:21, Mark 7:16,
+etc.).  Instead of a sequential counter, this scraper loads the KJV verse
+map and assigns verse_ids to match the KJV exactly:
+
+  * NRSVUE verses present in KJV  -> assigned the matching KJV verse_id
+  * KJV verses absent in NRSVUE   -> inserted with empty scripture_text
+  * NRSVUE-only verses (no KJV slot) -> silently dropped
+
+This makes the DB self-consistent without any post-hoc alignment script.
+
 Usage:
     python3 scrape_nrsvue.py
     python3 scrape_nrsvue.py --resume
     python3 scrape_nrsvue.py --delay 1.5 --output nrsvue-scriptures-sqlite.db
-    python3 scrape_nrsvue.py --kjv-source ../../lds-scriptures-sqlite.db
+    python3 scrape_nrsvue.py --kjv-source lds-scriptures-sqlite.db
 
 Options:
     --output      Output DB file path        (default: nrsvue-scriptures-sqlite.db)
-    --kjv-source  KJV source DB for Triple   (default: lds-scriptures-sqlite.db)
+    --kjv-source  KJV source DB for Triple + verse_id map (default: lds-scriptures-sqlite.db)
     --delay       Seconds between requests   (default: 1.2)
     --retries     Max retries per request    (default: 4)
     --resume      Skip already-scraped chapters
@@ -240,11 +252,29 @@ def get_done_chapter_ids(conn: sqlite3.Connection) -> Set[int]:
         return set()
 
 
-def get_max_verse_id(conn: sqlite3.Connection) -> int:
-    try:
-        return conn.execute("SELECT COALESCE(MAX(id), 0) FROM verses").fetchone()[0]
-    except sqlite3.OperationalError:
-        return 0
+def load_kjv_verse_map(kjv_path: str) -> Dict[tuple, list]:
+    """
+    Load the KJV verse list for Bible books (volumes 1-2).
+    Returns {(book_id, chapter_number): [(verse_id, verse_number), ...]}
+    ordered by verse_number within each chapter.
+    """
+    kjv = sqlite3.connect(kjv_path)
+    rows = kjv.execute("""
+        SELECT v.id, b.id, c.chapter_number, v.verse_number
+        FROM   verses v
+        JOIN   chapters c ON c.id = v.chapter_id
+        JOIN   books    b ON b.id = c.book_id
+        WHERE  b.volume_id IN (1, 2)
+        ORDER  BY v.id
+    """).fetchall()
+    kjv.close()
+    result: Dict[tuple, list] = {}
+    for verse_id, book_id, ch_num, v_num in rows:
+        key = (book_id, ch_num)
+        if key not in result:
+            result[key] = []
+        result[key].append((verse_id, v_num))
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -476,9 +506,18 @@ def scrape(
     conn.execute("PRAGMA synchronous=NORMAL")
     create_schema(conn)
 
-    done_ids  = get_done_chapter_ids(conn) if resume else set()
-    verse_id  = get_max_verse_id(conn)     if resume else 0
+    done_ids   = get_done_chapter_ids(conn) if resume else set()
     chapter_id = 0  # always counts from 0 upward; incremented before use
+
+    # Load KJV verse map for Bible-wide verse_id alignment
+    kjv_path = Path(kjv_source)
+    if not kjv_path.exists():
+        sys.exit(f"[ERROR] KJV source not found: {kjv_path}\n"
+                 "        Required to build the verse_id map before scraping.")
+    print(f"  Loading KJV verse map from {kjv_path.name} …", flush=True)
+    kjv_verse_map = load_kjv_verse_map(str(kjv_path))
+    kjv_bible_total = sum(len(v) for v in kjv_verse_map.values())
+    print(f"  KJV Bible chapters: {len(kjv_verse_map):,}  verses: {kjv_bible_total:,}", flush=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Seed volumes if not present
@@ -530,23 +569,22 @@ def scrape(
             )
 
             # Fetch
-            print(f"\r  [{book_num:2d}/{total_books}] {bk['title']} {ch_num}/{bk['chapters']}  ch={chapter_id}  v={verse_id}", end="", flush=True)
+            print(f"\r  [{book_num:2d}/{total_books}] {bk['title']} {ch_num}/{bk['chapters']}  ch={chapter_id}", end="", flush=True)
             html = fetch_chapter(bk["bg_name"], ch_num, session, delay, retries)
 
-            if html:
-                verses = extract_verses(html)
-                for v_num in sorted(verses):
-                    verse_id += 1
-                    conn.execute(
-                        "INSERT INTO verses VALUES (?,?,?,?)",
-                        (verse_id, chapter_id, v_num, verses[v_num])
-                    )
-                if verses:
-                    scraped_chs += 1
-                else:
-                    print(f"\n  [warn] no verses extracted for {bk['title']} {ch_num}", flush=True)
-            else:
-                print(f"\n  [skip] {bk['title']} {ch_num} — no content", flush=True)
+            kjv_chapter = kjv_verse_map.get((book_id, ch_num), [])
+            scraped = extract_verses(html) if html else {}
+            if html and not scraped:
+                print(f"\n  [warn] no verses extracted for {bk['title']} {ch_num}", flush=True)
+            elif not html:
+                print(f"\n  [skip] {bk['title']} {ch_num} — no content, inserting {len(kjv_chapter)} placeholder rows", flush=True)
+            for kjv_vid, v_num in kjv_chapter:
+                conn.execute(
+                    "INSERT OR IGNORE INTO verses VALUES (?,?,?,?)",
+                    (kjv_vid, chapter_id, v_num, scraped.get(v_num, ''))
+                )
+            if scraped:
+                scraped_chs += 1
 
             conn.commit()
 
@@ -588,23 +626,22 @@ def scrape(
                 (chapter_id, book_id, ch_num)
             )
 
-            print(f"\r  [{book_num:2d}/{total_books}] {bk['title']} {ch_num}/{bk['chapters']}  ch={chapter_id}  v={verse_id}", end="", flush=True)
+            print(f"\r  [{book_num:2d}/{total_books}] {bk['title']} {ch_num}/{bk['chapters']}  ch={chapter_id}", end="", flush=True)
             html = fetch_chapter(bk["bg_name"], ch_num, session, delay, retries)
 
-            if html:
-                verses = extract_verses(html)
-                for v_num in sorted(verses):
-                    verse_id += 1
-                    conn.execute(
-                        "INSERT INTO verses VALUES (?,?,?,?)",
-                        (verse_id, chapter_id, v_num, verses[v_num])
-                    )
-                if verses:
-                    scraped_chs += 1
-                else:
-                    print(f"\n  [warn] no verses extracted for {bk['title']} {ch_num}", flush=True)
-            else:
-                print(f"\n  [skip] {bk['title']} {ch_num} — no content", flush=True)
+            kjv_chapter = kjv_verse_map.get((book_id, ch_num), [])
+            scraped = extract_verses(html) if html else {}
+            if html and not scraped:
+                print(f"\n  [warn] no verses extracted for {bk['title']} {ch_num}", flush=True)
+            elif not html:
+                print(f"\n  [skip] {bk['title']} {ch_num} — no content, inserting {len(kjv_chapter)} placeholder rows", flush=True)
+            for kjv_vid, v_num in kjv_chapter:
+                conn.execute(
+                    "INSERT OR IGNORE INTO verses VALUES (?,?,?,?)",
+                    (kjv_vid, chapter_id, v_num, scraped.get(v_num, ''))
+                )
+            if scraped:
+                scraped_chs += 1
 
             conn.commit()
 
@@ -613,7 +650,8 @@ def scrape(
         else:
             print(f"\r  [{book_num:2d}/{total_books}] {bk['title']}  ✓ ({scraped_chs} chapters scraped) {'':30}", flush=True)
 
-    print(f"\n  Bible complete — {verse_id:,} verses total.", flush=True)
+    bible_verse_count = conn.execute("SELECT COUNT(*) FROM verses").fetchone()[0]
+    print(f"\n  Bible complete — {bible_verse_count:,} verses total (expected {kjv_bible_total:,}).", flush=True)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Phase 3 — Copy Triple Combination from KJV (unless --bible-only)
@@ -623,12 +661,7 @@ def scrape(
         print("  PHASE 3 — Triple Combination  (copied verbatim from KJV DB)")
         print("=" * 64)
 
-        kjv_path = Path(kjv_source)
-        if not kjv_path.exists():
-            print(f"  [warn] KJV source not found at {kjv_path} — skipping Triple.", flush=True)
-            print("         Re-run without --bible-only once the KJV DB is available.", flush=True)
-        else:
-            copy_triple_from_kjv(conn, str(kjv_path))
+        copy_triple_from_kjv(conn, str(kjv_path))
 
     # ──────────────────────────────────────────────────────────────────────────
     # Phase 4 — FTS5
@@ -657,7 +690,7 @@ if __name__ == "__main__":
     parser.add_argument("--output",     default="nrsvue-scriptures-sqlite.db", metavar="FILE",
                         help="Output SQLite file (default: nrsvue-scriptures-sqlite.db)")
     parser.add_argument("--kjv-source", default="lds-scriptures-sqlite.db",    metavar="FILE",
-                        help="KJV DB to copy Triple Combination from (default: lds-scriptures-sqlite.db)")
+                        help="KJV DB for Triple Combination + verse_id alignment map (default: lds-scriptures-sqlite.db)")
     parser.add_argument("--delay",      type=float, default=1.2, metavar="SEC",
                         help="Seconds between HTTP requests (default: 1.2)")
     parser.add_argument("--retries",    type=int,   default=4,   metavar="N",
