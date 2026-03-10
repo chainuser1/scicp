@@ -56,14 +56,21 @@ mac:
       arch:
         - x64
         - arm64
-  icon: "frontend/public/emblem.ico"
+  icon: "frontend/public/emblem-512.png"
 
 linux:
   target:
     - target: AppImage
       arch:
         - x64
-  icon: "frontend/public/emblem.ico"
+    - target: deb
+      arch:
+        - x64
+  icon: "frontend/public/emblem-512.png"
+  category: Education
+
+deb:
+  maintainer: "Scriptures in View <scriptures-in-view@localhost>"
 
 # ── Windows installer options ─────────────────────────────────────────────────
 nsis:

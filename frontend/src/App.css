@@ -5958,8 +5958,12 @@ button, [role="button"] {
   line-height: 1.5;
   color: var(--client-text, #f0ece0);
   text-align: inherit;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
-@media (max-width: 640px) { .verse-secondary-text { font-size: 0.48em; opacity: 0.5; } }
+@media (max-width: 640px)  { .verse-secondary-text { font-size: 0.48em; opacity: 0.5; } }
+@media (min-width: 641px) and (max-width: 900px) { .verse-secondary-text { font-size: 0.54em; } }
+@media (min-width: 2400px) { .verse-secondary-text { font-size: 0.52em; } }
 
 /* F8 — Secondary language segment toggle in header */
 /* ── F9 — Canon volume accent (Client) ─────────────────────────────────────── */
