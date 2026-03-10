@@ -3,8 +3,8 @@ const { Server } = require("socket.io");
 const path = require('path');
 const crypto = require('crypto');
 
-const DB_DIR = path.resolve(__dirname, '../resources/db');
-const FRONTEND_DIST_DIR = path.resolve(__dirname, '../frontend/dist');
+const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
+const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
 // english scriptures database (LDS standard works)
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), { fileMustExist: true });
 // additional language databases (optional)
@@ -2653,4 +2653,11 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers };
+// Entry point for Electron: registers socket handlers and starts the Fastify server.
+// Call this AFTER setting process.env.DB_DIR / FRONTEND_DIST_DIR if needed.
+async function startElectron() {
+  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue });
+  return start();
+}
+
+module.exports = { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers, startElectron };
