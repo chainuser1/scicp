@@ -16,11 +16,10 @@
     "lint:frontend": "npm run lint --workspace=frontend",
     "check:prod": "npm run build && npm run test:backend && npm run lint:frontend",
     "electron:dev": "npm run build --workspace=frontend && electron .",
-    "electron:build": "npm run build --workspace=frontend && electron-builder && npm rebuild better-sqlite3",
-    "electron:build:win": "npm run build --workspace=frontend && electron-builder --win && npm rebuild better-sqlite3",
-    "electron:build:mac": "npm run build --workspace=frontend && electron-builder --mac && npm rebuild better-sqlite3",
-    "electron:build:linux": "npm run build --workspace=frontend && electron-builder --linux && npm rebuild better-sqlite3",
-    "postinstall": "electron-builder install-app-deps"
+    "electron:build": "npm run build --workspace=frontend && electron-builder",
+    "electron:build:win": "npm run build --workspace=frontend && electron-builder --win",
+    "electron:build:mac": "npm run build --workspace=frontend && electron-builder --mac",
+    "electron:build:linux": "npm run build --workspace=frontend && electron-builder --linux"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
@@ -31,6 +30,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "electron": "^34.0.0",
     "electron-builder": "^25.0.0"
   },
