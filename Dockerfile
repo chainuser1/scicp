@@ -11,7 +11,8 @@ RUN npm ci --include=dev
 COPY . .
 
 RUN npm run build --workspace=frontend \
-  && NODE_ENV=production npm prune --omit=dev
+  && NODE_ENV=production npm prune --omit=dev \
+  && npm rebuild better-sqlite3
 
 EXPOSE 8080
 
