@@ -1,0 +1,76 @@
+appId: com.scriptures-in-view.desktop
+productName: Scriptures in View
+copyright: Copyright © 2026 Scriptures in View
+
+# Electron entry point (matches package.json "main")
+# electron-builder reads this automatically.
+
+directories:
+  output: dist-electron
+  buildResources: build-resources
+
+# ── Files included in the app bundle ──────────────────────────────────────────
+# electron/ and backend/ go into the ASAR; static assets go into extraResources.
+files:
+  - electron/**
+  - backend/**
+  - "!backend/.env"
+  - "!backend/logs"
+  - "!backend/__tests__"
+  - "!**/*.md"
+  - "!**/*.map"
+
+# ── Extra resources unpacked alongside the ASAR ───────────────────────────────
+# Databases and the built frontend must be plain files (not inside ASAR) because
+# SQLite needs real file-system access and @fastify/static serves from a path.
+extraResources:
+  - from: "resources/db"
+    to: "db"
+    filter:
+      - "**/*.db"
+  - from: "frontend/dist"
+    to: "frontend-dist"
+  - from: "frontend/public/emblem.ico"
+    to: "emblem.ico"
+
+# ── Unpack native addons from ASAR ────────────────────────────────────────────
+# better-sqlite3 uses a .node native addon; it cannot live inside an ASAR archive.
+asarUnpack:
+  - "**/*.node"
+  - "**/better-sqlite3/**"
+
+# Rebuild native modules (e.g. better-sqlite3) for the target Electron version
+npmRebuild: true
+
+# ── Platform targets ──────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: "frontend/public/emblem.ico"
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  icon: "frontend/public/emblem.ico"
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  icon: "frontend/public/emblem.ico"
+
+# ── Windows installer options ─────────────────────────────────────────────────
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "Scriptures in View"
+  installerIcon: "frontend/public/emblem.ico"
+  uninstallerIcon: "frontend/public/emblem.ico"
