@@ -1105,6 +1105,7 @@ const MobilePresenter = () => {
               <IconSearch />
             </HdrBtn>
           </div>
+          <CastingControl />
           {/* Compact live dot */}
           {liveVerse && (
             <div className="live-badge live-badge--compact">
