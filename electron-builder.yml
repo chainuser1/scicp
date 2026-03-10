@@ -2,6 +2,12 @@ appId: com.scriptures-in-view.desktop
 productName: Scriptures in View
 copyright: Copyright © 2026 Scriptures in View
 
+# ── Auto-update via GitHub Releases ──────────────────────────────────────────
+publish:
+  provider: github
+  owner: chainuser1
+  repo: scicp
+
 # Electron entry point (matches package.json "main")
 # electron-builder reads this automatically.
 

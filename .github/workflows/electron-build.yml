@@ -5,6 +5,9 @@ on:
   push:
     tags: [ 'v*' ]            # Auto-trigger on version tags (v1.0.0, v1.0.1, etc.)
 
+permissions:
+  contents: write              # Required to create GitHub Releases
+
 jobs:
   build:
     strategy:
@@ -39,7 +42,7 @@ jobs:
         run: npm run build --workspace=frontend
 
       - name: Build Electron (${{ matrix.platform }})
-        run: npx electron-builder --${{ matrix.platform }}
+        run: npx electron-builder --${{ matrix.platform }} --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
