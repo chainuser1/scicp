@@ -1007,8 +1007,10 @@ const MobilePresenter = () => {
     : 'presenter-container--light';
 
   /* ── Render ── */
+  const hasLiveActionBar = Boolean(staged || liveVerse);
+
   return (
-    <div className={`presenter-container ${presenterThemeClass}`}>
+    <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`}>
 
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
@@ -1896,6 +1898,37 @@ const MobilePresenter = () => {
         </div>
       )}
 
+      {!hasLiveActionBar && (
+        <div className="mobile-core-bar">
+          <button
+            className={`mobile-core-btn${drawerOpen && drawerTab === 'search' ? ' mobile-core-btn--active' : ''}`}
+            onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }}
+          >
+            <IconSearch />
+            <span>Search</span>
+          </button>
+          <button
+            className={`mobile-core-btn${drawerOpen && drawerTab === 'setlist' ? ' mobile-core-btn--active' : ''}`}
+            onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); }}
+          >
+            <IconList />
+            <span>Setlist</span>
+          </button>
+          <button
+            className={`mobile-core-btn${staged ? ' mobile-core-btn--live' : ''}`}
+            onClick={() => {
+              if (staged) goLive();
+              else if (!drawerOpen || drawerTab !== 'history') openDrawer('history');
+              else setDrawerOpen(false);
+            }}
+          >
+            <IconBolt />
+            <span>{staged ? 'Go Live' : 'Live'}</span>
+          </button>
+          <CastingControl className="mobile-core-btn mobile-core-btn--cast" label="Cast" />
+        </div>
+      )}
+
       {/* Sticky Go Live bar — mobile only, appears when a verse is staged */}
       {(staged || liveVerse) && (
         <div className="mobile-golive-bar">
@@ -1913,6 +1946,8 @@ const MobilePresenter = () => {
             aria-label="Next verse"
           >&#8250;</button>
           <div className="mobile-golive-actions">
+            <button className="mobile-mini-btn" onClick={() => openDrawer('search')}>Search</button>
+            <button className="mobile-mini-btn" onClick={() => openDrawer('setlist')}>Setlist</button>
             {liveVerse && (
               <>
                 <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">A-</button>

@@ -15,7 +15,7 @@ const IconCast = ({ active }) => (
   </svg>
 );
 
-export default function CastingControl() {
+export default function CastingControl({ className = '', label = '' }) {
   const [available, setAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
 
@@ -62,7 +62,7 @@ export default function CastingControl() {
 
   return (
     <button
-      className={`hdr-btn${casting ? ' hdr-btn--active' : ''}`}
+      className={`hdr-btn${casting ? ' hdr-btn--active' : ''}${className ? ` ${className}` : ''}`}
       onClick={handleToggle}
       disabled={!available && !casting}
       aria-label={casting ? 'Stop casting' : 'Cast to display'}
@@ -76,6 +76,7 @@ export default function CastingControl() {
       style={{ opacity: available || casting ? 1 : 0.4 }}
     >
       <IconCast active={casting} />
+      {label && <span>{label}</span>}
       {casting && <span className="hdr-badge" style={{ background: '#c9a84c', width: 6, height: 6, borderRadius: '50%', position: 'absolute', top: 4, right: 4 }} />}
     </button>
   );
