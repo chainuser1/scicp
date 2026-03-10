@@ -1,3 +1,5 @@
+// DEPRECATED: Use scripts/build-fts.js instead — it processes all 9 DBs
+// and uses the shared engine's initializeFts() with correct tokenizer config.
 const db = require('better-sqlite3')('./resources/db/lds-scriptures-sqlite.db');
 
 console.log('=== Setting up FTS5 Search ===\n');

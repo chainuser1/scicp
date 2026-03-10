@@ -1,0 +1,252 @@
+/**
+ * socket-local.js — Drop-in replacement for Socket.IO on mobile.
+ *
+ * Mimics the socket.io-client API (emit, on, off, connected) so
+ * MobilePresenter.jsx can import { socket } from './socket-local' with
+ * minimal changes from the original Presenter.jsx.
+ *
+ * Instead of network calls, emit() routes everything through the local
+ * scripture-service.js (offline sql.js queries) and the native
+ * ExternalDisplay plugin (when casting to a TV).
+ */
+import * as svc from './scripture-service';
+import { ExternalDisplay } from '../plugins/capacitor-external-display/src/index.js';
+
+// ── Simple event emitter ────────────────────────────────────────────────────
+const listeners = new Map();
+
+function on(event, fn) {
+  if (!listeners.has(event)) listeners.set(event, new Set());
+  listeners.get(event).add(fn);
+}
+
+function off(event, fn) {
+  if (!fn) { listeners.delete(event); return; }
+  const set = listeners.get(event);
+  if (set) { set.delete(fn); if (set.size === 0) listeners.delete(event); }
+}
+
+function fire(event, data) {
+  const set = listeners.get(event);
+  if (set) set.forEach(fn => { try { fn(data); } catch (e) { console.error(`socket-local [${event}]:`, e); } });
+}
+
+// ── External display bridge ─────────────────────────────────────────────────
+// Uses the capacitor-external-display plugin when available, falling back
+// to a local CustomEvent (for dev/browser testing).
+let _presentationActive = false;
+
+async function sendToDisplay(message) {
+  if (_presentationActive) {
+    try {
+      await ExternalDisplay.sendToDisplay({ message });
+    } catch {
+      // Fallback: dispatch locally (browser dev mode / popup)
+      window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
+    }
+  }
+  // Always fire locally too (for in-app preview if needed)
+  window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
+}
+
+/** Start presenting on an external display. Called by CastingControl. */
+export async function startCasting(clientUrl) {
+  try {
+    await ExternalDisplay.startPresentation({ url: clientUrl });
+    _presentationActive = true;
+    return true;
+  } catch (err) {
+    console.warn('startCasting failed:', err);
+    return false;
+  }
+}
+
+/** Stop the external display presentation. */
+export async function stopCasting() {
+  try {
+    await ExternalDisplay.stopPresentation();
+  } catch { /* ignore */ }
+  _presentationActive = false;
+}
+
+/** Check if an external display is connected. */
+export async function isDisplayAvailable() {
+  try {
+    const { available } = await ExternalDisplay.isAvailable();
+    return available;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if we're actively presenting. */
+export function isCasting() {
+  return _presentationActive;
+}
+
+// ── Emit handler — routes socket events to local service calls ──────────────
+function emit(event, payload, ackCallback) {
+  // Handle ack-style calls where the last arg is a callback
+  if (typeof payload === 'function') {
+    ackCallback = payload;
+    payload = {};
+  }
+
+  switch (event) {
+    case 'search': {
+      const { query, page = 0, pageSize = 10, language = 'en' } = payload || {};
+      if (!query || !String(query).trim()) {
+        fire('search-results', { results: [], total: 0, page: 0, pageSize });
+        return;
+      }
+      try {
+        const result = svc.search(query, page, pageSize, language);
+        fire('search-results', { ...result, query, language });
+      } catch (err) {
+        console.error('socket-local search error:', err);
+        fire('search-results', { results: [], total: 0, page, pageSize, query, language });
+      }
+      break;
+    }
+
+    case 'go-live': {
+      const { verse, theme, language, secondaryLanguage } = payload || {};
+      let scriptureText = verse.scripture_text;
+      let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
+      let bookTitle = verse.book_title;
+
+      // Fetch from the correct language DB
+      const targetLang = language || 'en';
+      const row = svc.getVerse(verse, targetLang);
+      if (row) {
+        if (targetLang !== 'en') {
+          if (row.scripture_text) scriptureText = row.scripture_text;
+          if (row.verse_title) verseTitle = row.verse_title;
+          if (row.book_title) bookTitle = row.book_title;
+        } else {
+          scriptureText = row.scripture_text;
+          verseTitle = row.verse_title;
+          bookTitle = row.book_title;
+        }
+      }
+
+      const segments = svc.segmentVerseText(scriptureText);
+      const verseWithSegments = {
+        ...verse,
+        scripture_text: scriptureText,
+        verse_title: verseTitle,
+        book_title: bookTitle,
+        segments,
+        totalSegments: segments.length,
+        currentSegment: 0,
+        secondary_text: null,
+        secondary_book_title: null,
+        secondary_segments: null,
+        secondaryLanguage: null,
+        language: targetLang,
+        version_citation: svc.getVersionCitation(targetLang, verse.volume_id),
+        volume_title: row?.volume_title || verse.volume_title || '',
+        volume_short_title: row?.volume_short_title || verse.volume_short_title || '',
+      };
+
+      // Dual language
+      if (secondaryLanguage && secondaryLanguage !== targetLang) {
+        const secRow = svc.getVerse(verse, secondaryLanguage);
+        if (secRow) {
+          verseWithSegments.secondary_text = secRow.scripture_text;
+          verseWithSegments.secondary_book_title = secRow.book_title;
+          verseWithSegments.secondaryLanguage = secondaryLanguage;
+        }
+      }
+
+      // Update local state and send to external display
+      fire('update-verse', verseWithSegments);
+      sendToDisplay({ type: 'update-verse', data: verseWithSegments });
+      break;
+    }
+
+    case 'update-verse': {
+      const verse = payload?.verse || payload;
+      fire('update-verse', verse);
+      sendToDisplay({ type: 'update-verse', data: verse });
+      break;
+    }
+
+    case 'update-theme': {
+      const theme = payload?.theme || payload;
+      fire('update-theme', theme);
+      sendToDisplay({ type: 'update-theme', data: theme });
+      break;
+    }
+
+    case 'highlight-text': {
+      const text = payload?.text ?? payload;
+      fire('highlight-text', text);
+      sendToDisplay({ type: 'highlight-text', data: text });
+      break;
+    }
+
+    case 'clear-screen': {
+      fire('clear-screen', {});
+      sendToDisplay({ type: 'clear-screen' });
+      if (typeof ackCallback === 'function') ackCallback({ ok: true });
+      break;
+    }
+
+    case 'go-custom': {
+      const { text, subtext, theme } = payload || {};
+      fire('custom-text', { text, subtext, theme });
+      sendToDisplay({ type: 'custom-text', data: { text, subtext, theme } });
+      break;
+    }
+
+    case 'update-language': {
+      // No-op locally — language switching is handled in go-live
+      break;
+    }
+
+    case 'preload-background': {
+      sendToDisplay({ type: 'preload-background', data: { background_url: payload?.background_url } });
+      break;
+    }
+
+    // ── Session events (no-op on mobile — single local session) ───────────
+    case 'join-session': {
+      if (typeof ackCallback === 'function') {
+        ackCallback({ ok: true, sessionId: 'LOCAL', presenterToken: 'mobile-local' });
+      }
+      fire('session-joined', { sessionId: 'LOCAL' });
+      break;
+    }
+
+    case 'leave-session': {
+      if (typeof ackCallback === 'function') ackCallback({ ok: true });
+      fire('session-left');
+      break;
+    }
+
+    case 'set-session-pin':
+    case 'clear-session-pin': {
+      if (typeof ackCallback === 'function') ackCallback({ ok: true });
+      break;
+    }
+
+    default:
+      console.warn(`socket-local: unhandled emit "${event}"`, payload);
+  }
+}
+
+// ── Public API (mimics socket.io-client) ────────────────────────────────────
+export const socket = {
+  connected: true,
+  id: 'mobile-local',
+  emit,
+  on,
+  off,
+  // Fire a synthetic 'connect' event once the service is initialized
+  async init() {
+    await svc.init();
+    fire('connect');
+    fire('session-joined', { sessionId: 'LOCAL' });
+  },
+};
