@@ -218,6 +218,14 @@ const QUICK_TOPICS = [
   'holy ghost', 'resurrection', 'obedience', 'trials', 'gratitude',
 ];
 
+const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳' };
+const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
+function getCitation(language, volumeId) {
+  const vid = Number(volumeId);
+  if (vid >= 3) return TRIPLE_CITATIONS[vid] || '';
+  return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
+}
+
 const IconQr = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -1294,6 +1302,7 @@ const Presenter = () => {
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
                 {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+                <span className="hdr-verse-citation"> · {getCitation(currentLanguage, liveVerse.volume_id)}</span>
               </span>
               {hasSegments && (
                 <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
@@ -2097,7 +2106,10 @@ const Presenter = () => {
               </div>
             </div>
             <div className="staged-verse-display">
-              <h3 className="staged-title">{staged.book_title} {staged.chapter_number}:{staged.verse_number}</h3>
+              <h3 className="staged-title">
+                {staged.book_title} {staged.chapter_number}:{staged.verse_number}
+                <span className="staged-citation"> · {getCitation(currentLanguage, staged.volume_id)}</span>
+              </h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
             <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
