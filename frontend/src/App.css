@@ -2108,6 +2108,14 @@ button,
   line-height: 1.2;
 }
 
+.hdr-verse-citation {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8em;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  opacity: 0.65;
+}
+
 .hdr-seg-count {
   font-family: 'Inter', sans-serif;
   font-size: 0.68rem;
@@ -3109,6 +3117,14 @@ button,
   letter-spacing: 0.1em;
   color: var(--gold-light);
   margin: 0 0 0.55rem;
+}
+
+.staged-citation {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.8em;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  opacity: 0.55;
 }
 
 .staged-text {
