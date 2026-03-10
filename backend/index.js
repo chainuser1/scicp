@@ -2,6 +2,8 @@ const fastify = require('fastify')({ logger: true });
 const { Server } = require("socket.io");
 const path = require('path');
 const crypto = require('crypto');
+const { BetterSqliteAdapter } = require('../shared/db-adapter');
+const engine = require('../shared/scripture-engine');
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
@@ -24,6 +26,32 @@ let db_nrsvue = null;
 try { db_nrsvue   = require('better-sqlite3')(path.join(DB_DIR, 'nrsvue-scriptures-sqlite.db'),   DB_OPTS); } catch (_) {}
 let db_waray = null;
 try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'),    DB_OPTS); } catch (_) {}
+
+// ── Wrapped adapters for the shared scripture engine ─────────────────────────
+const dba          = new BetterSqliteAdapter(db);
+const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
+const dba_cebuano  = new BetterSqliteAdapter(db_cebuano);
+const dba_spanish  = new BetterSqliteAdapter(db_spanish);
+const dba_greek    = new BetterSqliteAdapter(db_greek);
+const dba_ilocano  = new BetterSqliteAdapter(db_ilocano);
+let dba_japanese   = db_japanese ? new BetterSqliteAdapter(db_japanese) : null;
+let dba_nrsvue     = db_nrsvue   ? new BetterSqliteAdapter(db_nrsvue)   : null;
+let dba_waray      = db_waray    ? new BetterSqliteAdapter(db_waray)    : null;
+
+// Resolve the correct adapter for a given language code
+function resolveDbAdapter(language) {
+  switch (language) {
+    case 'ceb':    return dba_cebuano;
+    case 'tl':     return dba_tagalog;
+    case 'es':     return dba_spanish;
+    case 'el':     return dba_greek;
+    case 'ilo':    return dba_ilocano;
+    case 'ja':     return dba_japanese || dba;
+    case 'nrsvue': return dba_nrsvue || dba;
+    case 'war':    return dba_waray || dba;
+    default:       return dba;
+  }
+}
 
 const fastifyStatic = require('@fastify/static');
 
@@ -164,19 +192,9 @@ fastify.delete('/setlists/:id', async (request, reply) => {
 // ── scripture browser endpoints (F1) ──────────────────────────────────────────
 fastify.get('/browse/books', async (request, reply) => {
   const { language } = request.query;
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
+  const targetDb = resolveDbAdapter(language);
   try {
-    const rows = targetDb.prepare(`
-      SELECT b.id AS book_id, b.book_title, b.book_short_title,
-             v.id AS volume_id, v.volume_title, v.volume_short_title,
-             COUNT(DISTINCT c.id) AS chapter_count
-      FROM books b
-      JOIN volumes v ON v.id = b.volume_id
-      JOIN chapters c ON c.book_id = b.id
-      GROUP BY b.id
-      ORDER BY b.id
-    `).all();
-    return rows;
+    return engine.browseBooks(targetDb);
   } catch (err) {
     fastify.log.error('browse/books failed', err);
     reply.code(500);
@@ -187,18 +205,9 @@ fastify.get('/browse/books', async (request, reply) => {
 fastify.get('/browse/chapters', async (request, reply) => {
   const { book_id, language } = request.query;
   if (!book_id) { reply.code(400); return { error: 'book_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
+  const targetDb = resolveDbAdapter(language);
   try {
-    const rows = targetDb.prepare(`
-      SELECT c.id AS chapter_id, c.chapter_number,
-             COUNT(vs.id) AS verse_count
-      FROM chapters c
-      JOIN verses vs ON vs.chapter_id = c.id
-      WHERE c.book_id = ?
-      GROUP BY c.id
-      ORDER BY c.chapter_number
-    `).all(Number(book_id));
-    return rows;
+    return engine.browseChapters(targetDb, book_id);
   } catch (err) {
     fastify.log.error('browse/chapters failed', err);
     reply.code(500);
@@ -209,16 +218,9 @@ fastify.get('/browse/chapters', async (request, reply) => {
 fastify.get('/browse/verses', async (request, reply) => {
   const { chapter_id, language } = request.query;
   if (!chapter_id) { reply.code(400); return { error: 'chapter_id is required' }; }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ilo' ? db_ilocano : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db;
+  const targetDb = resolveDbAdapter(language);
   try {
-    const rows = targetDb.prepare(`
-      SELECT verse_id, book_title, chapter_number, verse_number,
-             scripture_text, verse_title, volume_title, volume_short_title
-      FROM scriptures
-      WHERE chapter_id = ?
-      ORDER BY verse_number
-    `).all(Number(chapter_id));
-    return rows;
+    return engine.browseVerses(targetDb, chapter_id);
   } catch (err) {
     fastify.log.error('browse/verses failed', err);
     reply.code(500);
@@ -296,1208 +298,13 @@ try {
 }
 
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
-// targetDb defaults to the English DB; label is used in log messages only.
-function initializeFts(targetDb = db, label = 'English') {
-  const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
-
-  const createFtsTableSql = `
-    CREATE VIRTUAL TABLE scriptures_fts USING fts5(
-      verse_id   UNINDEXED,
-      scripture_text,
-      verse_title,
-      book_title,
-      chapter_number UNINDEXED,
-      verse_number   UNINDEXED,
-      tokenize = "porter ascii"
-    )
-  `;
-
-  const populateFts = () => {
-    fastify.log.info(`[${label}] Populating FTS5 table from verses...`);
-    const insertStmt = targetDb.prepare(`
-      INSERT INTO scriptures_fts(verse_id, scripture_text, verse_title, book_title, chapter_number, verse_number)
-      SELECT
-        verses.id,
-        verses.scripture_text,
-        (books.book_title || ' ' || chapters.chapter_number || ':' || verses.verse_number),
-        books.book_title,
-        chapters.chapter_number,
-        verses.verse_number
-      FROM verses
-      JOIN chapters ON chapters.id = verses.chapter_id
-      JOIN books    ON books.id    = chapters.book_id
-    `);
-    const result = insertStmt.run();
-    fastify.log.info(`[${label}] FTS5 table populated with ${result.changes} verses`);
-    targetDb.exec(`INSERT INTO scriptures_fts(scriptures_fts) VALUES('optimize')`);
-    fastify.log.info(`[${label}] FTS5 index optimized`);
-  };
-
-  try {
-    const existing = targetDb.prepare(`
-      SELECT sql
-      FROM sqlite_master
-      WHERE type = 'table' AND name = 'scriptures_fts'
-    `).get();
-    const hasExpectedTokenizer = existing?.sql?.includes('porter ascii');
-
-    if (forceRebuild || !existing || !hasExpectedTokenizer) {
-      targetDb.exec(`DROP TABLE IF EXISTS scriptures_fts`);
-      targetDb.exec(createFtsTableSql);
-      populateFts();
-      return;
-    }
-
-    const ftsCount = targetDb.prepare(`SELECT COUNT(*) AS count FROM scriptures_fts`).get()?.count ?? 0;
-    if (ftsCount === 0) {
-      populateFts();
-    } else {
-      fastify.log.info(`[${label}] FTS5 table ready with ${ftsCount} indexed verses`);
-    }
-  } catch (err) {
-    fastify.log.error(`[${label}] FTS5 setup failed:`, err && err.message ? err.message : err);
-  }
-}
-
-// Map of book abbreviations to full names (LDS scriptures)
-const BOOK_ABBREVIATIONS = {
-  // Old Testament
-  'gen': 'Genesis',
-  'ex': 'Exodus',
-  'exo': 'Exodus',
-  'lev': 'Leviticus',
-  'num': 'Numbers',
-  'deut': 'Deuteronomy',
-  'josh': 'Joshua',
-  'judg': 'Judges',
-  'ruth': 'Ruth',
-  '1 sam': '1 Samuel',
-  '1sam': '1 Samuel',
-  '2 sam': '2 Samuel',
-  '2sam': '2 Samuel',
-  '1 kg': '1 Kings',
-  '1kg': '1 Kings',
-  '1 kgs': '1 Kings',
-  '2 kg': '2 Kings',
-  '2kg': '2 Kings',
-  '2 kgs': '2 Kings',
-  '1 chr': '1 Chronicles',
-  '1chr': '1 Chronicles',
-  '2 chr': '2 Chronicles',
-  '2chr': '2 Chronicles',
-  'ezra': 'Ezra',
-  'neh': 'Nehemiah',
-  'esth': 'Esther',
-  'job': 'Job',
-  'ps': 'Psalms',
-  'psa': 'Psalms',
-  'prov': 'Proverbs',
-  'eccl': 'Ecclesiastes',
-  'isa': 'Isaiah',
-  'jer': 'Jeremiah',
-  'lam': 'Lamentations',
-  'ezek': 'Ezekiel',
-  'dan': 'Daniel',
-  'hos': 'Hosea',
-  'joel': 'Joel',
-  'amos': 'Amos',
-  'obad': 'Obadiah',
-  'jonah': 'Jonah',
-  'micah': 'Micah',
-  'nahum': 'Nahum',
-  'hab': 'Habakkuk',
-  'zeph': 'Zephaniah',
-  'hag': 'Haggai',
-  'zech': 'Zechariah',
-  'mal': 'Malachi',
-  
-  // New Testament
-  'matt': 'Matthew',
-  'mark': 'Mark',
-  'mk': 'Mark',
-  'luke': 'Luke',
-  'lk': 'Luke',
-  'john': 'John',
-  'jn': 'John',
-  'acts': 'Acts',
-  'rom': 'Romans',
-  '1 cor': '1 Corinthians',
-  '1cor': '1 Corinthians',
-  '2 cor': '2 Corinthians',
-  '2cor': '2 Corinthians',
-  'gal': 'Galatians',
-  'eph': 'Ephesians',
-  'phil': 'Philippians',
-  'col': 'Colossians',
-  '1 thes': '1 Thessalonians',
-  '1thes': '1 Thessalonians',
-  '2 thes': '2 Thessalonians',
-  '2thes': '2 Thessalonians',
-  '1 tim': '1 Timothy',
-  '1tim': '1 Timothy',
-  '2 tim': '2 Timothy',
-  '2tim': '2 Timothy',
-  'titus': 'Titus',
-  'philem': 'Philemon',
-  'heb': 'Hebrews',
-  'james': 'James',
-  'jas': 'James',
-  '1 pet': '1 Peter',
-  '1pet': '1 Peter',
-  '2 pet': '2 Peter',
-  '2pet': '2 Peter',
-  '1 jn': '1 John',
-  '1jn': '1 John',
-  '2 jn': '2 John',
-  '2jn': '2 John',
-  '3 jn': '3 John',
-  '3jn': '3 John',
-  'jude': 'Jude',
-  'rev': 'Revelation',
-  
-  // Book of Mormon
-  '1 ne': '1 Nephi',
-  '1ne': '1 Nephi',
-  '2 ne': '2 Nephi',
-  '2ne': '2 Nephi',
-  'jacob': 'Jacob',
-  'enos': 'Enos',
-  'jarom': 'Jarom',
-  'omni': 'Omni',
-  'w of m': 'Words of Mormon',
-  'wom': 'Words of Mormon',
-  'mosiah': 'Mosiah',
-  'alma': 'Alma',
-  'hel': 'Helaman',
-  '3 ne': '3 Nephi',
-  '3ne': '3 Nephi',
-  '4 ne': '4 Nephi',
-  '4ne': '4 Nephi',
-  'moro': 'Moroni',
-  
-  // Doctrine and Covenants — all common spellings and abbreviations
-  'd and c': 'Doctrine and Covenants',
-  'd. & c.': 'Doctrine and Covenants',
-  'd.&c.': 'Doctrine and Covenants',
-  'lds d&c': 'Doctrine and Covenants',
-  'doctrine covenants': 'Doctrine and Covenants',
-  'd&c': 'Doctrine and Covenants',
-  'dc': 'Doctrine and Covenants',
-  'doc': 'Doctrine and Covenants',
-  'doc&cov': 'Doctrine and Covenants',
-  'doctrine and covenants': 'Doctrine and Covenants',
-  'doctrine & covenants': 'Doctrine and Covenants',
-  'doct': 'Doctrine and Covenants',
-  'doct&cov': 'Doctrine and Covenants',
-  'doctrineandcovenants': 'Doctrine and Covenants',
-
-  // Pearl of Great Price
-  'pgp': 'Moses',       // user will need chapter — best effort
-  'moses': 'Moses',
-  'abr': 'Abraham',
-  'abraham': 'Abraham',
-  'jsh': 'Joseph Smith—History',
-  'js-h': 'Joseph Smith—History',
-  'jsh-h': 'Joseph Smith—History',
-  'js-m': 'Joseph Smith—Matthew',
-  'jsm': 'Joseph Smith—Matthew',
-  'aof': 'Articles of Faith',
-  'articles of faith': 'Articles of Faith',
-
-  // Book of Mormon extras
-  'ether': 'Ether',
-  'words of mormon': 'Words of Mormon',
-  '3 nephi': '3 Nephi',
-  '4 nephi': '4 Nephi',
-  '1 nephi': '1 Nephi',
-  '2 nephi': '2 Nephi',
-  'helaman': 'Helaman',
-  'moroni': 'Moroni',
-
-  // Old Testament extras
-  'psalms': 'Psalms',
-  'psalm': 'Psalms',
-  'proverbs': 'Proverbs',
-  'prov': 'Proverbs',
-  'ecclesiastes': 'Ecclesiastes',
-  'song of solomon': 'Song of Solomon',
-  'sos': 'Song of Solomon',
-  'obadiah': 'Obadiah',
-  'jonah': 'Jonah',
-
-  'oa': 'Olive Garden Account',
-};
-
-// Function to expand abbreviated book name
-function expandBookName(bookRef) {
-  if (!bookRef) return null;
-  const lowerRef = bookRef.toLowerCase().trim();
-  return BOOK_ABBREVIATIONS[lowerRef] || bookRef;
-}
-
-// Function to segment verse text into readable chunks (max 200 words per segment)
-function segmentVerseText(text, wordsPerSegment = 200) {
-  if (!text) return [];
-
-  const words = text.split(/\s+/).filter(w => w.length > 0);
-  const segments = [];
-
-  for (let i = 0; i < words.length; i += wordsPerSegment) {
-    segments.push(words.slice(i, i + wordsPerSegment).join(' '));
-  }
-
-  return segments.length > 0 ? segments : [text];
-}
-
-// Dual-language segmentation: segment both languages at a tighter word limit,
-// then zip into equal-length arrays so each slide shows one matched pair.
-function segmentVerseTextDual(primaryText, secondaryText, wordsPerSegment = 150) {
-  const primarySegs   = segmentVerseText(primaryText,   wordsPerSegment);
-  const secondarySegs = segmentVerseText(secondaryText, wordsPerSegment);
-  const len = Math.max(primarySegs.length, secondarySegs.length);
-  // Pad the shorter array so indices always match
-  while (primarySegs.length   < len) primarySegs.push('');
-  while (secondarySegs.length < len) secondarySegs.push('');
-  return { primarySegments: primarySegs, secondarySegments: secondarySegs };
-}
-
-
-
-function parseScriptureReference(str) {
-    if (!str || typeof str !== 'string') return null;
-    const trimmed = str.trim();
-    // look for a book name followed by numeric chapter and optional verse
-    const match = trimmed.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
-    if (!match) return null;
-    let book = match[1].trim();
-    const chapter = parseInt(match[2], 10);
-    const verse = match[3] ? parseInt(match[3], 10) : null;
-    
-    // Try to expand abbreviated book name
-    book = expandBookName(book);
-    
-    return { book, chapter, verse };
-}
-
-// Build a safe FTS5 MATCH query from user input.
-// - quoted phrase ("...") is searched as an exact phrase
-// - otherwise split into tokens and require all tokens (AND)
-// Build a safe FTS5 MATCH query from user input.
-// ─── Doctrine Alias Map ───────────────────────────────────────────────────────
-//  Maps plain-language doctrinal queries → keyword expansions that FTS5 can
-//  match against scripture text. Evaluated before FTS5 runs, costs 0ms.
-//  Extend this map whenever a real-world presenter query stumps the system.
-// ─────────────────────────────────────────────────────────────────────────────
-const DOCTRINE_ALIASES = {
-
-  // ── Plan of Salvation ─────────────────────────────────────────────────────
-  '_plan_of_salvation': {
-    phrases: [
-      'great plan of the Eternal God',
-      'great plan of happiness',
-      'plan of salvation',
-      'plan of redemption',
-      'plan prepared from the foundation of the world',
-      'plan of happiness',
-      'before the world was',
-      'foundation of the world'
-    ],
-    terms: [
-      'salvation', 'redemption', 'happiness', 'immortality', 'eternal life',
-      'atonement', 'resurrection', 'exaltation', 'prepared', 'foundation',
-      'joy', 'chosen', 'foreordained'
-    ],
-  },
-  '_plan_of_redemption': {
-    phrases: ['plan prepared from the foundation of the world', 'plan of redemption', 'plan of salvation', 'plan of happiness'],
-    terms:   ['redemption', 'salvation', 'eternal life', 'atonement', 'prepared', 'foundation'],
-  },
-  '_plan_of_happiness': {
-    phrases: ['great plan of happiness', 'plan of happiness', 'plan of salvation'],
-    terms:   ['happiness', 'salvation', 'eternal life', 'joy', 'redemption'],
-  },
-  '_premortal_life': {
-    phrases: [
-      'before the world was',
-      'chosen before',
-      'choses before the foundation of the world',
-      'foundation of the world',
-      'pre-earth life',
-      'pre-earth life',
-      'council in heaven',
-      'foreordained'
-    ],
-    terms: [
-      'foreordained', 'chosen', 'foundation', 'spirits',
-      'council', 'heaven', 'premortal'
-    ],
-  },
-  '_war_in_heaven': {
-    phrases: ['and he became Satan, yea, even the devil, the father of all lies, to deceive', 'neither was their place found anymore in heaven', 'third part of the host of heaven', 'third part of the stars', 'fought against the dragon', 'war in heaven', 'devil and his angels', 'cast out', 'because of their agency', 'they were cast out'],
-    terms:   ['war', 'heaven', 'cast', 'rebel', 'devil', 'dragon', 'third', 'stars'],
-  },
-  '_spirit_world': {
-    phrases: ['spirit world', 'world of spirits', 'paradise of God', 'spirit prison', 'prison house'],
-    terms:   ['spirit', 'dead', 'prison', 'paradise', 'resurrection', 'disembodied'],
-  },
-  '_degrees_of_glory': {
-    phrases: ['celestial kingdom', 'terrestrial kingdom', 'telestial kingdom', 'degrees of glory', 'many mansions', 'glory of the sun', 'glory of the moon', 'glory of the stars'],
-    terms:   ['celestial', 'terrestrial', 'telestial', 'glory', 'kingdom', 'mansion', 'sun', 'moon', 'stars'],
-  },
-
-  // ── Atonement ─────────────────────────────────────────────────────────────
-  '_atonement': {
-    phrases: [
-      'suffered for our sins',
-      'he was wounded for our transgressions',
-      'he bore our griefs',
-      'by his stripes we are healed',
-      'he was broken for our iniquities',
-      'took upon him our sicknesses',
-      'carried our sorrows',
-      'bore our sins in his own body',
-      'atonement of Christ',
-      'atonement of Jesus Christ',
-      'infinite atonement',
-      'atoning sacrifice',
-      'atoning blood',
-      'blood of Christ',
-      'garden of Gethsemane',
-      'suffer in Gethsemane',
-      'blood from every pore',
-      'sweat as it were great drops',
-      'eternal sacrifice'
-    ],
-    terms: [
-      'atone', 'redeem', 'suffer', 'reconcile', 'ransom', 'sacrifice',
-      'expiate', 'infinite', 'eternal', 'sins', 'all mankind', 'gethsemane',
-      'cup', 'bleed', 'pore', 'agony', 'garden', 'wound', 'transgression',
-      'grief', 'stripe', 'heal', 'bore', 'carried'
-    ],
-  },
-
-  // ── Abrahamic Covenant ────────────────────────────────────────────────────
-  '_abrahamic_covenant': {
-    phrases: [
-      'Abraham shall be a father of many nations',
-      'Abraham was a father of many nations',
-      'Abraham rejoiced to see my day, and he saw it and was glad',
-      'make thee exceeding fruitful, and I will make nations of thee, and kings shall come out of thee',
-      'circumcise the flesh of thy foreskin, and it shall be a token of the covenant',
-      'and the Lord God shall give to Abraham a land of plenty and of good',
-      'familes of the earth blessed through Abraham',
-      'seed as the stars of heaven',
-      'seed as the sand upon the seashore',
-      'blessings of Abraham',
-      'Abrahamic blessings',
-      'unto thy seed give I this land, promise land',
-      'inherit the land of Canaan',
-      'father of many nations',
-      'father of a multitude of nations',
-      'in thy seed shall all the nations of the earth be blessed',
-      'priesthood shall continue in thy seed forever',
-      'covenant of circumcision',
-      'sign of the covenant',
-      'everlasting covenant',
-      'covenant made with Abraham',
-      'covenant of the priesthood',
-      'Abrahamic covenant',
-      'eternal marriage',
-      'priesthood lineage',
-      'covenant of Abraham',
-      'seed of Abraham',
-      'covenant with Abraham',
-      'blessings of Abraham',
-      'as the stars of heaven'
-    ],
-    terms: [
-      'abrahamic', 'covenant', 'Abraham', 'Isaac', 'Jacob', 'seed',
-      'blessing', 'nations', 'stars', 'sand', 'posterity', 'eternal',
-      'marriage', 'lineage'
-    ],
-  },
-
-  '_grace': {
-    phrases: [
-      'saved by grace',
-      'grace of God',
-      'grace of Christ',
-      'after all we can do'
-    ],
-    terms: [
-      'grace', 'mercy', 'favour', 'unmerited', 'enable', 'divine help'
-    ],
-  },
-  '_grace_vs_works': {
-    phrases: [
-      'saved by grace',
-      'after all we can do',
-      'faith without works',
-      'works of righteousness'
-    ],
-    terms: [
-      'grace', 'works', 'faith', 'justified', 'saved', 'merit'
-    ],
-  },
-  '_redemption': {
-    phrases: ['redemption of Christ', 'redemption through Christ', 'plan of redemption', 'redeemed from the fall'],
-    terms:   ['redeem', 'ransom', 'bought', 'price', 'redemption', 'deliver'],
-  },
-
-  // ── Christology ───────────────────────────────────────────────────────────
-  '_jesus_christ': {
-    phrases: ['Jesus Christ', 'Son of God', 'Son of Man', 'Lamb of God', 'Messiah', 'Holy One of Israel', 'Redeemer of Israel', 'Lord and Savior'],
-    terms:   ['Jesus', 'Christ', 'Savior', 'Redeemer', 'Messiah', 'Lord'],
-  },
-  '_second_coming': {
-    phrases: ['second coming', 'coming of the Son of Man', 'day of the Lord', 'great and dreadful day', 'coming in glory', 'at his coming'],
-    terms:   ['second', 'coming', 'return', 'clouds', 'glory', 'parousia', 'millennium'],
-  },
-  '_millennium': {
-    phrases: ['thousand years', 'reign of Christ', 'millennial reign', 'new heaven and new earth'],
-    terms:   ['millennium', 'thousand', 'reign', 'peace', 'Satan bound', 'rest'],
-  },
-  '_resurrection': {
-    phrases: [
-      'resurrection of the dead',
-      'resurrection of Christ',
-      'brought to pass the resurrection',
-      'rise from the dead',
-      'first resurrection',
-      'resurrection of the just',
-      'life after death',
-      'we shall live again'
-    ],
-    terms: [
-      'resurrect', 'rise', 'dead', 'immortal', 'body', 'alive',
-      'quicken', 'eternal', 'death', 'live'
-    ],
-  },
-
-  // ── Godhead ───────────────────────────────────────────────────────────────
-  '_godhead': {
-    phrases: ['the Father and the Son', 'God the Father', 'Holy Ghost', 'three separate', 'Godhead', 'three personages'],
-    terms:   ['father', 'son', 'holy ghost', 'godhead', 'personage', 'one'],
-  },
-  '_nature_of_god': {
-    phrases: ['God is a God of truth', 'body of flesh and bones', 'eternal God', 'immortal God', 'perfections of God'],
-    terms:   ['god', 'eternal', 'immortal', 'omniscient', 'omnipotent', 'flesh', 'bones', 'perfection'],
-  },
-  '_holy_ghost': {
-    phrases: ['Holy Ghost', 'Holy Spirit', 'gift of the Holy Ghost', 'Comforter', 'Spirit of God', 'Spirit of the Lord'],
-    terms:   ['holy ghost', 'comforter', 'spirit', 'confirm', 'receive', 'witness', 'gift'],
-  },
-  '_first_vision': {
-    phrases: ['pillar of light', 'two personages', 'Father and the Son appeared', 'grove of trees'],
-    terms:   ['vision', 'light', 'pillar', 'personage', 'grove', 'appeared', 'Joseph'],
-  },
-
-  // ── Faith & Repentance ────────────────────────────────────────────────────
-  '_faith': {
-    phrases: ['faith in Christ', 'faith in Jesus Christ', 'faith in the Lord', 'faith unto repentance', 'faith and works'],
-    terms:   ['faith', 'believe', 'trust', 'hope', 'assurance', 'confidence'],
-  },
-  '_repentance': {
-    phrases: ['repent and be baptized', 'repentance of sins', 'broken heart and contrite spirit', 'godly sorrow', 'forsake your sins'],
-    terms:   ['repent', 'forsake', 'confess', 'sorrow', 'contrite', 'broken heart', 'change'],
-  },
-  '_forgiveness': {
-    phrases: ['forgiveness of sins', 'sins are forgiven', 'I the Lord will forgive', 'remember no more', 'blot out transgressions'],
-    terms:   ['forgive', 'pardon', 'remit', 'cleanse', 'blot', 'remember no more', 'merciful'],
-  },
-  '_born_again': {
-    phrases: ['born again', 'born of God', 'born of the Spirit', 'new creature in Christ', 'spiritual rebirth', 'mighty change of heart', 'mighty change of heart', 'changed from their carnal', 'no more disposition to do evil', 'become new creatures in Christ'],
-    terms:   ['born', 'spirit', 'new', 'creature', 'change', 'heart', 'rebirth', 'mighty', 'carnal', 'disposition', 'evil', 'good'],
-  },
-  '_doubt': {
-    phrases: ['doubt not', 'fear not', 'O ye of little faith', 'wavering in faith'],
-    terms:   ['doubt', 'fear', 'unbelief', 'waver', 'unstable', 'weak'],
-  },
-
-  // ── Ordinances & Priesthood ───────────────────────────────────────────────
-  '_baptism': {
-    phrases: ['baptized in the name', 'baptism by immersion', 'born of water', 'enter by the gate', 'remission of sins by baptism'],
-    terms:   ['baptize', 'immerse', 'water', 'spirit', 'gate', 'covenant', 'remission'],
-  },
-  '_baptism_for_the_dead': {
-    phrases: ['baptized for the dead', 'baptism for the dead', 'proxy ordinance', 'work for the dead', 'salvation for the dead'],
-    terms:   ['baptized', 'dead', 'proxy', 'vicarious', 'salvation', 'temple'],
-  },
-  '_gift_of_holy_ghost': {
-    phrases: ['gift of the Holy Ghost', 'receive the Holy Ghost', 'confirmed a member', 'laying on of hands for the gift'],
-    terms:   ['holy ghost', 'gift', 'confirm', 'receive', 'laying', 'hands'],
-  },
-  '_sacrament': {
-    phrases: ['bread and wine', 'bless and break bread', 'in remembrance of me', 'body and blood', 'sacrament of the Lord'],
-    terms:   ['sacrament', 'bread', 'wine', 'cup', 'remember', 'body', 'blood', 'covenant'],
-  },
-  '_priesthood': {
-    phrases: ['Melchizedek Priesthood', 'Aaronic Priesthood', 'holy priesthood', 'keys of the kingdom', 'authority of God', 'ordained to the priesthood'],
-    terms:   ['priesthood', 'authority', 'ordain', 'keys', 'melchizedek', 'aaronic', 'hold'],
-  },
-  '_melchizedek_priesthood': {
-    phrases: ['Melchizedek Priesthood', 'higher priesthood', 'holy order of God', 'after the order of the Son of God'],
-    terms:   ['melchizedek', 'higher', 'priesthood', 'order', 'authority', 'high priest'],
-  },
-  '_aaronic_priesthood': {
-    phrases: ['Aaronic Priesthood', 'lesser priesthood', 'Levitical priesthood', 'preparatory priesthood'],
-    terms:   ['aaronic', 'lesser', 'levitical', 'deacon', 'teacher', 'priest', 'preparatory'],
-  },
-  '_laying_on_of_hands': {
-    phrases: ['laid their hands upon', 'laying on of hands', 'by the laying on', 'hands were laid'],
-    terms:   ['hands', 'laid', 'ordained', 'blessed', 'healed', 'consecrated'],
-  },
-  '_endowment': {
-    phrases: ['endowed with power', 'endowment from on high', 'clothed with power', 'receive your endowment'],
-    terms:   ['endow', 'power', 'high', 'holy', 'clothe', 'temple', 'ordinance'],
-  },
-  '_sealing': {
-    phrases: ['sealed for time and all eternity', 'sealed by the Holy Spirit of Promise', 'bind on earth', 'bind in heaven', 'sealing power', 'keys of sealing'],
-    terms:   ['seal', 'bind', 'loose', 'keys', 'heaven', 'earth', 'eternity', 'family'],
-  },
-  '_temple': {
-    phrases: ['house of the Lord', 'holy temple', 'temple of God', 'enter into the temple', 'holy of holies'],
-    terms:   ['temple', 'holy', 'house', 'Lord', 'sacred', 'ordinance', 'endowment', 'sealing'],
-  },
-
-  // ── Eternal Life & Exaltation ─────────────────────────────────────────────
-  '_eternal_life': {
-    phrases: ['eternal life', 'life eternal', 'immortality and eternal life', 'inherit eternal life', 'the greatest of all the gifts of God'],
-    terms:   ['eternal', 'life', 'immortality', 'exaltation', 'inherit', 'gift', 'God'],
-  },
-  '_exaltation': {
-    phrases: ['exalted in the celestial kingdom', 'joint heirs with Christ', 'heirs of God', 'thrones and dominions', 'eternal increase'],
-    terms:   ['exalt', 'celestial', 'inherit', 'throne', 'dominion', 'heir', 'eternal', 'increase'],
-  },
-  '_eternal_family': {
-    phrases: ['families are forever', 'sealed for eternity', 'eternal family', 'together forever', 'time and all eternity'],
-    terms:   ['family', 'sealed', 'eternal', 'together', 'forever', 'eternity', 'children'],
-  },
-  '_life_after_death': {
-    phrases: ['resurrection of the dead', 'spirit world', 'life after death', 'immortality', 'we shall live again'],
-    terms:   ['resurrect', 'spirit', 'world', 'eternal', 'death', 'live', 'immortal'],
-  },
-  '_judgement': {
-    phrases: ['stand before God', 'bar of God', 'judgment bar', 'judged according to works', 'books were opened', 'day of judgment'],
-    terms:   ['judgment', 'bar', 'God', 'stand', 'account', 'works', 'books', 'judged'],
-  },
-  '_outer_darkness': {
-    phrases: ['outer darkness', 'sons of perdition', 'weeping and wailing', 'gnashing of teeth', 'perdition', 'second death'],
-    terms:   ['outer', 'darkness', 'perdition', 'weeping', 'gnashing', 'sons', 'second death'],
-  },
-
-  // ── Families & Covenant ───────────────────────────────────────────────────
-  '_covenant': {
-    phrases: ['covenant with God', 'everlasting covenant', 'new covenant', 'covenant people', 'keep my covenant', 'enter into a covenant'],
-    terms:   ['covenant', 'promise', 'oath', 'swear', 'bind', 'agree', 'testament', 'keep'],
-  },
-  '_gathering_of_israel': {
-    phrases: ['gather Israel', 'remnant of Israel', 'house of Israel', 'return to the promised land', 'scattered Israel', 'ten tribes'],
-    terms:   ['gather', 'israel', 'remnant', 'return', 'promised', 'land', 'scattered', 'tribes'],
-  },
-  '_zion': {
-    phrases: ['City of Zion', 'pure in heart', 'city of Enoch', 'New Jerusalem', 'Zion shall flourish', 'establish Zion'],
-    terms:   ['zion', 'pure', 'heart', 'city', 'enoch', 'jerusalem', 'establish', 'flourish'],
-  },
-
-  // ── Revelation & Spiritual Gifts ──────────────────────────────────────────
-  'revelation': {
-    phrases: ['revelation from God', 'word of the Lord', 'thus saith the Lord', 'voice of the Lord', 'spirit of revelation', 'open vision'],
-    terms:   ['revelation', 'prophet', 'vision', 'manifest', 'spirit', 'saith', 'Lord'],
-  },
-  'still_small_voice': {
-    phrases: ['still small voice', 'voice of the Spirit', 'Spirit whispered', 'spirit of the Lord came upon'],
-    terms:   ['still', 'small', 'voice', 'spirit', 'whisper', 'quiet', 'gentle'],
-  },
-  '_grace_and_works': {
-    phrases: [
-      'after all we can do',
-      'saved by grace',
-      'grace of God',
-      'grace of Christ',
-      'faith without works',
-      'works of righteousness'
-    ],
-    terms: [
-      'grace', 'mercy', 'favour', 'unmerited', 'enable', 'divine help',
-      'works', 'faith', 'justified', 'saved', 'merit'
-    ],
-  },
-  '_zion': {
-    phrases: [
-      'come down from heaven',
-      'bride of the Lamb',
-      'Zion shall flourish',
-      'City of Zion',
-      'city of Enoch',
-      'pure in heart',
-      'New Jerusalem',
-      'establish Zion',
-      'holy city'
-    ],
-    terms: [
-      'zion', 'pure', 'heart', 'city', 'enoch', 'jerusalem',
-      'establish', 'flourish', 'new', 'holy', 'heaven', 'bride'
-    ],
-  },
- 
-  '_spiritual_gifts': {
-    phrases: ['gifts of the Spirit', 'gift of prophecy', 'gift of tongues', 'gift of healing', 'speaking in tongues', 'discerning of spirits'],
-    terms:   ['gift', 'spirit', 'prophecy', 'tongues', 'heal', 'discern', 'miracle'],
-  },
-  '_prophecy': {
-    phrases: ['thus saith the Lord', 'the word of the Lord came', 'prophesy in my name', 'spirit of prophecy'],
-    terms:   ['prophecy', 'prophet', 'saith', 'Lord', 'foretell', 'vision', 'declare'],
-  },
-  '_angels': {
-    phrases: ['angel of the Lord', 'ministering angels', 'angel appeared', 'angels of God', 'holy angels'],
-    terms:   ['angel', 'ministering', 'appeared', 'messenger', 'holy', 'heaven', 'sent'],
-  },
-
-  // ── Prayer & Worship ──────────────────────────────────────────────────────
-  '_prayer': {
-    phrases: ['pray always', 'pray without ceasing', 'ask and ye shall receive', 'ask of God', 'bow in prayer'],
-    terms:   ['pray', 'ask', 'father', 'name', 'faith', 'petition', 'kneel'],
-  },
-  '_fasting': {
-    phrases: ['fast and pray', 'fasting and prayer', 'humbled himself with fasting'],
-    terms:   ['fast', 'fasting', 'abstain', 'prayer', 'humble', 'soul'],
-  },
-  '_sabbath': {
-    phrases: ['keep the sabbath', 'sabbath day', 'day of rest', 'holy day', 'remember the sabbath'],
-    terms:   ['sabbath', 'day', 'rest', 'holy', 'Lord', 'keep', 'remember'],
-  },
-  '_tithing': {
-    phrases: ['pay tithing', 'bring all the tithes', 'tenth part', 'storehouse', 'windows of heaven', 'tithing and offerings'],
-    terms:   ['tithe', 'tenth', 'storehouse', 'offering', 'windows', 'heaven', 'pour out'],
-  },
-  '_gratitude': {
-    phrases: ['give thanks', 'thankful in all things', 'praise the Lord', 'grateful heart', 'acknowledge the hand of God'],
-    terms:   ['thank', 'grateful', 'praise', 'acknowledge', 'bless', 'glorify', 'hand of God'],
-  },
-
-  // ── Agency & Mortal Experience ────────────────────────────────────────────
-  '_agency': {
-    phrases: ['free to choose', 'agency of man', 'choose liberty', 'choose eternal life', 'enticed by the one or the other', 'moral agency'],
-    terms:   ['agency', 'choose', 'free', 'will', 'liberty', 'choose', 'entice', 'act'],
-  },
-  '_opposition': {
-    phrases: ['opposition in all things', 'bitter and the sweet', 'good and evil', 'compound in one'],
-    terms:   ['opposition', 'contrary', 'bitter', 'sweet', 'good', 'evil', 'compound'],
-  },
-  '_natural_man': {
-    phrases: ['natural man is an enemy to God', 'carnal mind', 'fallen man', 'put off the natural man', 'yield to the enticings'],
-    terms:   ['natural', 'man', 'enemy', 'carnal', 'fallen', 'yield', 'enticings', 'saint'],
-  },
-  'temptation': {
-    phrases: ['led into temptation', 'tempted of the devil', 'overcome temptation', 'resist the devil', 'fiery darts'],
-    terms:   ['tempt', 'devil', 'adversary', 'overcome', 'resist', 'fiery', 'darts', 'snare'],
-  },
-  '_trials': {
-    phrases: ['endure to the end', 'in the midst of affliction', 'all these things shall give thee experience', 'refiner fire'],
-    terms:   ['trial', 'tribulation', 'affliction', 'suffer', 'adversity', 'trouble', 'refine', 'endure'],
-  },
-  '_comfort_in_trials': {
-    phrases: ['I will not leave you comfortless', 'peace I leave with you', 'I am with thee', 'be still and know', 'bear up your burdens'],
-    terms:   ['comfort', 'peace', 'affliction', 'bear', 'burden', 'strengthen', 'consolation', 'still'],
-  },
-
-  // ── Service & Discipleship ────────────────────────────────────────────────
-  '_service': {
-    phrases: ['serve one another', 'in the service of your God', 'minister to the poor', 'succor the weak', 'pure religion'],
-    terms:   ['serve', 'minister', 'lift', 'poor', 'needy', 'hands', 'succor', 'strengthen'],
-  },
-  '_consecration': {
-    phrases: ['consecrate thy performance', 'dedicate to the Lord', 'consecrate to the Lord', 'law of consecration', 'all things in common', 'have all things equal'],
-    terms:   ['consecrate', 'dedicate', 'steward', 'all', 'law', 'performance', 'equal', 'common'],
-  },
-  '_charity': {
-    phrases: ['charity never faileth', 'pure love of Christ', 'charity is the pure love', 'clothe yourself with charity'],
-    terms:   ['charity', 'love', 'pure', 'Christ', 'faileth', 'greatest', 'bond'],
-  },
-  '_humility': {
-    phrases: ['humble yourself before God', 'broken heart and contrite spirit', 'meek and lowly in heart', 'humble yourselves'],
-    terms:   ['humble', 'meek', 'lowly', 'submissive', 'contrite', 'broken', 'heart'],
-  },
-  '_obedience': {
-    phrases: ['obedience to the commandments', 'keep my commandments', 'hearken unto my voice', 'do all things whatsoever the Lord commands'],
-    terms:   ['obey', 'keep', 'commandment', 'observe', 'hearken', 'follow', 'law'],
-  },
-
-  // ── Scripture & Restoration ───────────────────────────────────────────────
-  '_restoration': {
-    phrases: ['restoration of all things', 'restored church', 'dispensation of the fullness of times', 'restitution of all things'],
-    terms:   ['restoration', 'restore', 'dispensation', 'fullness', 'times', 'church', 'restitution'],
-  },
-  '_book_of_mormon': {
-    phrases: ['another testament of Jesus Christ', 'record of the Nephites', 'fulness of the gospel', 'stick of Joseph', 'gold plates'],
-    terms:   ['nephite', 'lamanite', 'record', 'plates', 'gospel', 'fullness', 'testament'],
-  },
-  '_word_of_god': {
-    phrases: ['word of God', 'word of the Lord', 'living word', 'iron rod', 'hold fast to the rod'],
-    terms:   ['word', 'god', 'scripture', 'commandment', 'truth', 'rod', 'iron'],
-  },
-  '_liahona': {
-    phrases: ['Liahona', 'ball of curious workmanship', 'director', 'faith and diligence'],
-    terms:   ['liahona', 'director', 'faith', 'diligence', 'compass', 'spindle', 'work'],
-  },
-  '_apostasy': {
-    phrases: ['great apostasy', 'falling away', 'darkness covered the earth', 'plain and precious truths removed'],
-    terms:   ['apostasy', 'apostate', 'fall', 'away', 'darkness', 'plain', 'precious', 'removed'],
-  },
-  '_prophet': {
-    phrases: ['called of God', 'living prophet', 'voice of the prophet', 'follow the prophet', 'word of the prophet'],
-    terms:   ['prophet', 'seer', 'revelator', 'called', 'God', 'voice', 'follow', 'living'],
-  },
-
-  // ── Specific LDS Doctrinal Phrases ────────────────────────────────────────
-  '_by_their_fruits': {
-    phrases: ['by their fruits ye shall know them', 'good tree bringeth forth', 'corrupt tree'],
-    terms:   ['fruits', 'know', 'tree', 'good', 'corrupt', 'bring', 'forth'],
-  },
-  '_iron_rod': {
-    phrases: ['rod of iron', 'hold fast to the rod', 'word of God', 'strait and narrow path', 'hold fast', 'strait and narrow'],
-    terms:   ['rod', 'iron', 'hold', 'fast', 'word', 'god', 'strait', 'narrow', 'path'],
-  },
-  '_light_of_christ': {
-    phrases: ['light of Christ', 'spirit of Christ', 'given to every man', 'true light', 'light and life'],
-    terms:   ['light', 'Christ', 'spirit', 'every', 'man', 'conscience', 'truth'],
-  },
-  '_love_of_god': {
-    phrases: ['love of God', 'God so loved the world', 'charity is the love of God', 'he first loved us'],
-    terms:   ['love', 'God', 'world', 'gave', 'son', 'charity', 'first'],
-  },
-  '_armor_of_god': {
-    phrases: ['whole armor of God', 'breastplate of righteousness', 'shield of faith', 'sword of the Spirit', 'helmet of salvation'],
-    terms:   ['armor', 'breastplate', 'shield', 'faith', 'sword', 'spirit', 'helmet', 'salvation'],
-  },
-  '_new_jerusalem': {
-    phrases: ['New Jerusalem', 'city of Zion', 'holy city', 'come down from heaven', 'bride of the Lamb'],
-    terms:   ['new', 'jerusalem', 'zion', 'city', 'holy', 'heaven', 'bride'],
-  },
-  '_abide_in_me': {
-    phrases: ['abide in me', 'I am the vine', 'branch cannot bear fruit', 'abide in my love'],
-    terms:   ['abide', 'vine', 'branch', 'fruit', 'love', 'remain', 'dwell'],
-  },
-  '_prayer_of_faith': {
-    phrases: ['prayer of faith', 'pray with faith', 'ask in faith', 'ask of God', 'receive according to your faith', 'nothing wavering'],
-    terms:   ['prayer', 'faith', 'ask', 'waver', 'believe', 'receive', 'heal'],
-  },
-  '_power_of_god': {
-    phrases: ['power of God', 'arm of the Lord', 'by the power of God', 'omnipotent God', 'mighty to save', 'strength of the Lord', 'mighty God', 'omnipotent arm', 'omnipotent power', 'matchless power of God'],
-    terms:   ['power', 'God', 'arm', 'Lord', 'omnipotent', 'mighty', 'strength'],
-  },
-  '_endure_to_the_end': {
-    phrases: ['endure to the end', 'hold out faithful', 'patient in tribulation', 'endure tribulation', 'faithful unto the end', 'trials and tribulations', 'trial of your faith', 'worketh patience', 'patience in thy affliction', 'run with endurance'],
-    terms:   ['endure', 'end', 'faithful', 'patient', 'tribulation', 'run', 'persevere'],
-  },
-  '_steadfast': {
-    phrases: ['steadfast and immovable', 'firm and steadfast in the faith', 'hold fast'],
-    terms:   ['steadfast', 'immovable', 'firm', 'faith', 'hold', 'fast', 'constant'],
-  },
-};
-
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function sanitizeAliasEntry(entry) {
-  const uniqPhrases = [];
-  const seenPhrases = new Set();
-  for (const phrase of entry.phrases || []) {
-    const normalized = String(phrase || '').trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seenPhrases.has(key)) continue;
-    seenPhrases.add(key);
-    uniqPhrases.push(normalized);
-  }
-
-  const uniqTerms = [];
-  const seenTerms = new Set();
-  for (const term of entry.terms || []) {
-    const normalized = String(term || '').trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seenTerms.has(key)) continue;
-    seenTerms.add(key);
-    uniqTerms.push(normalized);
-  }
-
-  return { phrases: uniqPhrases, terms: uniqTerms };
-}
-
-function compileDoctrineAliases(aliases) {
-  const normalizedMap = {};
-  const keys = Object.keys(aliases);
-  for (const key of keys) {
-    normalizedMap[key.toLowerCase().trim()] = sanitizeAliasEntry(aliases[key]);
-  }
-
-  const sortedKeys = Object.keys(normalizedMap).sort((a, b) => b.length - a.length);
-  return { normalizedMap, sortedKeys };
-}
-
-const COMPILED_ALIASES = compileDoctrineAliases(DOCTRINE_ALIASES);
-
-function applyDoctrineAliases(input) {
-  const lower = String(input || '').toLowerCase().trim();
-  if (!lower) return null;
-
-  const exact = COMPILED_ALIASES.normalizedMap[lower];
-  if (exact) return exact;
-
-  for (const key of COMPILED_ALIASES.sortedKeys) {
-    const pattern = new RegExp(`(^|\\W)${escapeRegex(key)}(?=\\W|$)`, 'i');
-    if (pattern.test(lower)) {
-      return COMPILED_ALIASES.normalizedMap[key];
-    }
-  }
-  return null;
-}
-
-const buildFTSPhraseQuery = (phrase) => {
-  return `"${phrase.replace(/\"/g, '\"\"')}"`;
-};
-
-const buildFTSTermQuery = (terms, mode = 'and') => {
-  if (!terms || !terms.length) return '';
-  const cleaned = terms.map((t) => String(t || '').trim()).filter(Boolean);
-  if (!cleaned.length) return '';
-  const wildcarded = cleaned
-    .map((t) => {
-      const safe = t.replace(/["']/g, '').replace(/[^a-zA-Z0-9\-\s]/g, '').trim();
-      if (!safe) return '';
-      if (safe.includes(' ')) return `"${safe.replace(/\"/g, '\"\"')}"`;
-      return `${safe}*`;
-    })
-    .filter(Boolean);
-  if (!wildcarded.length) return '';
-  return mode === 'or'
-    ? wildcarded.join(' OR ')
-    : wildcarded.join(' AND ');
-};
-
-const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
-  if (!input) return '';
-  const trimmed = input.trim();
-  if (!trimmed) return '';
-
-  const quoted = trimmed.match(/^"(.+)"$/);
-  if (quoted) return `"${quoted[1].replace(/\"/g, '\"\"')}"`;
-
-  const terms = trimmed
-    .split(/\s+/)
-    .map(t => t.replace(/["']/g, '').replace(/[^a-zA-Z0-9\-]/g, ''))
-    .filter(t => t.length > 1);
-
-  if (terms.length === 0) return '';
-  const wildcarded = terms.map(t => `${t}*`);
-  return orFallback ? wildcarded.join(' OR ') : wildcarded.join(' AND ');
-};
-
-
-// runFTSCount — returns the total number of matching verses for a query
-// without fetching any row data. Used to tell the client how many pages exist.
-// We cap the internal scan at MAX_COUNT_SCAN to avoid full-table scans on
-// very broad OR queries (e.g. "faith" OR "love" OR "hope" = tens of thousands).
-const MAX_COUNT_SCAN = 2000;
-const runFTSCount = (matchQuery, targetDb = db) => {
-  try {
-    const stmt = targetDb.prepare(`
-      SELECT COUNT(*) AS total
-      FROM (
-        SELECT verse_id
-        FROM scriptures_fts
-        WHERE scriptures_fts MATCH ?
-        LIMIT ${MAX_COUNT_SCAN}
-      )
-    `);
-    return stmt.get(matchQuery)?.total ?? 0;
-  } catch (_err) {
-    return 0;
-  }
-};
-
-// runFTSQuery — fetch one page of results ranked by BM25 relevance.
-// offset allows true server-side pagination: the DB does the skipping,
-// nothing unnecessary is loaded into memory or sent over the socket.
-const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, targetDb = db) => {
-  const literalPattern = rawPhrase
-    ? `%${rawPhrase.trim().toLowerCase()}%`
-    : null;
-
-  // The inner subquery fetches limit+offset rows so BM25 ranking is stable
-  // across pages — the same query plan is used each time, offsets are cheap.
-  const stmt = targetDb.prepare(`
-    SELECT
-      s.volume_id, s.book_id, s.chapter_id, s.verse_id,
-      s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
-      s.volume_subtitle, s.book_subtitle, s.volume_short_title, s.book_short_title,
-      s.volume_lds_url, s.book_lds_url, s.chapter_number, s.verse_number,
-      s.scripture_text, s.verse_title, s.verse_short_title
-    FROM scriptures s
-    JOIN (
-      SELECT verse_id, bm25(scriptures_fts, 0, 10, 5, 1, 0, 0) AS rank
-      FROM scriptures_fts
-      WHERE scriptures_fts MATCH ?
-      LIMIT ${limit} OFFSET ${offset}
-    ) fts ON fts.verse_id = s.verse_id
-    ORDER BY
-      CASE WHEN ${literalPattern ? 'LOWER(s.scripture_text) LIKE ?' : '0'} THEN 0 ELSE 1 END,
-      fts.rank,
-      s.verse_id
-  `);
-
-  const args = literalPattern
-    ? [matchQuery, literalPattern]
-    : [matchQuery];
-
-  return stmt.all(...args);
-};
-
-// phraseSearch — paginated, returns { results: [...], total: N }
-// page is 0-based. pageSize controls rows returned. total is capped at
-// MAX_COUNT_SCAN so the count query stays fast on broad OR searches.
-// targetDb defaults to the English db; pass db_tagalog or db_cebuano for
-// multilingual searches. FTS5 is tried first; LIKE is the fallback.
-const phraseSearch = (phrase, page = 0, pageSize = 10, targetDb = db) => {
-  if (!phrase || !phrase.trim()) return { results: [], total: 0 };
-
-  const raw    = phrase.trim();
-  const offset = page * pageSize;
-  const alias  = applyDoctrineAliases(raw);
-
-  try {
-    const ftsExists = targetDb.prepare(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='scriptures_fts'`
-    ).get();
-
-    if (ftsExists) {
-
-      if (alias) {
-        // Pass 0 — exact FTS5 phrase match on each alias phrase.
-        const phraseQueries = (alias.phrases || []).map(buildFTSPhraseQuery);
-        if (phraseQueries.length > 0) {
-          const combined = phraseQueries.join(' OR ');
-          const total   = runFTSCount(combined, targetDb);
-          const results = runFTSQuery(combined, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        // Pass 1 — AND on alias terms
-        const andQ = buildFTSTermQuery(alias.terms || [], 'and');
-        if (andQ) {
-          const total   = runFTSCount(andQ, targetDb);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        // Pass 2 — OR on alias terms
-        const orQ = buildFTSTermQuery(alias.terms || [], 'or');
-        if (orQ) {
-          const total   = runFTSCount(orQ, targetDb);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-      } else {
-
-        // No alias — raw input path
-        // Pass 0 — exact phrase on raw input (multi-word only)
-        if (raw.split(/\s+/).length > 1) {
-          const exactQ  = buildFTSPhraseQuery(raw);
-          const total   = runFTSCount(exactQ, targetDb);
-          const results = runFTSQuery(exactQ, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        // Pass 1 — AND on raw terms
-        const andQ = buildFTSMatchQuery(raw);
-        if (andQ) {
-          const total   = runFTSCount(andQ, targetDb);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        // Pass 2 — OR on raw terms
-        const orQ = buildFTSMatchQuery(raw, { orFallback: true });
-        if (orQ) {
-          const total   = runFTSCount(orQ, targetDb);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        // Pass 3 — prefix wildcard for single-word input
-        if (raw.split(/\s+/).length === 1) {
-          const wq      = `${raw}*`;
-          const total   = runFTSCount(wq, targetDb);
-          const results = runFTSQuery(wq, raw, pageSize, offset, targetDb);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-      }
-    }
-  } catch (err) {
-    fastify.log.warn('FTS pipeline failed, falling back to LIKE:', err && err.message);
-  }
-
-  // Last resort — LIKE token scan (no FTS, count with subquery)
-  const fallbackTerms = (alias ? (alias.terms || [raw]) : [raw])
-    .join(' ').trim().split(/\s+/).filter(Boolean);
-  const clauses = fallbackTerms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
-  const likeParams = [];
-  fallbackTerms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
-
-  const countRow = targetDb.prepare(`
-    SELECT COUNT(*) AS total FROM scriptures WHERE ${clauses.join(' AND ')}
-  `).get(...likeParams);
-  const total = Math.min(countRow?.total ?? 0, MAX_COUNT_SCAN);
-
-  const results = targetDb.prepare(`
-    SELECT book_id, book_title, chapter_number, verse_number,
-           scripture_text, verse_title, verse_id
-    FROM scriptures
-    WHERE ${clauses.join(' AND ')}
-    ORDER BY verse_id
-    LIMIT ? OFFSET ?
-  `).all(...likeParams, pageSize, offset);
-
-  return { results, total };
-};
-
-
-// searchScripture — paginated entry point.
-// For structured references (e.g. "John 3:16") pagination is a no-op since
-// the result set is always tiny (one chapter = ~30 verses max).
-// For phrase/FTS searches we delegate to phraseSearch which handles paging.
-const searchScripture = (input, page = 0, pageSize = 10) => {
-    const ref = parseScriptureReference(input);
-    if (ref) {
-        let sql = `
-    SELECT
-        book_title,
-        chapter_number,
-        verse_number,
-        scripture_text,
-        verse_title,
-        verse_short_title,
-        verse_id
-    FROM
-        scriptures
-    WHERE
-        LOWER(book_title) = LOWER(?)`;
-        const params = [ref.book];
-
-        sql += '\n        AND chapter_number = ?';
-        params.push(ref.chapter);
-
-        if (ref.verse !== null) {
-            sql += ' AND verse_number = ?';
-            params.push(ref.verse);
-        }
-
-        // For reference lookups: count first, then page
-        const countSql  = sql.replace(/SELECT[\s\S]+?FROM/, 'SELECT COUNT(*) AS total FROM');
-        const countRow  = db.prepare(countSql + ' LIMIT 200').get(...params);
-        const total     = countRow?.total ?? 0;
-
-        const pageSql   = sql + `\n    ORDER BY verse_id ASC\n    LIMIT ? OFFSET ?`;
-        const stmt      = db.prepare(pageSql);
-        const result    = stmt.all(...params, pageSize, page * pageSize);
-        if (result.length > 0 || total > 0) return { results: result, total };
-
-        // Fallback for unexpected title variants
-        const fallbackCountSql = countSql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?') + ' LIMIT 200';
-        const fallbackPageSql  = sql.replace('LOWER(book_title) = LOWER(?)', 'book_title LIKE ?') + '\n    ORDER BY verse_id ASC\n    LIMIT ? OFFSET ?';
-        const fallbackParams   = [`%${ref.book}%`, ...params.slice(1)];
-        const fbCount = db.prepare(fallbackCountSql).get(...fallbackParams)?.total ?? 0;
-        const fbRows  = db.prepare(fallbackPageSql).all(...fallbackParams, pageSize, page * pageSize);
-        if (fbRows.length > 0 || fbCount > 0) return { results: fbRows, total: fbCount };
-
-        return phraseSearch(input, page, pageSize);
-    }
-
-    return phraseSearch(input, page, pageSize);
-};
-
-// searchScriptureInDb — same logic as searchScripture but operates on an
-// arbitrary database handle. Used when the presenter searches in TL or CEB.
-// We duplicate the reference-lookup + phrase-search flow here so the two DBs
-// can have their own FTS tables (or fall back to LIKE if they don't).
-const searchScriptureInDb = (input, page = 0, pageSize = 10, targetDb) => {
-  if (!targetDb) return searchScripture(input, page, pageSize);
-
-  const ref = parseScriptureReference(input);
-  const offset = page * pageSize;
-
-  if (ref) {
-    try {
-      const countRow = targetDb.prepare(`
-        SELECT COUNT(*) AS total FROM scriptures
-        WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
-        ${ref.verse !== null ? 'AND verse_number = ?' : ''}
-        LIMIT 200
-      `).get(...(ref.verse !== null ? [ref.book, ref.chapter, ref.verse] : [ref.book, ref.chapter]));
-
-      const total = countRow?.total ?? 0;
-      const rows  = targetDb.prepare(`
-        SELECT book_title, chapter_number, verse_number,
-               scripture_text, verse_title, verse_short_title, verse_id
-        FROM scriptures
-        WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
-        ${ref.verse !== null ? 'AND verse_number = ?' : ''}
-        ORDER BY verse_id ASC LIMIT ? OFFSET ?
-      `).all(...(ref.verse !== null
-        ? [ref.book, ref.chapter, ref.verse, pageSize, offset]
-        : [ref.book, ref.chapter, pageSize, offset]));
-
-      if (rows.length > 0 || total > 0) return { results: rows, total };
-    } catch (_e) { /* fall through to LIKE */ }
-  }
-
-  // Delegate to phraseSearch which tries FTS5 first, then LIKE as fallback.
-  // targetDb is threaded through so the correct database is used throughout.
-  return phraseSearch(input, page, pageSize, targetDb);
-};
-
-// direction should be 'next' or 'prev'
-function getAdjacentVerse({ verse_id, book_id, chapter_number, verse_number, direction }, targetDb) {
-    const op = direction === 'next' ? '+' : '-';
-
-    // If coordinates are provided, resolve the target DB's own verse_id first.
-    // This is essential for DBs with different versification (e.g. Japanese 口語訳).
-    let localVerseId = verse_id;
-    if (book_id != null && chapter_number != null && verse_number != null) {
-        const current = targetDb.prepare(
-            'SELECT verse_id FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1'
-        ).get(Number(book_id), Number(chapter_number), Number(verse_number));
-        if (current) localVerseId = current.verse_id;
-    }
-
-    const stmt = targetDb.prepare(`
-      SELECT
-        book_id,
-        book_title,
-        chapter_number,
-        verse_number,
-        scripture_text,
-        verse_title,
-        verse_short_title,
-        verse_id,
-        volume_id
-      FROM scriptures
-      WHERE verse_id = ? ${op} 1
-      LIMIT 1
-    `);
-    try {
-        return stmt.get(localVerseId);
-    } catch (err) {
-        fastify.log.error('adjacent query failed', err);
-        return null;
-    }
-}
-
-// add HTTP route for adjacent verse
+// Uses the shared engine's initializeFts via adapters.
+const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
+        searchScripture, searchScriptureInDb, getAdjacentVerse, fetchVerseByCoords,
+        getVersionCitation, getVerseOfTheDay, VOTD_POOL,
+        BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES } = engine;
+
+// ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
     const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
     if (!verse_id || !direction) {
@@ -1505,10 +312,7 @@ fastify.get('/verse/adjacent', async (request, reply) => {
         return { error: 'missing parameters' };
     }
 
-    let targetDb = db;
-    if (language && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language)) {
-        targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db_ilocano;
-    }
+    const targetDb = resolveDbAdapter(language);
 
     const result = getAdjacentVerse({
         verse_id: Number(verse_id),
@@ -1516,7 +320,7 @@ fastify.get('/verse/adjacent', async (request, reply) => {
         chapter_number: chapter_number ? Number(chapter_number) : undefined,
         verse_number:   verse_number   ? Number(verse_number)   : undefined,
         direction,
-    }, targetDb);
+    }, targetDb, fastify.log);
 
     if (!result) {
         reply.code(404);
@@ -1533,10 +337,10 @@ fastify.get('/verse/:verse_id/translation', async (request, reply) => {
     reply.code(400);
     return { error: 'language must be tl, ceb, es, el, ilo, ja, nrsvue or war' };
   }
-  const targetDb = language === 'ceb' ? db_cebuano : language === 'tl' ? db_tagalog : language === 'es' ? db_spanish : language === 'el' ? db_greek : language === 'ja' ? (db_japanese || db) : language === 'nrsvue' ? (db_nrsvue || db) : language === 'war' ? (db_waray || db) : db_ilocano;
+  const targetDb = resolveDbAdapter(language);
   try {
     // Resolve coordinates from the KJV DB so non-KJV versification (e.g. Japanese) is handled correctly.
-    const coords = db.prepare(
+    const coords = dba.prepare(
       'SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1'
     ).get(Number(verse_id));
     if (!coords) { reply.code(404); return { error: 'verse not found' }; }
@@ -1550,207 +354,18 @@ fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   }
 });
 
-// Verse of the Day — deterministic by UTC calendar date so all clients agree.
-// Uses the total verse count as a modulus so every date maps to a real verse.
-// ─── Curated VOTD pool ────────────────────────────────────────────────────────
-// ~200 verse_ids hand-picked for doctrinal richness, familiarity, and uplift.
-// Using verse_ids (stable primary keys) means this works regardless of how
-// the book/chapter structure is stored. Spread across OT, NT, BoM, D&C, PGP.
-const VOTD_POOL = [
-  // ── Old Testament ──────────────────────────────────────────────────────────
-  26, 27, 28,                                             // Genesis 1:26–28 (image of God)
-  100, 101, 102,                                          // Genesis 1:1–3
-  6492,                                                   // Joshua 24:15 (serve the Lord)
-  13323, 13324,                                           // Job 19:25–26 (I know my Redeemer)
-  14901, 14902, 14903,                                    // Psalms 23:1–3
-  15601, 15602, 15603,                                    // Psalms 46:1–3
-  17022,                                                  // Proverbs 22:6 (train up a child)
-  18201, 18202,                                           // Proverbs 3:5–6
-  17836,                                                  // Isaiah 9:6 (unto us a child is born)
-  21001, 21002,                                           // Isaiah 1:18
-  21850, 21851, 21852,                                    // Isaiah 40:28–31
-  22350, 22351,                                           // Isaiah 53:4–5
-  18507, 18508, 18509,                                    // Isaiah 43:1–3 (fear not)
-  19647, 19648, 19649,                                    // Jeremiah 29:11–13
-  22657,                                                  // Micah 6:8
-  23131,                                                  // Malachi 3:10
-  // ── New Testament ──────────────────────────────────────────────────────────
-  23238, 23239, 23240, 23241, 23242, 23243,               // Matthew 5:3–8 Beatitudes
-  23244, 23245, 23246, 23247,                             // Matthew 5:9–12 Beatitudes cont.
-  24975, 24976, 24977, 24978, 24979, 24980,               // Sermon on the Mount (Matt 5–6)
-  23488, 23489, 23490,                                    // Matthew 11:28–30 (come unto me)
-  24704, 24705,                                           // Mark 12:30–31 (love God, neighbor)
-  24984, 24985,                                           // Luke 2:10–11 (tidings of great joy)
-  26046, 26047, 26048,                                    // John 1:1–3
-  25478, 25479, 25480,                                    // John 3:16–18
-  25771, 25772, 25773,                                    // John 14:6, 15:12–13
-  26492,                                                  // John 10:10 (life more abundantly)
-  26763,                                                  // John 17:3 (this is life eternal)
-  26988,                                                  // Acts 2:38
-  26634, 26635,                                           // Romans 8:28,31
-  27336, 27337,                                           // 1 Cor 13:4–7
-  28739, 28740, 28741,                                    // 1 Cor 15:20–22 (resurrection)
-  28895,                                                  // 2 Cor 5:17 (new creation)
-  29238, 29239,                                           // Ephesians 2:8–9 (grace)
-  28635, 28636, 28637,                                    // Philippians 4:7–8
-  29870, 29871,                                           // 2 Timothy 3:16–17 (all scripture)
-  29001, 29002,                                           // Hebrews 11:1,6
-  30272,                                                  // James 1:5
-  30611, 30612,                                           // 1 John 4:7–8 (love is of God)
-  31058,                                                  // Revelation 21:4 (no more tears)
-  // ── Book of Mormon ─────────────────────────────────────────────────────────
-  31103,                                                  // 1 Nephi 1:1 (goodly parents)
-  31172, 31173,                                           // 1 Nephi 3:7
-  31958, 31959,                                           // 2 Nephi 9:28–29
-  32100, 32101, 32102,                                    // 2 Nephi 2:25–27
-  32318,                                                  // 2 Nephi 25:26 (talk of Christ)
-  32901, 32902,                                           // 2 Nephi 31:20
-  32703, 32704, 32705, 32706,                             // Enos 1:1–4 (wrestle before God)
-  32887, 32888,                                           // Mosiah 4:9–10 (believe in God)
-  33212, 33213, 33214,                                    // Mosiah 18:8–10 (baptismal covenant)
-  33500, 33501,                                           // Jacob 2:18–19
-  33709,                                                  // Alma 5:14 (born of God)
-  34200, 34201,                                           // Mosiah 2:17
-  34561,                                                  // Alma 32:21 (faith)
-  34638, 34639, 34640,                                    // Alma 34:32–34 (this life the time)
-  34800, 34801, 34802,                                    // Mosiah 3:17–19
-  35500, 35501, 35502,                                    // Alma 7:11–13
-  36200, 36201,                                           // Alma 26:12
-  36544, 36545,                                           // 3 Nephi 18:20–21 (pray always)
-  36849, 36850, 36851,                                    // 4 Nephi 1:15–17 (no contention)
-  37100, 37101,                                           // Alma 37:35–37
-  37433,                                                  // Ether 12:27 (weakness → strength)
-  37584, 37585,                                           // Moroni 7:16–17 (light of Christ)
-  38000, 38001, 38002,                                    // Helaman 5:12
-  39100, 39101, 39102,                                    // 3 Nephi 11:10–11
-  39800, 39801, 39802,                                    // 3 Nephi 27:20–21
-  40500, 40501,                                           // Moroni 7:45–47
-  40800, 40801, 40802,                                    // Moroni 10:3–5
-  // ── Doctrine and Covenants ─────────────────────────────────────────────────
-  37857, 37858,                                           // D&C 8:2–3 (burning in bosom)
-  38250,                                                  // D&C 25:13 (song of the righteous)
-  38738, 38739,                                           // D&C 46:11–12 (gifts of the Spirit)
-  39009, 39010,                                           // D&C 58:42–43 (remember no more)
-  39197,                                                  // D&C 64:10 (forgive all men)
-  39922, 39923, 39924, 39925,                             // D&C 89:18–21 (Word of Wisdom)
-  40824, 40825,                                           // D&C 121:36–37 (priesthood power)
-  41100, 41101,                                           // D&C 1:37–38
-  41300, 41301, 41302,                                    // D&C 6:33–36
-  41800, 41801,                                           // D&C 18:15–16
-  // ── Pearl of Great Price ───────────────────────────────────────────────────
-  41399,                                                  // Moses 1:39 (work and glory)
-  41635,                                                  // Moses 7:18 (Zion people)
-  41794, 41795,                                           // Abraham 3:22–23 (noble and great)
-  41983, 41984, 41985, 41986, 41987,                      // Articles of Faith 1–5
-  41988, 41989, 41990, 41991, 41992, 41993, 41994, 41995, // Articles of Faith 6–13
-];
-
+// ── Verse of the Day ────────────────────────────────────────────────────────
 fastify.get('/verse/of-the-day', async (request, reply) => {
   try {
-    const now = new Date();
-    const start = Date.UTC(now.getUTCFullYear(), 0, 0);
-    const dayOfYear = Math.floor(
-      (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
-    );
-
-    // Step 1: try the curated pool — consistent, uplifting, doctrinally rich.
-    // LCG spread so sequential days don't feel linear within the pool.
-    const LCG_A = 1664525, LCG_C = 1013904223, MOD = 2 ** 32;
-    const seed   = ((LCG_A * dayOfYear + LCG_C) % MOD + MOD) % MOD;
-    const poolId = VOTD_POOL[seed % VOTD_POOL.length];
-
-    const verse = db.prepare(`
-      SELECT book_title, chapter_number, verse_number,
-             scripture_text, verse_title, verse_id, volume_id
-      FROM scriptures WHERE verse_id = ?
-    `).get(poolId);
-
-    if (verse) return { ...verse, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', verse.volume_id) };
-
-    // Step 2: graceful fallback — random verse from full canon if pool ID misses
-    const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
-    const total    = countRow?.total || 41995;
-    const fallbackSeed = ((LCG_A * (dayOfYear + 1) + LCG_C) % MOD + MOD) % MOD;
-    const fallback = db.prepare(`
-      SELECT book_title, chapter_number, verse_number,
-             scripture_text, verse_title, verse_id, volume_id
-      FROM scriptures WHERE verse_id = ?
-    `).get((fallbackSeed % total) + 1);
-
-    if (!fallback) { reply.code(404); return { error: 'not found' }; }
-    return { ...fallback, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', fallback.volume_id) };
+    const result = getVerseOfTheDay(dba);
+    if (!result) { reply.code(404); return { error: 'not found' }; }
+    return result;
   } catch (err) {
     fastify.log.error('verse-of-the-day failed', err);
     reply.code(500);
     return { error: 'internal error' };
   }
 });
-
-// ── Version citation helpers ──────────────────────────────────────────────────
-const BIBLE_CITATIONS = {
-  en:     'KJV',
-  nrsvue: 'NRSVUE',
-  tl:     'Ang Biblia',
-  ceb:    'Ang Biblia',
-  ilo:    'RIPV',
-  es:     'RVR',
-  el:     'Greek Bible',
-  ja:     '口語訳',
-  war:    'Samarenyo',
-};
-
-const TRIPLE_CITATIONS = {
-  3: 'Book of Mormon',
-  4: 'D&C',
-  5: 'Pearl of Great Price',
-};
-
-const LANGUAGE_NAMES = {
-  en:     'English',
-  nrsvue: 'English',
-  tl:     'Tagalog',
-  ceb:    'Cebuano',
-  ilo:    'Ilocano',
-  es:     'Spanish',
-  el:     'Greek',
-  ja:     'Japanese',
-  war:    'Waray',
-};
-
-function getVersionCitation(language, volumeId, secondaryLanguage) {
-  const vid = Number(volumeId);
-  if (secondaryLanguage) {
-    if (vid >= 3) {
-      const p = LANGUAGE_NAMES[language] || 'English';
-      const s = LANGUAGE_NAMES[secondaryLanguage] || secondaryLanguage;
-      return `${p} vs ${s}`;
-    }
-    const p = BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
-    const s = BIBLE_CITATIONS[secondaryLanguage] || secondaryLanguage.toUpperCase();
-    return `${p} vs ${s}`;
-  }
-  if (vid >= 3) {
-    const book = TRIPLE_CITATIONS[vid] || '';
-    const lang = LANGUAGE_NAMES[language] || 'English';
-    return book ? `${book}, ${lang}` : '';
-  }
-  return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
-}
-
-// Fetch a verse row by canonical coordinates (book_id + chapter_number + verse_number).
-// book_id is consistent across ALL language databases; verse_id is NOT (e.g. Japanese
-// 口語訳 has a different total verse count from the KJV). Always prefer coordinates.
-function fetchVerseByCoords(targetDb, verse, cols) {
-  if (verse.book_id != null && verse.chapter_number != null && verse.verse_number != null) {
-    return targetDb.prepare(
-      `SELECT ${cols} FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1`
-    ).get(Number(verse.book_id), Number(verse.chapter_number), Number(verse.verse_number));
-  }
-  // Fallback: verse_id — only reliable within the same DB
-  return targetDb.prepare(
-    `SELECT ${cols} FROM scriptures WHERE verse_id = ? LIMIT 1`
-  ).get(Number(verse.verse_id));
-}
 
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
@@ -2346,27 +961,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
         fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize} lang=${language}`);
 
-        // Route search to the correct database for the active language.
-        // TL and CEB have their own scriptures tables; English is the default.
-        // searchScripture uses the module-level `db` var so we temporarily swap
-        // it via a language-aware wrapper rather than refactoring the whole function.
+        // Route search to the correct database adapter for the active language.
         let searchResults;
-        if (language === 'ceb') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_cebuano);
-        } else if (language === 'tl') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_tagalog);
-        } else if (language === 'es') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_spanish);
-        } else if (language === 'el') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_greek);
-        } else if (language === 'ilo') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_ilocano);
-        } else if (language === 'ja') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_japanese || db);
-        } else if (language === 'nrsvue') {
-          searchResults = searchScriptureInDb(query, page, pageSize, db_nrsvue || db);
+        if (language === 'en') {
+          searchResults = searchScripture(query, page, pageSize, dba, fastify.log);
         } else {
-          searchResults = searchScripture(query, page, pageSize);
+          searchResults = searchScriptureInDb(query, page, pageSize, resolveDbAdapter(language), fastify.log);
         }
 
         const { results, total } = searchResults;
@@ -2461,7 +1061,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // If there's a live verse, re-fetch it in the new language and re-broadcast
       if (state.liveVerse) {
-        const targetDb = lang === 'ceb' ? db_cebuano : lang === 'tl' ? db_tagalog : lang === 'es' ? db_spanish : lang === 'el' ? db_greek : lang === 'ilo' ? db_ilocano : lang === 'ja' ? (db_japanese || db) : lang === 'nrsvue' ? (db_nrsvue || db) : lang === 'war' ? (db_waray || db) : db;
+        const targetDb = resolveDbAdapter(lang);
         try {
           const row = fetchVerseByCoords(
             targetDb,
@@ -2504,10 +1104,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const normalizedLanguage = language ? language.toLowerCase().trim() : null;
 
       // Determine target database with streamlined mapping
-      let targetDb = db;
+      let targetDb = dba;
       const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normalizedLanguage);
       if (isTranslation) {
-        targetDb = normalizedLanguage === 'ceb' ? db_cebuano : normalizedLanguage === 'tl' ? db_tagalog : normalizedLanguage === 'es' ? db_spanish : normalizedLanguage === 'el' ? db_greek : normalizedLanguage === 'ja' ? (db_japanese || db) : normalizedLanguage === 'nrsvue' ? (db_nrsvue || db) : normalizedLanguage === 'war' ? (db_waray || db) : db_ilocano;
+        targetDb = resolveDbAdapter(normalizedLanguage);
       }
 
       if (targetDb) {
@@ -2568,7 +1168,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       // F8 — dual language display: fetch secondary language text
       const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
       if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
-        const secDb = normSecLang === 'ceb' ? db_cebuano : normSecLang === 'tl' ? db_tagalog : normSecLang === 'es' ? db_spanish : normSecLang === 'el' ? db_greek : normSecLang === 'ilo' ? db_ilocano : normSecLang === 'ja' ? (db_japanese || db) : normSecLang === 'nrsvue' ? (db_nrsvue || db) : normSecLang === 'war' ? (db_waray || db) : db;
+        const secDb = resolveDbAdapter(normSecLang);
         try {
           const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title');
           if (secRow) {
@@ -2685,14 +1285,17 @@ const start = async () => {
     // Skip in Electron — DBs are read-only (ASAR) and FTS tables are pre-built.
     if (!IS_ELECTRON_PKG) {
     setImmediate(() => {
-      initializeFts(db, 'English');
-      initializeFts(db_tagalog, 'Tagalog');
-      initializeFts(db_cebuano, 'Cebuano');
-      initializeFts(db_spanish, 'Spanish');
-      initializeFts(db_greek,   'Greek');
-      initializeFts(db_ilocano, 'Ilocano');
-      if (db_japanese) initializeFts(db_japanese, 'Japanese');
-      if (db_nrsvue)   initializeFts(db_nrsvue,   'NRSVUE');
+      const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
+      const ftsOpts = { forceRebuild, log: fastify.log };
+      initializeFts(dba, 'English', ftsOpts);
+      initializeFts(dba_tagalog, 'Tagalog', ftsOpts);
+      initializeFts(dba_cebuano, 'Cebuano', ftsOpts);
+      initializeFts(dba_spanish, 'Spanish', ftsOpts);
+      initializeFts(dba_greek,   'Greek', ftsOpts);
+      initializeFts(dba_ilocano, 'Ilocano', ftsOpts);
+      if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
+      if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
+      if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
     });
     } // end !IS_ELECTRON_PKG
   } catch (err) {
@@ -2710,8 +1313,12 @@ if (require.main === module) {
 // Entry point for Electron: registers socket handlers and starts the Fastify server.
 // Call this AFTER setting process.env.DB_DIR / FRONTEND_DIST_DIR if needed.
 async function startElectron() {
-  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue });
+  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray });
   return start();
 }
 
-module.exports = { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers, startElectron };
+// ── Backward-compatible wrappers (bind default English DB for tests/exports) ─
+const searchScriptureDefault = (input, page, pageSize) => searchScripture(input, page, pageSize, dba, fastify.log);
+const searchScriptureInDbDefault = (input, page, pageSize, targetDb) => searchScriptureInDb(input, page, pageSize, targetDb, fastify.log);
+
+module.exports = { parseScriptureReference, searchScripture: searchScriptureDefault, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers, startElectron };
