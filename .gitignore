@@ -24,6 +24,13 @@ backend/logs/
 dist-electron/
 build-resources/
 
+# Mobile — generated/copied assets (not tracked in git)
+mobile/android/
+mobile/ios/
+mobile/public/assets/db/
+mobile/public/sql-wasm.wasm
+mobile/dist/
+
 # Symlinks / npm workspace artifacts
 frontend@*
 scicp@*
