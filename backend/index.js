@@ -1451,11 +1451,12 @@ function getAdjacentVerse({ verse_id, direction }, db) {
         chapter_number,
         verse_number,
         scripture_text,
-        verse_title, 
+        verse_title,
         verse_short_title,
         chapter_number,
         verse_number,
-        verse_id
+        verse_id,
+        volume_id
       FROM scriptures
       WHERE verse_id = ? ${op} 1
       LIMIT 1
@@ -1490,7 +1491,7 @@ fastify.get('/verse/adjacent', async (request, reply) => {
         reply.code(404);
         return { error: 'not found' };
     }
-    return result;
+    return { ...result, version_citation: getVersionCitation(language || 'en', result.volume_id) };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
@@ -1626,11 +1627,11 @@ fastify.get('/verse/of-the-day', async (request, reply) => {
 
     const verse = db.prepare(`
       SELECT book_title, chapter_number, verse_number,
-             scripture_text, verse_title, verse_id
+             scripture_text, verse_title, verse_id, volume_id
       FROM scriptures WHERE verse_id = ?
     `).get(poolId);
 
-    if (verse) return { ...verse, date: now.toISOString().slice(0, 10) };
+    if (verse) return { ...verse, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', verse.volume_id) };
 
     // Step 2: graceful fallback — random verse from full canon if pool ID misses
     const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
@@ -1638,12 +1639,12 @@ fastify.get('/verse/of-the-day', async (request, reply) => {
     const fallbackSeed = ((LCG_A * (dayOfYear + 1) + LCG_C) % MOD + MOD) % MOD;
     const fallback = db.prepare(`
       SELECT book_title, chapter_number, verse_number,
-             scripture_text, verse_title, verse_id
+             scripture_text, verse_title, verse_id, volume_id
       FROM scriptures WHERE verse_id = ?
     `).get((fallbackSeed % total) + 1);
 
     if (!fallback) { reply.code(404); return { error: 'not found' }; }
-    return { ...fallback, date: now.toISOString().slice(0, 10) };
+    return { ...fallback, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', fallback.volume_id) };
   } catch (err) {
     fastify.log.error('verse-of-the-day failed', err);
     reply.code(500);
