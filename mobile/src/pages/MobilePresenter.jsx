@@ -12,7 +12,7 @@ const themes = {
     tone: "light"
   },
   dark: {
-    background_url: "url('https://www.churchofjesuschrist.org/imgs/12e3b576ad7921a3bc2e36a70150958981e383c1/full/1280%2C/0/default')",
+    background_url: "url('https://content.churchofjesuschrist.org/acp/bc/cp/Africa%20Southeast%20Area/Christ%20images/1200x675/christ-praying-in-gethsemane-dewey_1183667_inl.jpg')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
     layout: "centered",
