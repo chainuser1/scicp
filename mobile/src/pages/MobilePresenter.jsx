@@ -558,6 +558,14 @@ const MobilePresenter = () => {
     setTourOpen(true);
   };
 
+  const retryConnection = () => {
+    setConnectionState('connecting');
+    socket.init().catch(err => {
+      console.error('[MobilePresenter] reconnect failed:', err);
+      setConnectionState('error');
+    });
+  };
+
   /* ── Socket & data ── */
   useEffect(() => {
     const handleConnect = () => {
@@ -1232,6 +1240,17 @@ const MobilePresenter = () => {
           )}
         </div>
       </header>
+
+      {connectionState !== 'connected' && (
+        <div className={`mobile-conn-banner mobile-conn-banner--${connectionState}`} role="status" aria-live="polite">
+          <span>
+            {connectionState === 'connecting' ? 'Connecting offline services...' : 'Offline services disconnected.'}
+          </span>
+          {connectionState !== 'connecting' && (
+            <button className="mobile-conn-banner-btn" onClick={retryConnection}>Retry</button>
+          )}
+        </div>
+      )}
 
       {tourOpen && (
         <aside className="tour-card" role="dialog" aria-live="polite" aria-label="Presenter walkthrough">
