@@ -1680,8 +1680,18 @@ const LANGUAGE_NAMES = {
   ja:     'Japanese',
 };
 
-function getVersionCitation(language, volumeId) {
+function getVersionCitation(language, volumeId, secondaryLanguage) {
   const vid = Number(volumeId);
+  if (secondaryLanguage) {
+    if (vid >= 3) {
+      const p = LANGUAGE_NAMES[language] || 'English';
+      const s = LANGUAGE_NAMES[secondaryLanguage] || secondaryLanguage;
+      return `${p} vs ${s}`;
+    }
+    const p = BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
+    const s = BIBLE_CITATIONS[secondaryLanguage] || secondaryLanguage.toUpperCase();
+    return `${p} vs ${s}`;
+  }
   if (vid >= 3) {
     const book = TRIPLE_CITATIONS[vid] || '';
     const lang = LANGUAGE_NAMES[language] || 'English';
@@ -2503,6 +2513,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         } catch (err) {
           fastify.log.warn('dual-lang fetch failed:', err?.message);
         }
+      }
+
+      // Recompute citation now that secondaryLanguage is known
+      if (verseWithSegments.secondaryLanguage) {
+        verseWithSegments.version_citation = getVersionCitation(
+          normalizedLanguage || 'en',
+          verse.volume_id,
+          verseWithSegments.secondaryLanguage
+        );
       }
 
       const state = getSessionState(sessionId);

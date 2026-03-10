@@ -221,8 +221,18 @@ const QUICK_TOPICS = [
 const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳' };
 const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
 const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese' };
-function getCitation(language, volumeId) {
+function getCitation(language, volumeId, secondaryLanguage) {
   const vid = Number(volumeId);
+  if (secondaryLanguage) {
+    if (vid >= 3) {
+      const p = LANGUAGE_NAMES[language] || 'English';
+      const s = LANGUAGE_NAMES[secondaryLanguage] || secondaryLanguage;
+      return `${p} vs ${s}`;
+    }
+    const p = BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
+    const s = BIBLE_CITATIONS[secondaryLanguage] || secondaryLanguage.toUpperCase();
+    return `${p} vs ${s}`;
+  }
   if (vid >= 3) {
     const book = TRIPLE_CITATIONS[vid] || '';
     const lang = LANGUAGE_NAMES[language] || 'English';
@@ -1307,7 +1317,7 @@ const Presenter = () => {
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
                 {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
-                <span className="hdr-verse-citation"> ({getCitation(currentLanguage, liveVerse.volume_id)})</span>
+                <span className="hdr-verse-citation"> ({getCitation(currentLanguage, liveVerse.volume_id, secondaryLanguage)})</span>
               </span>
               {hasSegments && (
                 <span className="hdr-seg-count">{currentSegment + 1}/{liveVerse.segments.length}</span>
@@ -2113,7 +2123,7 @@ const Presenter = () => {
             <div className="staged-verse-display">
               <h3 className="staged-title">
                 {staged.book_title} {staged.chapter_number}:{staged.verse_number}
-                <span className="staged-citation"> ({getCitation(currentLanguage, staged.volume_id)})</span>
+                <span className="staged-citation"> ({getCitation(currentLanguage, staged.volume_id, secondaryLanguage)})</span>
               </h3>
               <p className="staged-text">{staged.scripture_text}</p>
             </div>
