@@ -2365,7 +2365,7 @@ const Presenter = () => {
               </button>
             </div>
             <div
-              className="preview-box"
+              className={`preview-box${currentTheme?.background_url ? ' preview-box--has-bg' : ''}`}
               onMouseUp={handlePreviewTextSelection}
               style={{
                 backgroundImage: currentTheme?.background_url || undefined,
