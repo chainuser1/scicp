@@ -907,8 +907,17 @@ const Presenter = () => {
       // page is already set by the emitter — don't reset to 0 on paginated fetches
     };
     const handleUpdateVerse = data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); };
+    const handleThemeReceived = theme => {
+      setCurrentTheme(theme);
+      setStaged(prev => prev ? { ...prev, theme: themeForVerse(theme, prev) } : prev);
+      if (theme?.font_size) {
+        const parsed = parseFloat(theme.font_size);
+        if (!isNaN(parsed)) setFontSizeRem(parsed);
+      }
+    };
     socket.on('search-results', handleSearchResults);
     socket.on('update-verse',   handleUpdateVerse);
+    socket.on('update-theme',   handleThemeReceived);
     socket.on('session-created', handleSessionJoined);
     socket.on('session-joined', handleSessionJoined);
     socket.on('session-error', handleSessionError);
@@ -939,6 +948,7 @@ const Presenter = () => {
     return () => {
       socket.off('search-results', handleSearchResults);
       socket.off('update-verse',   handleUpdateVerse);
+      socket.off('update-theme',   handleThemeReceived);
       socket.off('session-created', handleSessionJoined);
       socket.off('session-joined', handleSessionJoined);
       socket.off('session-error', handleSessionError);
@@ -1304,7 +1314,7 @@ const Presenter = () => {
     setDrawerTab('search');
     setDrawerOpen(true);
   };
-  const presenterThemeClass = currentTheme === themes.dark
+  const presenterThemeClass = currentTheme?.tone === 'dark'
     ? 'presenter-container--dark'
     : 'presenter-container--light';
 
@@ -2310,7 +2320,16 @@ const Presenter = () => {
                 <IconChevronRight /><IconChevronRight />
               </button>
             </div>
-            <div className="preview-box" onMouseUp={handlePreviewTextSelection}>
+            <div
+              className="preview-box"
+              onMouseUp={handlePreviewTextSelection}
+              style={{
+                backgroundImage: currentTheme?.background_url || undefined,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                fontFamily: currentTheme?.font_family || undefined,
+              }}
+            >
               <div className="preview-text">{renderPreviewText()}</div>
               {(liveVerse.secondary_segments?.[currentSegment] || liveVerse.secondary_text) && (
                 <p className="preview-secondary-text">
