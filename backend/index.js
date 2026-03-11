@@ -320,7 +320,6 @@ if (!IS_ELECTRON_PKG) {
 const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
         searchScripture, searchScriptureInDb, getAdjacentVerse, fetchVerseByCoords,
         getVersionCitation, getVerseOfTheDay, VOTD_POOL, phraseSearch,
-        applyDoctrineAliases, DOCTRINE_ALIASES,
         BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES } = engine;
 
 // ── Semantic embedding infrastructure ────────────────────────────────────────
@@ -330,7 +329,6 @@ const EMBED_BATCH_SIZE   = 50;
 let embeddingsReady     = false;
 const embeddingCache    = new Map(); // verse_id → Float32Array(384)
 const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
-const verseConceptCache = new Map(); // verse_id → Set<string> of matched concept keys
 
 // Topical Guide caches (populated at startup if topical-guide.db is present)
 const verseTopicCache = new Map(); // verse_id → Set<topic_slug>
@@ -363,17 +361,6 @@ function buildTopicalGuideCache() {
   }
 }
 
-function detectConcepts(text) {
-  const lower = text.toLowerCase();
-  const found = new Set();
-  for (const [key, def] of Object.entries(DOCTRINE_ALIASES)) {
-    const hit = def.terms?.some(t => lower.includes(t.toLowerCase()))
-             || def.phrases?.some(p => lower.includes(p.toLowerCase()));
-    if (hit) found.add(key);
-  }
-  return found;
-}
-
 function setsOverlap(a, b) {
   for (const item of a) if (b.has(item)) return true;
   return false;
@@ -389,7 +376,6 @@ function buildVerseMetaCache() {
   const rows = db.prepare('SELECT id AS verse_id, chapter_id, scripture_text FROM verses').all();
   for (const r of rows) {
     verseMetaCache.set(r.verse_id, { chapter_id: r.chapter_id, scripture_text: r.scripture_text });
-    verseConceptCache.set(r.verse_id, detectConcepts(r.scripture_text));
   }
 }
 
@@ -457,6 +443,50 @@ async function initEmbeddings() {
 buildVerseMetaCache();
 buildTopicalGuideCache();
 
+// ── TG topic search helper ────────────────────────────────────────────────────
+// Finds a topic by name/slug match, returns all verses in that topic cluster
+// ranked by how many topics they share with the query topic.
+function topicSearch(query, page = 0, pageSize = 10) {
+  if (!topicalGuideReady || !db_tg) return { results: [], total: 0 };
+  const lower = query.toLowerCase().trim();
+  // Match topic slug or name (exact first, then prefix, then substring)
+  const allTopics = [...topicNameMap.entries()]; // [slug, name]
+  let matched =
+    allTopics.find(([s, n]) => s === lower || n.toLowerCase() === lower) ??
+    allTopics.find(([s, n]) => s.startsWith(lower) || n.toLowerCase().startsWith(lower)) ??
+    allTopics.find(([s, n]) => s.includes(lower) || n.toLowerCase().includes(lower));
+  if (!matched) return null; // signal: no TG match, fall through to FTS
+
+  const [topicSlug, topicName] = matched;
+  const queryTopics = new Set([topicSlug]);
+
+  // Get all verse_ids for this topic
+  const topicVerseIds = db_tg.prepare(`
+    SELECT g.verse_id FROM topical_guide g
+    JOIN topics t ON t.id = g.topic_id
+    WHERE t.slug = ? AND g.verse_id IS NOT NULL AND g.verse_id != -1
+  `).all(topicSlug).map(r => r.verse_id);
+
+  if (!topicVerseIds.length) return { results: [], total: 0, matchedTopic: topicName };
+
+  // Score by shared topic count
+  const scored = topicVerseIds.map(vid => {
+    const vTopics = verseTopicCache.get(vid) ?? new Set();
+    let overlap = 0;
+    for (const s of queryTopics) if (vTopics.has(s)) overlap++;
+    return { verse_id: vid, overlap };
+  });
+  scored.sort((a, b) => b.overlap - a.overlap);
+
+  const total  = scored.length;
+  const paged  = scored.slice(page * pageSize, page * pageSize + pageSize);
+  const stmt   = dba.prepare(
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+  );
+  const results = paged.map(({ verse_id }) => ({ ...stmt.get(verse_id), matched_concept: topicName }));
+  return { results, total, matchedTopic: topicName };
+}
+
 // ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
     const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
@@ -492,14 +522,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
 
   // Fallback: FTS-based results while embeddings are still computing
   if (!embeddingsReady) {
-    const concepts = verseConceptCache.get(verseId);
-    let phrase;
-    if (concepts && concepts.size > 0) {
-      const firstConcept = [...concepts][0];
-      const aliasDef = DOCTRINE_ALIASES[firstConcept];
-      phrase = aliasDef ? (aliasDef.terms || []).slice(0, 5).join(' ') : null;
-    }
-    if (!phrase) phrase = meta.scripture_text.split(/\s+/).slice(0, 6).join(' ');
+    const phrase = meta.scripture_text.split(/\s+/).slice(0, 6).join(' ');
     const { results } = phraseSearch(phrase, 0, 12, dba, fastify.log);
     return { results: results.filter(r => r.verse_id !== verseId), fallback: true };
   }
@@ -507,22 +530,17 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   const liveVec = embeddingCache.get(verseId);
   if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
 
-  const liveConcepts = verseConceptCache.get(verseId);
-  const liveTopics   = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
-  const liveChapter  = meta.chapter_id;
+  const liveTopics  = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
+  const liveChapter = meta.chapter_id;
 
   const scores = [];
   for (const [cid, cvec] of embeddingCache) {
     const cmeta = verseMetaCache.get(cid);
     if (cmeta.chapter_id === liveChapter) continue;
     let score = cosineSimilarity(liveVec, cvec);
-    // Topical Guide boost (canonical topic match — preferred signal)
-    if (topicalGuideReady && liveTopics.size) {
+    if (liveTopics.size) {
       const cTopics = verseTopicCache.get(cid);
       if (cTopics && setsOverlap(liveTopics, cTopics)) score += 0.15;
-    } else if (liveConcepts.size && setsOverlap(liveConcepts, verseConceptCache.get(cid))) {
-      // Fall back to DOCTRINE_ALIASES concept boost when TG not loaded
-      score += 0.15;
     }
     scores.push({ verse_id: cid, score });
   }
@@ -535,24 +553,16 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   `);
   const results = scores.slice(0, 12).map(({ verse_id, score }) => {
     const row = stmt.get(verse_id);
-    // Matched concept: prefer Topical Guide topic name, fall back to DOCTRINE_ALIASES key
     let matchedConcept = null;
-    if (topicalGuideReady && liveTopics.size) {
+    if (liveTopics.size) {
       const cTopics = verseTopicCache.get(verse_id);
-      if (cTopics) {
-        const sharedSlug = [...liveTopics].find(s => cTopics.has(s)) ?? null;
-        matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
-      }
-    } else if (liveConcepts.size) {
-      const concepts = verseConceptCache.get(verse_id);
-      matchedConcept = [...liveConcepts].find(c => concepts.has(c)) ?? null;
+      const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
+      matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
     }
     return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
   });
 
-  const matchedConcept = topicalGuideReady && liveTopics.size
-    ? (topicNameMap.get([...liveTopics][0]) ?? null)
-    : (liveConcepts.size ? [...liveConcepts][0] : null);
+  const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
 
   return { results, matchedConcept };
 });
@@ -1190,16 +1200,29 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
         fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize} lang=${language}`);
 
-        // Route search to the correct database adapter for the active language.
+        // ── Search pipeline ────────────────────────────────────────────────
+        // 1. Exact scripture ref  → handled inside searchScripture/searchScriptureInDb
+        // 2. Phrase (≥4 words)    → FTS BM25 for best word-combination match
+        // 3. TG topic (1-3 words) → authoritative topic cluster, ranked by overlap
+        // 4. FTS AND → OR fallback
+        //
+        // TG topic search only applies to English (the TG is English-only).
         let searchResults;
-        if (language === 'en') {
+        const words = query.trim().split(/\s+/);
+        const tgHit = (language === 'en' && topicalGuideReady && words.length <= 3)
+          ? topicSearch(query.trim(), page, pageSize)
+          : null;
+
+        if (tgHit && tgHit.total > 0) {
+          searchResults = tgHit;
+        } else if (language === 'en') {
           searchResults = searchScripture(query, page, pageSize, dba, fastify.log);
         } else {
           searchResults = searchScriptureInDb(query, page, pageSize, resolveDbAdapter(language), fastify.log);
         }
 
-        const { results, total } = searchResults;
-        socket.emit('search-results', { results, total, page, pageSize, query, language });
+        const { results, total, matchedTopic } = searchResults;
+        socket.emit('search-results', { results, total, page, pageSize, query, language, matchedTopic });
       } catch (err) {
         fastify.log.error({ err }, 'search handler failed');
         socket.emit('search-results', { results: [], total: 0, page: 0, pageSize: 10 });
