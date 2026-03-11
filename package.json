@@ -21,12 +21,12 @@
     "electron:build:win": "npm run build --workspace=frontend && electron-builder --win",
     "electron:build:mac": "npm run build --workspace=frontend && electron-builder --mac",
     "electron:build:linux": "npm run build --workspace=frontend && electron-builder --linux",
-    "build-fts": "node scripts/build-fts.js",
-    "build-fts:force": "node scripts/build-fts.js --force",
+    "build-fts": "echo 'FTS tables are pre-built in all DBs — no build step needed'",
+    "build-fts:force": "echo 'FTS tables are pre-built in all DBs — no build step needed'",
     "mobile:dev": "cd mobile && npm run dev",
-    "mobile:build": "node scripts/build-fts.js && cd mobile && npm run build",
-    "mobile:android": "node scripts/build-fts.js && cd mobile && npm run build && npx cap sync android",
-    "mobile:ios": "node scripts/build-fts.js && cd mobile && npm run build && npx cap sync ios"
+    "mobile:build": "cd mobile && npm run build",
+    "mobile:android": "cd mobile && npm run build && npx cap sync android",
+    "mobile:ios": "cd mobile && npm run build && npx cap sync ios"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
