@@ -31,6 +31,23 @@ try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scripture
 let db_tg = null;
 try { db_tg = require('better-sqlite3')(path.join(DB_DIR, 'topical-guide.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
 
+// Verse Embeddings DB — separate writable file so the scripture DBs stay read-only
+// Pre-computed locally and committed via git-lfs; Railway never recomputes.
+let db_embed = null;
+if (!IS_ELECTRON_PKG) {
+  try {
+    db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
+    db_embed.exec(`
+      CREATE TABLE IF NOT EXISTS verse_embeddings (
+        verse_id INTEGER PRIMARY KEY,
+        embedding BLOB NOT NULL
+      );
+    `);
+  } catch (err) {
+    fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
+  }
+}
+
 // ── Wrapped adapters for the shared scripture engine ─────────────────────────
 const dba          = new BetterSqliteAdapter(db);
 const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
@@ -301,20 +318,6 @@ try {
   fastify.log.error('failed to ensure setlists table', err);
 }
 
-// ensure verse_embeddings table exists (skip in Electron — DB is read-only ASAR)
-if (!IS_ELECTRON_PKG) {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS verse_embeddings (
-        verse_id INTEGER PRIMARY KEY,
-        embedding BLOB NOT NULL
-      );
-    `);
-  } catch (err) {
-    fastify.log.error('failed to ensure verse_embeddings table', err);
-  }
-}
-
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 // Uses the shared engine's initializeFts via adapters.
 const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
@@ -386,7 +389,8 @@ function buildVerseMetaCache() {
 }
 
 function buildEmbeddingCache() {
-  const rows = db.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
+  if (!db_embed) return;
+  const rows = db_embed.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
   for (const r of rows) {
     embeddingCache.set(
       r.verse_id,
@@ -408,8 +412,8 @@ async function processBatchAsync(pipe, verses, offset) {
     const out = await pipe(v.scripture_text, { pooling: 'mean', normalize: true });
     rows.push({ verse_id: v.verse_id, buf: Buffer.from(new Float32Array(out.data).buffer) });
   }
-  const ins = db.prepare('INSERT OR REPLACE INTO verse_embeddings (verse_id, embedding) VALUES (?, ?)');
-  db.transaction(items => { for (const { verse_id, buf } of items) ins.run(verse_id, buf); })(rows);
+  const ins = db_embed.prepare('INSERT OR REPLACE INTO verse_embeddings (verse_id, embedding) VALUES (?, ?)');
+  db_embed.transaction(items => { for (const { verse_id, buf } of items) ins.run(verse_id, buf); })(rows);
   const done = offset + batch.length;
   if (done % 1000 < EMBED_BATCH_SIZE || done >= verses.length)
     fastify.log.info(`[Embeddings] ${done}/${verses.length}`);
@@ -417,27 +421,28 @@ async function processBatchAsync(pipe, verses, offset) {
 }
 
 async function initEmbeddings() {
+  if (!db_embed) return; // no embeddings DB available
   try {
     fastify.log.info('[Embeddings] Loading pipeline…');
     const { pipeline } = await import('@xenova/transformers');
     const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
     fastify.log.info('[Embeddings] Pipeline loaded.');
     if (REBUILD_EMBEDDINGS) {
-      db.prepare('DELETE FROM verse_embeddings').run();
+      db_embed.prepare('DELETE FROM verse_embeddings').run();
       fastify.log.info('[Embeddings] Cleared for rebuild.');
     }
     const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
-    const existing = db.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
+    const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
     if (existing >= total) {
       fastify.log.info(`[Embeddings] ${existing}/${total} already stored — building cache.`);
       buildEmbeddingCache();
       return;
     }
-    const missing = db.prepare(`
-      SELECT v.id AS verse_id, v.scripture_text FROM verses v
-      LEFT JOIN verse_embeddings e ON v.id = e.verse_id
-      WHERE e.verse_id IS NULL
-    `).all();
+    const embeddedIds = new Set(
+      db_embed.prepare('SELECT verse_id FROM verse_embeddings').all().map(r => r.verse_id)
+    );
+    const missing = db.prepare('SELECT id AS verse_id, scripture_text FROM verses').all()
+      .filter(v => !embeddedIds.has(v.verse_id));
     fastify.log.info(`[Embeddings] Computing ${missing.length} embeddings in background…`);
     setImmediate(() => processBatchAsync(pipe, missing, 0));
   } catch (err) {

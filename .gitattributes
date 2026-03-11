@@ -1,0 +1,2 @@
+resources/db/verse-embeddings.db filter=lfs diff=lfs merge=lfs -text
+resources/db/lds-scriptures-sqlite.db filter=lfs diff=lfs merge=lfs -text
