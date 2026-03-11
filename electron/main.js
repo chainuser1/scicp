@@ -144,6 +144,7 @@ function openClientWindow(display) {
 
   const primary = screen.getPrimaryDisplay();
   const isSecondary = display && display.id !== primary.id;
+  const shouldFullscreen = Boolean(isSecondary);
   const bounds = display
     ? display.bounds
     : { x: primary.bounds.x + 80, y: primary.bounds.y + 80, width: 1280, height: 720 };
@@ -153,10 +154,12 @@ function openClientWindow(display) {
     y:         bounds.y,
     width:     bounds.width,
     height:    bounds.height,
-    fullscreen: isSecondary,
+    show:      false,
+    fullscreen: shouldFullscreen,
     title:     'Scriptures in View — Display',
     icon:      getIcon(),
-    frame:     !isSecondary,
+    frame:     !shouldFullscreen,
+    fullscreenable: true,
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -165,6 +168,12 @@ function openClientWindow(display) {
     },
   });
   clientWin.setMenuBarVisibility(false);
+  clientWin.once('ready-to-show', () => {
+    if (!clientWin || clientWin.isDestroyed()) return;
+    if (shouldFullscreen) clientWin.setFullScreen(true);
+    else clientWin.setFullScreen(false);
+    clientWin.show();
+  });
   clientWin.loadURL('http://127.0.0.1:3000/client?electron=1');
   clientWin.on('closed', () => { clientWin = null; });
 }
