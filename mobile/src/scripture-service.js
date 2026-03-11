@@ -46,10 +46,10 @@ export function search(query, page = 0, pageSize = 10, language = 'en') {
 
   const log = { info: () => {}, warn: console.warn, error: console.error };
 
-  // For short English queries (1-3 words), try Topical Guide first
+  // For short English queries (1-7 words), try Topical Guide first (TG topic names go up to 7 words)
   if (language === 'en') {
     const words = query.trim().split(/\s+/);
-    if (words.length >= 1 && words.length <= 3) {
+    if (words.length >= 1 && words.length <= 7) {
       const tgRaw = getDb('tg');
       if (tgRaw) {
         const tgAdapter = new SqlJsAdapter(tgRaw);
