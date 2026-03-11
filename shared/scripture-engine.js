@@ -44,12 +44,26 @@ function segmentVerseTextDual(primaryText, secondaryText, wordsPerSegment = 150)
 function parseScriptureReference(str) {
   if (!str || typeof str !== 'string') return null;
   const trimmed = str.trim();
-  const match = trimmed.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
-  if (!match) return null;
-  let book = match[1].trim();
-  const chapter = parseInt(match[2], 10);
-  const verse = match[3] ? parseInt(match[3], 10) : null;
-  book = expandBookName(book);
+  const tokens  = trimmed.split(/\s+/);
+
+  // ── Try "book chapter verse" (all spaces, e.g. "1 ne 1 1", "matt 5 3") ──
+  // For multi-word books (≥4 tokens) AND single-word books (3 tokens).
+  if (tokens.length >= 3) {
+    const verse   = parseInt(tokens[tokens.length - 1], 10);
+    const chapter = parseInt(tokens[tokens.length - 2], 10);
+    if (!isNaN(verse) && !isNaN(chapter) && verse > 0 && chapter > 0) {
+      const bookRaw = tokens.slice(0, tokens.length - 2).join(' ');
+      const book    = expandBookName(bookRaw);
+      if (book !== bookRaw) return { book, chapter, verse };
+    }
+  }
+
+  // ── Try "book chapter:verse" or "book chapter" ────────────────────────────
+  const colonMatch = trimmed.match(/^(.+?)\s+(\d+)(?::(\d+))?$/);
+  if (!colonMatch) return null;
+  const book    = expandBookName(colonMatch[1].trim());
+  const chapter = parseInt(colonMatch[2], 10);
+  const verse   = colonMatch[3] ? parseInt(colonMatch[3], 10) : null;
   return { book, chapter, verse };
 }
 
