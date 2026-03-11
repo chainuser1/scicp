@@ -256,7 +256,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
   const total = Math.min(countRow?.total ?? 0, MAX_COUNT_SCAN);
 
   const results = db.prepare(`
-    SELECT book_id, book_title, chapter_number, verse_number,
+    SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
            scripture_text, verse_title, verse_id
     FROM scriptures
     WHERE ${clauses.join(' AND ')}
@@ -273,6 +273,8 @@ const searchScripture = (input, page = 0, pageSize = 10, db, log = null) => {
   if (ref) {
     let sql = `
     SELECT
+        book_id,
+        chapter_id,
         book_title,
         chapter_number,
         verse_number,
@@ -333,7 +335,7 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, db, log = null) => 
 
       const total = countRow?.total ?? 0;
       const rows  = db.prepare(`
-        SELECT book_title, chapter_number, verse_number,
+        SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
                scripture_text, verse_title, verse_short_title, verse_id
         FROM scriptures
         WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
