@@ -20,6 +20,14 @@ const DEFAULT_THEME = {
   layout: 'centered',
   tone: 'dark',
 };
+const CJK_REGEX = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]/;
+const containsCjk = (text) => CJK_REGEX.test(String(text || ''));
+const weightedLength = (text) => {
+  const value = String(text || '');
+  let total = 0;
+  for (const ch of value) total += CJK_REGEX.test(ch) ? 1.8 : 1;
+  return total;
+};
 
 export default function MobileClient() {
   // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -60,7 +68,6 @@ export default function MobileClient() {
     const idx = order.indexOf(mode);
     return order[Math.min(order.length - 1, (idx === -1 ? 1 : idx) + steps)];
   };
-
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
 
@@ -293,14 +300,15 @@ export default function MobileClient() {
       }
       let pressure = 0;
       if (viewport.w <= 900)        pressure += 1;
-      if (displayText.length > 220) pressure += 1;
-      if (displayText.length > 420) pressure += 1;
+      const weightedPrimaryLength = weightedLength(displayText);
+      if (weightedPrimaryLength > 220) pressure += 1;
+      if (weightedPrimaryLength > 420) pressure += 1;
       if (pressure > 0) mode = pushReadabilityMode(mode, pressure >= 2 ? 2 : 1);
       setReadabilityMode(mode);
       const words   = displayText.trim().split(/\s+/).filter(Boolean);
       const avgWord = words.length ? words.join('').length / words.length : 0;
-      setDyslexiaMode(viewport.w <= 1024 && (displayText.length > 260 || avgWord >= 5.6));
-      setAutoReducedMotion(prefersReducedMotion || viewport.w <= 640 || displayText.length > 320);
+      setDyslexiaMode(viewport.w <= 1024 && (weightedPrimaryLength > 260 || avgWord >= 5.6));
+      setAutoReducedMotion(prefersReducedMotion || viewport.w <= 640 || weightedPrimaryLength > 320);
     };
     tune();
     return () => { active = false; };
@@ -326,8 +334,11 @@ export default function MobileClient() {
 
   // ─── Zoom-correct font sizing ─────────────────────────────────────────────
   const { w: vw, h: vh, rem: PX_PER_REM } = viewport;
-  const length = displayText.length;
-  const secLength = secondaryText.length;
+  const hasCjkPrimary = containsCjk(displayText);
+  const hasCjkSecondary = containsCjk(secondaryText);
+  const hasCjk = hasCjkPrimary || hasCjkSecondary;
+  const length = weightedLength(displayText);
+  const secLength = weightedLength(secondaryText);
 
   const maxCap        = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
@@ -350,9 +361,9 @@ export default function MobileClient() {
   const backdropHPad = 2 * Math.min(3 * PX_PER_REM, Math.max(1.1 * PX_PER_REM, vw * 0.032));
   const backdropW    = (vw >= 901 ? Math.min(vw * 0.88, 1280) : Math.min(vw * 0.9, 1250)) - backdropHPad;
   const textAreaW    = Math.max(80, backdropW);
-  const charW        = dyslexiaMode ? 0.61 : 0.57;
-  const lh           = dyslexiaMode ? 1.58 : 1.52;
-  const WRAP_FUDGE   = 1.13;
+  const charW        = (dyslexiaMode ? 0.61 : 0.57) + (hasCjk ? 0.08 : 0);
+  const lh           = (dyslexiaMode ? 1.58 : 1.52) + (hasCjk ? 0.08 : 0);
+  const WRAP_FUDGE   = hasCjk ? 1.18 : 1.13;
 
   // Secondary text sizing constants (see .verse-secondary-text CSS)
   const SEC_FONT_RATIO = vw <= 640 ? 0.48 : 0.58;   // em relative to primary
@@ -381,7 +392,8 @@ export default function MobileClient() {
   })();
 
   const fittingRem       = fontSizeThatFits * 0.95;
-  const rawFloor         = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
+  const rawFloorBase     = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
+  const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
   const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
