@@ -3399,10 +3399,12 @@ button,
 
 .preview-text {
   font-family: 'Cormorant Garamond', serif;
-  font-size: clamp(0.95rem, 0.75rem + 0.5vw, 1.1rem); /* fluid — live content deserves room */
+  font-size: clamp(0.95rem, 0.75rem + 0.5vw, 1.1rem);
   font-style: italic;
-  color: var(--text-primary); /* primary — live content should outrank staged */
-  line-height: 1.6;
+  color: var(--text-primary);
+  line-height: 1.62;
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
 /* Bold emphasis for highlighted text inside the presenter preview box.
@@ -4219,7 +4221,7 @@ button,
 }
 .presenter-container--light .preview-caption { color: #8b3a1a; border-top-color: rgba(139, 58, 26, 0.15); }
 .presenter-container--light .preview-caption-volume { color: #6b3020; }
-.presenter-container--light .preview-text  { color: #5c3d2e; }
+.presenter-container--light .preview-text  { color: #1e0e06; }
 
 .presenter-container--light .search-drawer {
   background: #f0ebe2;
@@ -5657,11 +5659,12 @@ button, [role="button"] {
 /* ── Preview-box text readability over background images ── */
 .preview-box--has-bg {
   position: relative;
+  overflow: hidden; /* clip overlay to rounded corners */
 }
 .preview-box--has-bg::before {
   content: '';
   position: absolute; inset: 0;
-  background: rgba(6, 3, 1, 0.42);
+  background: rgba(4, 2, 1, 0.58);
   border-radius: inherit;
   pointer-events: none;
   z-index: 0;
@@ -5669,16 +5672,28 @@ button, [role="button"] {
 .preview-box--has-bg .preview-text,
 .preview-box--has-bg .preview-secondary-text {
   position: relative; z-index: 1;
-  color: rgba(242, 234, 218, 0.97) !important;
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.85), 0 2px 4px rgba(0, 0, 0, 0.6);
+  color: rgba(245, 238, 222, 0.98) !important;
+  text-shadow:
+    0 1px 18px rgba(0, 0, 0, 0.92),
+    0 2px 5px rgba(0, 0, 0, 0.75),
+    0 0 1px rgba(0, 0, 0, 0.9);
 }
 .presenter-container--light .preview-box--has-bg::before {
-  background: rgba(240, 232, 215, 0.38);
+  background: rgba(242, 234, 216, 0.62);
 }
 .presenter-container--light .preview-box--has-bg .preview-text,
 .presenter-container--light .preview-box--has-bg .preview-secondary-text {
-  color: rgba(14, 7, 2, 0.97) !important;
-  text-shadow: 0 1px 12px rgba(240, 228, 200, 0.9), 0 2px 5px rgba(230, 215, 180, 0.7);
+  color: rgba(12, 5, 1, 0.98) !important;
+  text-shadow:
+    0 1px 14px rgba(248, 235, 205, 0.95),
+    0 2px 6px rgba(230, 215, 180, 0.8),
+    0 0 1px rgba(255, 248, 230, 0.7);
+}
+
+/* ── preview-text base legibility (no background image) ── */
+.preview-text {
+  font-size: clamp(0.97rem, 0.78rem + 0.5vw, 1.12rem);
+  font-weight: 400;
 }
 
 /* ══════════════════════════════════════════════════════════════
