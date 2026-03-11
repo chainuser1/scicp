@@ -507,7 +507,12 @@ function Client() {
       setVerse((v) => ({ ...v, theme }));
     };
 
-    const handleHighlight = ({ text }) => setHighlightedText(text || '');
+    const handleHighlight = (payload) => {
+      const text = (payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'text'))
+        ? payload.text
+        : payload;
+      setHighlightedText(text ? String(text) : '');
+    };
 
     // Fires when we join our own session room — just record the ID.
     const handleSessionJoined = ({ sessionId, verse: v, theme: t }) => {
