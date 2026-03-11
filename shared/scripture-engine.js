@@ -106,22 +106,6 @@ function compileDoctrineAliases(aliases) {
   return { normalizedMap, sortedKeys };
 }
 
-const COMPILED_ALIASES = compileDoctrineAliases(DOCTRINE_ALIASES);
-
-function applyDoctrineAliases(input) {
-  const lower = String(input || '').toLowerCase().trim();
-  if (!lower) return null;
-  const exact = COMPILED_ALIASES.normalizedMap[lower];
-  if (exact) return exact;
-  for (const key of COMPILED_ALIASES.sortedKeys) {
-    const pattern = new RegExp(`(^|\\W)${escapeRegex(key)}(?=\\W|$)`, 'i');
-    if (pattern.test(lower)) {
-      return COMPILED_ALIASES.normalizedMap[key];
-    }
-  }
-  return null;
-}
-
 // ── FTS5 query builders ─────────────────────────────────────────────────────
 const buildFTSPhraseQuery = (phrase) => {
   return `"${phrase.replace(/\"/g, '""')}"`;
@@ -218,7 +202,6 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
 
   const raw    = phrase.trim();
   const offset = page * pageSize;
-  const alias  = applyDoctrineAliases(raw);
 
   try {
     const ftsExists = db.prepare(
@@ -226,59 +209,36 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
     ).get();
 
     if (ftsExists) {
+      // Exact phrase match (for multi-word input)
+      if (raw.split(/\s+/).length > 1) {
+        const exactQ  = buildFTSPhraseQuery(raw);
+        const total   = runFTSCount(exactQ, db);
+        const results = runFTSQuery(exactQ, raw, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total };
+      }
 
-      if (alias) {
-        const phraseQueries = (alias.phrases || []).map(buildFTSPhraseQuery);
-        if (phraseQueries.length > 0) {
-          const combined = phraseQueries.join(' OR ');
-          const total   = runFTSCount(combined, db);
-          const results = runFTSQuery(combined, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
+      // AND match (all terms must appear)
+      const andQ = buildFTSMatchQuery(raw);
+      if (andQ) {
+        const total   = runFTSCount(andQ, db);
+        const results = runFTSQuery(andQ, raw, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total };
+      }
 
-        const andQ = buildFTSTermQuery(alias.terms || [], 'and');
-        if (andQ) {
-          const total   = runFTSCount(andQ, db);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
+      // OR match (any term)
+      const orQ = buildFTSMatchQuery(raw, { orFallback: true });
+      if (orQ) {
+        const total   = runFTSCount(orQ, db);
+        const results = runFTSQuery(orQ, raw, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total };
+      }
 
-        const orQ = buildFTSTermQuery(alias.terms || [], 'or');
-        if (orQ) {
-          const total   = runFTSCount(orQ, db);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-      } else {
-
-        if (raw.split(/\s+/).length > 1) {
-          const exactQ  = buildFTSPhraseQuery(raw);
-          const total   = runFTSCount(exactQ, db);
-          const results = runFTSQuery(exactQ, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        const andQ = buildFTSMatchQuery(raw);
-        if (andQ) {
-          const total   = runFTSCount(andQ, db);
-          const results = runFTSQuery(andQ, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        const orQ = buildFTSMatchQuery(raw, { orFallback: true });
-        if (orQ) {
-          const total   = runFTSCount(orQ, db);
-          const results = runFTSQuery(orQ, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
-
-        if (raw.split(/\s+/).length === 1) {
-          const wq      = `${raw}*`;
-          const total   = runFTSCount(wq, db);
-          const results = runFTSQuery(wq, raw, pageSize, offset, db);
-          if (results.length > 0 || total > 0) return { results, total };
-        }
+      // Prefix wildcard (single word)
+      if (raw.split(/\s+/).length === 1) {
+        const wq      = `${raw}*`;
+        const total   = runFTSCount(wq, db);
+        const results = runFTSQuery(wq, raw, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total };
       }
     }
   } catch (err) {
@@ -286,11 +246,10 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
   }
 
   // Last resort — LIKE token scan
-  const fallbackTerms = (alias ? (alias.terms || [raw]) : [raw])
-    .join(' ').trim().split(/\s+/).filter(Boolean);
-  const clauses = fallbackTerms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
+  const terms = raw.trim().split(/\s+/).filter(Boolean);
+  const clauses = terms.map(() => '(scripture_text LIKE ? OR verse_title LIKE ?)');
   const likeParams = [];
-  fallbackTerms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
+  terms.forEach(t => likeParams.push(`%${t}%`, `%${t}%`));
 
   const countRow = db.prepare(`
     SELECT COUNT(*) AS total FROM scriptures WHERE ${clauses.join(' AND ')}
@@ -601,13 +560,6 @@ module.exports = {
   parseScriptureReference,
   getVersionCitation,
 
-  // Doctrine aliases
-  applyDoctrineAliases,
-  escapeRegex,
-  sanitizeAliasEntry,
-  compileDoctrineAliases,
-  COMPILED_ALIASES,
-
   // FTS builders
   buildFTSPhraseQuery,
   buildFTSTermQuery,
@@ -629,7 +581,6 @@ module.exports = {
 
   // Re-export data for consumers that need raw access
   BOOK_ABBREVIATIONS,
-  DOCTRINE_ALIASES,
   BIBLE_CITATIONS,
   TRIPLE_CITATIONS,
   LANGUAGE_NAMES,
