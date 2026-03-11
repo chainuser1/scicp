@@ -10,9 +10,7 @@ const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirnam
 // Inside Electron the DBs live in the read-only ASAR archive — open them
 // without journal/WAL writes so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
-// Open DBs read-only only in Electron (ASAR archive — no writes allowed)
-const IS_READONLY = IS_ELECTRON_PKG;
-const DB_OPTS = { fileMustExist: true, readonly: IS_READONLY };
+const DB_OPTS = { fileMustExist: true };
 // In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
 const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
 // english scriptures database (LDS standard works)
