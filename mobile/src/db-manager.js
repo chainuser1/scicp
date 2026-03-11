@@ -76,6 +76,11 @@ export async function initAllDatabases() {
         return { lang, ok: !!db };
       })
     );
+    // Also load topical-guide.db (optional — graceful if absent)
+    try {
+      const tg = await loadDatabase('topical-guide.db');
+      if (tg) databases.set('tg', tg);
+    } catch (_) {}
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length}/${entries.length} databases`);
     return databases;
