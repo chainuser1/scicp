@@ -813,7 +813,17 @@ const MobilePresenter = () => {
     setContextLoading(true);
     try {
       if (tab === 'chapter' && !chapterVerses.length) {
-        const verses = svc.browse('verses', { chapterId: liveVerse.chapter_id }, currentLanguage);
+        let chapterId = liveVerse.chapter_id;
+        // Resolve chapter_id from book+chapter if missing (e.g. verse came from socket or old search result)
+        if (!chapterId && liveVerse.book_id && liveVerse.chapter_number) {
+          const chapters = svc.browse('chapters', { bookId: liveVerse.book_id }, currentLanguage);
+          const matched = Array.isArray(chapters)
+            ? chapters.find(c => Number(c.chapter_number) === Number(liveVerse.chapter_number))
+            : null;
+          chapterId = matched?.chapter_id ?? null;
+        }
+        if (!chapterId) { setContextLoading(false); return; }
+        const verses = svc.browse('verses', { chapterId }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
       } else if (tab === 'related' && !relatedVerses.length) {
         const { results, matchedConcept: mc } = svc.getRelated(liveVerse.verse_id, currentLanguage);
