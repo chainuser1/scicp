@@ -112,6 +112,7 @@ function Client() {
   const [prevBgUrl, setPrevBgUrl] = useState('');
   const [bgFading, setBgFading]   = useState(false);
   const bgFadeTimer               = useRef(null);
+  const bgUrlRef                  = useRef(DEFAULT_BG);
 
   // textVisible drives the only animation: a gentle opacity crossfade
   // on the text layer. The backdrop box never moves or disappears.
@@ -306,6 +307,7 @@ function Client() {
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
   const [autoReducedMotion, setAutoReducedMotion] = useState(false);
+  useEffect(() => { bgUrlRef.current = bgUrl; }, [bgUrl]);
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -333,16 +335,18 @@ function Client() {
 
   // ─── Background crossfade ─────────────────────────────────────────────────
   const crossfadeBackground = useCallback((newUrl) => {
-    if (!newUrl || newUrl === bgUrl) return;
+    const currentBg = bgUrlRef.current;
+    if (!newUrl || newUrl === currentBg) return;
     clearTimeout(bgFadeTimer.current);
-    setPrevBgUrl(bgUrl);
+    setPrevBgUrl(currentBg);
+    bgUrlRef.current = newUrl;
     setBgUrl(newUrl);
     setBgFading(true);
     bgFadeTimer.current = setTimeout(() => {
       setPrevBgUrl('');
       setBgFading(false);
     }, 1400);
-  }, [bgUrl]);
+  }, []);
 
   // F14 — Reset (or start) the screensaver countdown
   const resetScreensaver = useCallback(() => {
@@ -760,7 +764,8 @@ function Client() {
   const tone            = verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark';
   const isDisconnected  = connectionState === 'disconnected' || connectionState === 'error';
   const isReconnecting  = connectionState === 'reconnecting';
-  const noMotion        = autoReducedMotion;
+  const forceAnimations = Boolean((customData?.theme || verse?.theme)?.force_animations);
+  const noMotion        = autoReducedMotion && !forceAnimations;
   const joinedSession   = joinedSessionRef.current;
 
   // ─── Highlight render ─────────────────────────────────────────────────────
