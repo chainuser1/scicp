@@ -12,6 +12,7 @@ import {
   parseScriptureReference,
   searchScripture,
   searchScriptureInDb,
+  topicSearch,
   getAdjacentVerse,
   fetchVerseByCoords,
   browseBooks,
@@ -45,7 +46,17 @@ export function search(query, page = 0, pageSize = 10, language = 'en') {
 
   const log = { info: () => {}, warn: console.warn, error: console.error };
 
+  // For short English queries (1-3 words), try Topical Guide first
   if (language === 'en') {
+    const words = query.trim().split(/\s+/);
+    if (words.length >= 1 && words.length <= 3) {
+      const tgRaw = getDb('tg');
+      if (tgRaw) {
+        const tgAdapter = new SqlJsAdapter(tgRaw);
+        const tgResult = topicSearch(query, page, pageSize, tgAdapter, adapter);
+        if (tgResult && tgResult.total > 0) return { ...tgResult, page, pageSize };
+      }
+    }
     return searchScripture(query, page, pageSize, adapter, log);
   }
   return searchScriptureInDb(query, page, pageSize, adapter, log);
