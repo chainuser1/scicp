@@ -27,6 +27,10 @@ try { db_nrsvue   = require('better-sqlite3')(path.join(DB_DIR, 'nrsvue-scriptur
 let db_waray = null;
 try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'),    DB_OPTS); } catch (_) {}
 
+// Topical Guide DB (optional — built by scripts/scrape-topical-guide.js)
+let db_tg = null;
+try { db_tg = require('better-sqlite3')(path.join(DB_DIR, 'topical-guide.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+
 // ── Wrapped adapters for the shared scripture engine ─────────────────────────
 const dba          = new BetterSqliteAdapter(db);
 const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
@@ -328,6 +332,37 @@ const embeddingCache    = new Map(); // verse_id → Float32Array(384)
 const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
 const verseConceptCache = new Map(); // verse_id → Set<string> of matched concept keys
 
+// Topical Guide caches (populated at startup if topical-guide.db is present)
+const verseTopicCache = new Map(); // verse_id → Set<topic_slug>
+const topicNameMap    = new Map(); // topic_slug → topic_name (display)
+let topicalGuideReady = false;
+
+function buildTopicalGuideCache() {
+  if (!db_tg) return;
+  try {
+    const tcount = db_tg.prepare('SELECT COUNT(*) AS c FROM topical_guide WHERE verse_id IS NOT NULL').get().c;
+    if (tcount === 0) return; // scraper still running
+    const topics = db_tg.prepare('SELECT id, slug, name FROM topics').all();
+    const topicSlugById = new Map();
+    for (const t of topics) {
+      topicNameMap.set(t.slug, t.name);
+      topicSlugById.set(t.id, t.slug);
+    }
+    const rows = db_tg.prepare('SELECT topic_id, verse_id FROM topical_guide WHERE verse_id IS NOT NULL').all();
+    for (const r of rows) {
+      const slug = topicSlugById.get(r.topic_id);
+      if (!slug) continue;
+      let s = verseTopicCache.get(r.verse_id);
+      if (!s) { s = new Set(); verseTopicCache.set(r.verse_id, s); }
+      s.add(slug);
+    }
+    topicalGuideReady = true;
+    fastify.log.info(`Topical Guide loaded: ${topicNameMap.size} topics, ${verseTopicCache.size} verses mapped`);
+  } catch (err) {
+    fastify.log.warn('Topical Guide cache build failed (non-fatal):', err.message);
+  }
+}
+
 function detectConcepts(text) {
   const lower = text.toLowerCase();
   const found = new Set();
@@ -420,6 +455,7 @@ async function initEmbeddings() {
 
 // Build verse meta + concept cache synchronously before any requests are served
 buildVerseMetaCache();
+buildTopicalGuideCache();
 
 // ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
@@ -472,6 +508,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
 
   const liveConcepts = verseConceptCache.get(verseId);
+  const liveTopics   = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
   const liveChapter  = meta.chapter_id;
 
   const scores = [];
@@ -479,7 +516,14 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     const cmeta = verseMetaCache.get(cid);
     if (cmeta.chapter_id === liveChapter) continue;
     let score = cosineSimilarity(liveVec, cvec);
-    if (liveConcepts.size && setsOverlap(liveConcepts, verseConceptCache.get(cid))) score += 0.15;
+    // Topical Guide boost (canonical topic match — preferred signal)
+    if (topicalGuideReady && liveTopics.size) {
+      const cTopics = verseTopicCache.get(cid);
+      if (cTopics && setsOverlap(liveTopics, cTopics)) score += 0.15;
+    } else if (liveConcepts.size && setsOverlap(liveConcepts, verseConceptCache.get(cid))) {
+      // Fall back to DOCTRINE_ALIASES concept boost when TG not loaded
+      score += 0.15;
+    }
     scores.push({ verse_id: cid, score });
   }
   scores.sort((a, b) => b.score - a.score);
@@ -491,14 +535,26 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   `);
   const results = scores.slice(0, 12).map(({ verse_id, score }) => {
     const row = stmt.get(verse_id);
-    const concepts = verseConceptCache.get(verse_id);
-    const matchedConcept = liveConcepts.size
-      ? ([...liveConcepts].find(c => concepts.has(c)) ?? null)
-      : null;
+    // Matched concept: prefer Topical Guide topic name, fall back to DOCTRINE_ALIASES key
+    let matchedConcept = null;
+    if (topicalGuideReady && liveTopics.size) {
+      const cTopics = verseTopicCache.get(verse_id);
+      if (cTopics) {
+        const sharedSlug = [...liveTopics].find(s => cTopics.has(s)) ?? null;
+        matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
+      }
+    } else if (liveConcepts.size) {
+      const concepts = verseConceptCache.get(verse_id);
+      matchedConcept = [...liveConcepts].find(c => concepts.has(c)) ?? null;
+    }
     return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
   });
 
-  return { results };
+  const matchedConcept = topicalGuideReady && liveTopics.size
+    ? (topicNameMap.get([...liveTopics][0]) ?? null)
+    : (liveConcepts.size ? [...liveConcepts][0] : null);
+
+  return { results, matchedConcept };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
