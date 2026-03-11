@@ -331,8 +331,9 @@ const embeddingCache    = new Map(); // verse_id → Float32Array(384)
 const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
 
 // Topical Guide caches (populated at startup if topical-guide.db is present)
-const verseTopicCache = new Map(); // verse_id → Set<topic_slug>
-const topicNameMap    = new Map(); // topic_slug → topic_name (display)
+const verseTopicCache  = new Map(); // verse_id → Set<topic_slug>
+const topicVerseIndex  = new Map(); // topic_slug → Set<verse_id>  (reverse index)
+const topicNameMap     = new Map(); // topic_slug → topic_name (display)
 let topicalGuideReady = false;
 
 function buildTopicalGuideCache() {
@@ -350,9 +351,14 @@ function buildTopicalGuideCache() {
     for (const r of rows) {
       const slug = topicSlugById.get(r.topic_id);
       if (!slug) continue;
+      // Forward: verse_id → slugs
       let s = verseTopicCache.get(r.verse_id);
       if (!s) { s = new Set(); verseTopicCache.set(r.verse_id, s); }
       s.add(slug);
+      // Reverse: slug → verse_ids
+      let rv = topicVerseIndex.get(slug);
+      if (!rv) { rv = new Set(); topicVerseIndex.set(slug, rv); }
+      rv.add(r.verse_id);
     }
     topicalGuideReady = true;
     fastify.log.info(`Topical Guide loaded: ${topicNameMap.size} topics, ${verseTopicCache.size} verses mapped`);
@@ -520,51 +526,78 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   const meta = verseMetaCache.get(verseId);
   if (!meta) { reply.code(404); return { error: 'Verse not found' }; }
 
-  // Fallback: FTS-based results while embeddings are still computing
-  if (!embeddingsReady) {
-    const phrase = meta.scripture_text.split(/\s+/).slice(0, 6).join(' ');
-    const { results } = phraseSearch(phrase, 0, 12, dba, fastify.log);
-    return { results: results.filter(r => r.verse_id !== verseId), fallback: true };
-  }
-
-  const liveVec = embeddingCache.get(verseId);
-  if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
-
   const liveTopics  = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
   const liveChapter = meta.chapter_id;
-
-  const scores = [];
-  for (const [cid, cvec] of embeddingCache) {
-    const cmeta = verseMetaCache.get(cid);
-    if (cmeta.chapter_id === liveChapter) continue;
-    let score = cosineSimilarity(liveVec, cvec);
-    if (liveTopics.size) {
-      const cTopics = verseTopicCache.get(cid);
-      if (cTopics && setsOverlap(liveTopics, cTopics)) score += 0.15;
-    }
-    scores.push({ verse_id: cid, score });
-  }
-  scores.sort((a, b) => b.score - a.score);
 
   const stmt = dba.prepare(`
     SELECT verse_id, verse_title, scripture_text, book_title,
            chapter_number, verse_number, chapter_id
     FROM scriptures WHERE verse_id = ?
   `);
-  const results = scores.slice(0, 12).map(({ verse_id, score }) => {
-    const row = stmt.get(verse_id);
-    let matchedConcept = null;
-    if (liveTopics.size) {
+
+  // ── TG-based scoring (always available once TG is loaded) ────────────────
+  // Build overlap map: verse_id → count of shared topics
+  const tgScores = new Map(); // verse_id → overlap count
+  if (liveTopics.size > 0) {
+    for (const slug of liveTopics) {
+      const peers = topicVerseIndex.get(slug);
+      if (!peers) continue;
+      for (const vid of peers) {
+        if (vid === verseId) continue;
+        const vmeta = verseMetaCache.get(vid);
+        if (vmeta && vmeta.chapter_id === liveChapter) continue; // skip same chapter
+        tgScores.set(vid, (tgScores.get(vid) ?? 0) + 1);
+      }
+    }
+  }
+
+  // ── If embeddings ready, blend cosine similarity + TG boost ─────────────
+  if (embeddingsReady) {
+    const liveVec = embeddingCache.get(verseId);
+    if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
+
+    const scores = [];
+    for (const [cid, cvec] of embeddingCache) {
+      const cmeta = verseMetaCache.get(cid);
+      if (cmeta && cmeta.chapter_id === liveChapter) continue;
+      let score = cosineSimilarity(liveVec, cvec);
+      const overlap = tgScores.get(cid) ?? 0;
+      if (overlap > 0) score += 0.15 * Math.min(overlap, 3); // boost up to +0.45 for 3+ shared topics
+      scores.push({ verse_id: cid, score });
+    }
+    scores.sort((a, b) => b.score - a.score);
+
+    const results = scores.slice(0, 12).map(({ verse_id, score }) => {
+      const row = stmt.get(verse_id);
       const cTopics = verseTopicCache.get(verse_id);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
-      matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
-    }
-    return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
-  });
+      const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
+      return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
+    });
+    const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
+    return { results, matchedConcept };
+  }
 
-  const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
+  // ── Fallback: TG-only (embeddings still computing) ───────────────────────
+  if (tgScores.size > 0) {
+    const sorted = [...tgScores.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12);
+    const results = sorted.map(([vid, overlap]) => {
+      const row = stmt.get(vid);
+      const cTopics = verseTopicCache.get(vid);
+      const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
+      const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? null) : null;
+      return { ...row, similarity_score: +(overlap / liveTopics.size).toFixed(4), matched_concept: matchedConcept };
+    });
+    const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
+    return { results, matchedConcept, fallback: true };
+  }
 
-  return { results, matchedConcept };
+  // ── Last resort: FTS phrase on verse text ────────────────────────────────
+  const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
+  const { results: ftsResults } = phraseSearch(phrase, 0, 12, dba, fastify.log);
+  return { results: ftsResults.filter(r => r.verse_id !== verseId), fallback: true };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
