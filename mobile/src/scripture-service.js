@@ -79,7 +79,7 @@ export function getVerse(verse, language = 'en') {
 export function getAdjacent(verse, direction, language = 'en') {
   const adapter = resolveAdapter(language);
   if (!adapter) return null;
-  return getAdjacentVerse(adapter, verse, direction);
+  return getAdjacentVerse({ ...verse, direction }, adapter);
 }
 
 // ── Verse of the Day ────────────────────────────────────────────────────────

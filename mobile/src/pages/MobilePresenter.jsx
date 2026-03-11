@@ -1109,7 +1109,6 @@ const MobilePresenter = () => {
                       <option value="ilo">Ilocano</option>
                       <option value="ja">Japanese</option>
                       <option value="war">Waray</option>
-                      <option value="zh">Chinese (Simplified)</option>
                     </select>
                     <button
                       className="popover-swap-btn"
