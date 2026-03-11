@@ -453,8 +453,8 @@ function browseChapters(db, bookId) {
 
 function browseVerses(db, chapterId) {
   return db.prepare(`
-    SELECT verse_id, book_title, chapter_number, verse_number,
-           scripture_text, verse_title, volume_title, volume_short_title
+    SELECT verse_id, book_id, chapter_id, book_title, chapter_number, verse_number,
+           scripture_text, verse_title, volume_id, volume_title, volume_short_title
     FROM scriptures
     WHERE chapter_id = ?
     ORDER BY verse_number
@@ -556,7 +556,7 @@ function getVerseOfTheDay(db) {
   const poolId = VOTD_POOL[seed % VOTD_POOL.length];
 
   const verse = db.prepare(`
-    SELECT book_title, chapter_number, verse_number,
+    SELECT book_id, book_title, chapter_id, chapter_number, verse_number,
            scripture_text, verse_title, verse_id, volume_id
     FROM scriptures WHERE verse_id = ?
   `).get(poolId);
@@ -570,7 +570,7 @@ function getVerseOfTheDay(db) {
   const total    = countRow?.total || 41995;
   const fallbackSeed = ((LCG_A * (dayOfYear + 1) + LCG_C) % MOD + MOD) % MOD;
   const fallback = db.prepare(`
-    SELECT book_title, chapter_number, verse_number,
+    SELECT book_id, book_title, chapter_id, chapter_number, verse_number,
            scripture_text, verse_title, verse_id, volume_id
     FROM scriptures WHERE verse_id = ?
   `).get((fallbackSeed % total) + 1);

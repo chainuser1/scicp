@@ -1113,7 +1113,20 @@ const Presenter = () => {
     setContextLoading(true);
     try {
       if (tab === 'chapter' && !chapterVerses.length) {
-        const res = await fetch(`${API_URL}/browse/verses?chapter_id=${liveVerse.chapter_id}`);
+        // Resolve chapter_id — may be missing on verses from VOTD/history/setlist
+        let chapterId = liveVerse.chapter_id;
+        if (!chapterId && liveVerse.book_id && liveVerse.chapter_number) {
+          const cr = await fetch(`${API_URL}/browse/chapters?book_id=${liveVerse.book_id}&language=${currentLanguage}`).catch(() => null);
+          if (cr?.ok) {
+            const chapters = await cr.json();
+            const matched = Array.isArray(chapters)
+              ? chapters.find(c => Number(c.chapter_number) === Number(liveVerse.chapter_number))
+              : null;
+            chapterId = matched?.chapter_id ?? null;
+          }
+        }
+        if (!chapterId) { setContextLoading(false); return; }
+        const res = await fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`);
         if (res.ok) {
           const d = await res.json();
           setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
