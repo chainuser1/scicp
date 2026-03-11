@@ -1,3 +1,5 @@
+resources/db/verse-embeddings.db filter=lfs diff=lfs merge=lfs -text
+resources/db/lds-scriptures-sqlite.db filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/model.onnx filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/model.onnx.data filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/onnx/model.onnx.data filter=lfs diff=lfs merge=lfs -text
