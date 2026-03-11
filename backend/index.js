@@ -297,12 +297,129 @@ try {
   fastify.log.error('failed to ensure setlists table', err);
 }
 
+// ensure verse_embeddings table exists (skip in Electron — DB is read-only ASAR)
+if (!IS_ELECTRON_PKG) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS verse_embeddings (
+        verse_id INTEGER PRIMARY KEY,
+        embedding BLOB NOT NULL
+      );
+    `);
+  } catch (err) {
+    fastify.log.error('failed to ensure verse_embeddings table', err);
+  }
+}
+
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 // Uses the shared engine's initializeFts via adapters.
 const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
         searchScripture, searchScriptureInDb, getAdjacentVerse, fetchVerseByCoords,
-        getVersionCitation, getVerseOfTheDay, VOTD_POOL,
+        getVersionCitation, getVerseOfTheDay, VOTD_POOL, phraseSearch,
+        applyDoctrineAliases, DOCTRINE_ALIASES,
         BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES } = engine;
+
+// ── Semantic embedding infrastructure ────────────────────────────────────────
+const REBUILD_EMBEDDINGS = process.env.REBUILD_EMBEDDINGS === 'true';
+const EMBED_BATCH_SIZE   = 50;
+
+let embeddingsReady     = false;
+const embeddingCache    = new Map(); // verse_id → Float32Array(384)
+const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
+const verseConceptCache = new Map(); // verse_id → Set<string> of matched concept keys
+
+function detectConcepts(text) {
+  const lower = text.toLowerCase();
+  const found = new Set();
+  for (const [key, def] of Object.entries(DOCTRINE_ALIASES)) {
+    const hit = def.terms?.some(t => lower.includes(t.toLowerCase()))
+             || def.phrases?.some(p => lower.includes(p.toLowerCase()));
+    if (hit) found.add(key);
+  }
+  return found;
+}
+
+function setsOverlap(a, b) {
+  for (const item of a) if (b.has(item)) return true;
+  return false;
+}
+
+function cosineSimilarity(a, b) {
+  let sum = 0.0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum;
+}
+
+function buildVerseMetaCache() {
+  const rows = db.prepare('SELECT id AS verse_id, chapter_id, scripture_text FROM verses').all();
+  for (const r of rows) {
+    verseMetaCache.set(r.verse_id, { chapter_id: r.chapter_id, scripture_text: r.scripture_text });
+    verseConceptCache.set(r.verse_id, detectConcepts(r.scripture_text));
+  }
+}
+
+function buildEmbeddingCache() {
+  const rows = db.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
+  for (const r of rows) {
+    embeddingCache.set(
+      r.verse_id,
+      new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
+    );
+  }
+  embeddingsReady = true;
+}
+
+async function processBatchAsync(pipe, verses, offset) {
+  if (offset >= verses.length) {
+    buildEmbeddingCache();
+    fastify.log.info('[Embeddings] Ready — in-memory cache built.');
+    return;
+  }
+  const batch = verses.slice(offset, offset + EMBED_BATCH_SIZE);
+  const rows = [];
+  for (const v of batch) {
+    const out = await pipe(v.scripture_text, { pooling: 'mean', normalize: true });
+    rows.push({ verse_id: v.verse_id, buf: Buffer.from(new Float32Array(out.data).buffer) });
+  }
+  const ins = db.prepare('INSERT OR REPLACE INTO verse_embeddings (verse_id, embedding) VALUES (?, ?)');
+  db.transaction(items => { for (const { verse_id, buf } of items) ins.run(verse_id, buf); })(rows);
+  const done = offset + batch.length;
+  if (done % 1000 < EMBED_BATCH_SIZE || done >= verses.length)
+    fastify.log.info(`[Embeddings] ${done}/${verses.length}`);
+  setImmediate(() => processBatchAsync(pipe, verses, done));
+}
+
+async function initEmbeddings() {
+  try {
+    fastify.log.info('[Embeddings] Loading pipeline…');
+    const { pipeline } = await import('@xenova/transformers');
+    const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    fastify.log.info('[Embeddings] Pipeline loaded.');
+    if (REBUILD_EMBEDDINGS) {
+      db.prepare('DELETE FROM verse_embeddings').run();
+      fastify.log.info('[Embeddings] Cleared for rebuild.');
+    }
+    const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
+    const existing = db.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
+    if (existing >= total) {
+      fastify.log.info(`[Embeddings] ${existing}/${total} already stored — building cache.`);
+      buildEmbeddingCache();
+      return;
+    }
+    const missing = db.prepare(`
+      SELECT v.id AS verse_id, v.scripture_text FROM verses v
+      LEFT JOIN verse_embeddings e ON v.id = e.verse_id
+      WHERE e.verse_id IS NULL
+    `).all();
+    fastify.log.info(`[Embeddings] Computing ${missing.length} embeddings in background…`);
+    setImmediate(() => processBatchAsync(pipe, missing, 0));
+  } catch (err) {
+    fastify.log.error('[Embeddings] Init failed: ' + err.message);
+  }
+}
+
+// Build verse meta + concept cache synchronously before any requests are served
+buildVerseMetaCache();
 
 // ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
@@ -327,6 +444,61 @@ fastify.get('/verse/adjacent', async (request, reply) => {
         return { error: 'not found' };
     }
     return { ...result, version_citation: getVersionCitation(language || 'en', result.volume_id) };
+});
+
+// ── HTTP route: semantically related verses ───────────────────────────────────
+fastify.get('/verse/:verse_id/related', async (request, reply) => {
+  const verseId = parseInt(request.params.verse_id, 10);
+  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
+
+  const meta = verseMetaCache.get(verseId);
+  if (!meta) { reply.code(404); return { error: 'Verse not found' }; }
+
+  // Fallback: FTS-based results while embeddings are still computing
+  if (!embeddingsReady) {
+    const concepts = verseConceptCache.get(verseId);
+    let phrase;
+    if (concepts && concepts.size > 0) {
+      const firstConcept = [...concepts][0];
+      const aliasDef = DOCTRINE_ALIASES[firstConcept];
+      phrase = aliasDef ? (aliasDef.terms || []).slice(0, 5).join(' ') : null;
+    }
+    if (!phrase) phrase = meta.scripture_text.split(/\s+/).slice(0, 6).join(' ');
+    const { results } = phraseSearch(phrase, 0, 12, dba, fastify.log);
+    return { results: results.filter(r => r.verse_id !== verseId), fallback: true };
+  }
+
+  const liveVec = embeddingCache.get(verseId);
+  if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
+
+  const liveConcepts = verseConceptCache.get(verseId);
+  const liveChapter  = meta.chapter_id;
+
+  const scores = [];
+  for (const [cid, cvec] of embeddingCache) {
+    const cmeta = verseMetaCache.get(cid);
+    if (cmeta.chapter_id === liveChapter) continue;
+    let score = cosineSimilarity(liveVec, cvec);
+    if (liveConcepts.size && setsOverlap(liveConcepts, verseConceptCache.get(cid))) score += 0.15;
+    scores.push({ verse_id: cid, score });
+  }
+  scores.sort((a, b) => b.score - a.score);
+
+  const stmt = dba.prepare(`
+    SELECT verse_id, verse_title, scripture_text, book_title,
+           chapter_number, verse_number, chapter_id
+    FROM scriptures WHERE verse_id = ?
+  `);
+  const results = scores.slice(0, 12).map(({ verse_id, score }) => {
+    const row = stmt.get(verse_id);
+    const concepts = verseConceptCache.get(verse_id);
+    const matchedConcept = liveConcepts.size
+      ? ([...liveConcepts].find(c => concepts.has(c)) ?? null)
+      : null;
+    return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
+  });
+
+  return { results };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
@@ -1303,6 +1475,8 @@ const start = async () => {
       if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
       if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
     });
+    // Initialize semantic embeddings in background (resume-safe: skips already-stored rows)
+    setImmediate(() => initEmbeddings());
     } // end !IS_ELECTRON_PKG
   } catch (err) {
     fastify.log.error(err)

@@ -501,6 +501,13 @@ const Presenter = () => {
   const [pinManageInput, setPinManageInput]         = useState('');
   const [pinManageConfirm, setPinManageConfirm]     = useState('');
   const [pinManageError, setPinManageError]         = useState('');
+  // ── Context expansion modal ───────────────────────────────────────────────
+  const [contextOpen,    setContextOpen]    = useState(false);
+  const [contextTab,     setContextTab]     = useState('chapter');
+  const [chapterVerses,  setChapterVerses]  = useState([]);
+  const [relatedVerses,  setRelatedVerses]  = useState([]);
+  const [relatedConcept, setRelatedConcept] = useState(null);
+  const [contextLoading, setContextLoading] = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
@@ -1089,6 +1096,38 @@ const Presenter = () => {
       }
     } catch (err) {
       if (err.name !== 'AbortError') console.error('adjacent fetch failed', err);
+    }
+  };
+
+  // Reset context cache when the live verse changes
+  useEffect(() => {
+    setChapterVerses([]);
+    setRelatedVerses([]);
+    setRelatedConcept(null);
+  }, [liveVerse?.verse_id]);
+
+  const openContextModal = async (tab = 'chapter') => {
+    if (!liveVerse) return;
+    setContextOpen(true);
+    setContextTab(tab);
+    setContextLoading(true);
+    try {
+      if (tab === 'chapter' && !chapterVerses.length) {
+        const res = await fetch(`${API_URL}/browse/verses?chapter_id=${liveVerse.chapter_id}`);
+        if (res.ok) {
+          const d = await res.json();
+          setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
+        }
+      } else if (tab === 'related' && !relatedVerses.length) {
+        const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related`);
+        if (res.ok) {
+          const d = await res.json();
+          setRelatedVerses(d.results ?? []);
+          setRelatedConcept(d.matchedConcept ?? null);
+        }
+      }
+    } finally {
+      setContextLoading(false);
     }
   };
 
@@ -2280,6 +2319,11 @@ const Presenter = () => {
                   </button>
                 )}
                 <span className="card-hint">select text to highlight</span>
+                <button className="context-expand-btn"
+                  onClick={() => openContextModal('chapter')}
+                  title="Chapter & related scriptures">
+                  ☰ Context
+                </button>
                 <button className="end-live-btn" onClick={endLive} title="End live — clears TV screen (E)">
                   ◼ End Live
                 </button>
@@ -2541,6 +2585,79 @@ const Presenter = () => {
                 <button className="pin-modal-btn pin-modal-btn--danger" onClick={handleClearPin}>Remove PIN</button>
               )}
               <button className="pin-modal-btn pin-modal-btn--cancel" onClick={() => setPinManageOpen(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Expansion Modal — Chapter view and semantic related scriptures */}
+      {contextOpen && (
+        <div className="ctx-backdrop" onClick={() => setContextOpen(false)}>
+          <div className="ctx-modal" onClick={e => e.stopPropagation()}>
+            <div className="ctx-header">
+              <span className="ctx-title">
+                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+              </span>
+              <button className="ctx-close" onClick={() => setContextOpen(false)}>✕</button>
+            </div>
+
+            <div className="ctx-tabs">
+              <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('chapter'); if (!chapterVerses.length) openContextModal('chapter'); }}>
+                Chapter {liveVerse.chapter_number}
+              </button>
+              <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); }}>
+                Related
+                {relatedConcept && (
+                  <span className="ctx-concept-tag">
+                    {relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            <div className="ctx-body">
+              {contextLoading ? (
+                <div className="ctx-loading">Loading…</div>
+              ) : contextTab === 'chapter' ? (
+                <ul className="ctx-list">
+                  {chapterVerses.map(v => (
+                    <li key={v.verse_id}
+                      className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>
+                      <span className="ctx-item-ref">{v.verse_number}</span>
+                      <span className="ctx-item-text">{v.scripture_text}</span>
+                      <div className="ctx-item-actions">
+                        <button onClick={() => { setStaged({...v, theme: themeForVerse(currentTheme, v)}); setContextOpen(false); }}>Stage</button>
+                        <button onClick={() => addToSetlist(v)}>+ List</button>
+                        <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="ctx-list">
+                  {relatedVerses.length === 0
+                    ? <li className="ctx-empty">No related verses found.</li>
+                    : relatedVerses.map(v => (
+                        <li key={v.verse_id} className="ctx-item">
+                          <span className="ctx-item-ref">{v.verse_title}</span>
+                          <span className="ctx-item-text">{v.scripture_text}</span>
+                          {v.matched_concept && (
+                            <span className="ctx-concept-tag">
+                              {v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}
+                            </span>
+                          )}
+                          <div className="ctx-item-actions">
+                            <button onClick={() => { setStaged({...v, theme: themeForVerse(currentTheme, v)}); setContextOpen(false); }}>Stage</button>
+                            <button onClick={() => addToSetlist(v)}>+ List</button>
+                            <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
+                          </div>
+                        </li>
+                      ))
+                  }
+                </ul>
+              )}
             </div>
           </div>
         </div>
