@@ -1209,7 +1209,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         // TG topic search only applies to English (the TG is English-only).
         let searchResults;
         const words = query.trim().split(/\s+/);
-        const tgHit = (language === 'en' && topicalGuideReady && words.length <= 3)
+        // TG topic names go up to 7 words — try for any query up to that length
+        const tgHit = (language === 'en' && topicalGuideReady && words.length <= 7)
           ? topicSearch(query.trim(), page, pageSize)
           : null;
 
