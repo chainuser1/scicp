@@ -165,6 +165,7 @@ function openClientWindow(display) {
       contextIsolation: true,
       nodeIntegration:  false,
       sandbox:          false,
+      backgroundThrottling: false, // keep CSS animations running when presenter window has focus
     },
   });
   clientWin.setMenuBarVisibility(false);

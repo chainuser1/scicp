@@ -1470,6 +1470,31 @@ button,
 
 .end-live-btn:active { transform: scale(0.96); }
 
+.context-expand-btn {
+  padding: 0.25rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.35rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.context-expand-btn:hover {
+  background: rgba(201, 168, 76, 0.15);
+  border-color: rgba(201, 168, 76, 0.4);
+}
+.presenter-container--light .context-expand-btn {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(139, 58, 26, 0.2);
+}
+.presenter-container--light .context-expand-btn:hover {
+  background: rgba(201, 168, 76, 0.15);
+  border-color: rgba(201, 168, 76, 0.5);
+}
+
 .clear-highlight-btn {
   padding: 0.22rem 0.5rem;
   background: rgba(201, 168, 76, 0.1);
@@ -5625,6 +5650,122 @@ button, [role="button"] {
 .pin-modal-btn--danger {
   background: #dc2626;
   color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CONTEXT EXPANSION MODAL — Chapter view + Semantic Related
+   ══════════════════════════════════════════════════════════════ */
+.ctx-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  z-index: 10002;
+  display: flex; align-items: center; justify-content: center;
+}
+.ctx-modal {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  width: min(42rem, 96vw);
+  max-height: 80dvh;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+.ctx-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.ctx-title { font-family: 'Cinzel', serif; font-size: 0.85rem; font-weight: 600; }
+.ctx-close {
+  background: none; border: none; color: inherit; cursor: pointer;
+  opacity: 0.4; font-size: 0.9rem; padding: 0.2rem 0.4rem;
+  border-radius: 0.25rem; transition: opacity 0.15s;
+}
+.ctx-close:hover { opacity: 1; }
+
+.ctx-tabs {
+  display: flex; gap: 0.25rem; padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.ctx-tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: inherit; cursor: pointer; font-size: 0.82rem;
+  padding: 0.3rem 0.85rem; border-radius: 0.35rem 0.35rem 0 0;
+  opacity: 0.5; display: flex; align-items: center; gap: 0.4rem;
+  transition: opacity 0.15s, background 0.15s;
+}
+.ctx-tab:hover { opacity: 0.8; background: rgba(255, 255, 255, 0.04); }
+.ctx-tab--active { opacity: 1; border-bottom-color: var(--accent, #c9a84c); }
+
+.ctx-body { overflow-y: auto; flex: 1; padding: 0.25rem 0.75rem 1rem; }
+
+.ctx-loading { padding: 3rem; text-align: center; opacity: 0.4; font-size: 0.9rem; }
+
+.ctx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+
+.ctx-empty { padding: 2rem; text-align: center; opacity: 0.4; font-size: 0.85rem; }
+
+.ctx-item {
+  display: grid;
+  grid-template-columns: 1.8rem 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 0.6rem;
+  align-items: start;
+  padding: 0.5rem 0.4rem;
+  border-radius: 0.35rem;
+  transition: background 0.12s;
+}
+.ctx-item:hover { background: rgba(255, 255, 255, 0.04); }
+.ctx-item--live { background: rgba(201, 168, 76, 0.1); }
+
+.ctx-item-ref {
+  font-family: 'Cinzel', serif; font-size: 0.72rem; font-weight: 700;
+  opacity: 0.6; padding-top: 0.15rem;
+  grid-column: 1; grid-row: 1;
+}
+.ctx-item-text {
+  font-family: 'Cormorant Garamond', serif; font-style: italic;
+  font-size: 0.9rem; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+  grid-column: 2; grid-row: 1;
+}
+.ctx-concept-tag {
+  display: inline-block; font-size: 0.67rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--accent, #c9a84c); background: rgba(201, 168, 76, 0.12);
+  border-radius: 0.25rem; padding: 0.1rem 0.35rem;
+  grid-column: 2; grid-row: 2; align-self: start; width: fit-content;
+  margin-top: 0.2rem;
+}
+.ctx-item-actions {
+  grid-column: 3; grid-row: 1 / 3;
+  display: flex; flex-direction: column; gap: 0.25rem; flex-shrink: 0;
+}
+.ctx-item-actions button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.3rem; color: inherit; cursor: pointer;
+  font-size: 0.72rem; padding: 0.18rem 0.5rem; white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ctx-item-actions button:hover {
+  background: rgba(201, 168, 76, 0.15);
+  border-color: rgba(201, 168, 76, 0.4);
+}
+
+/* Light theme overrides */
+.presenter-container--light .ctx-modal { background: #f5f0e8; border-color: rgba(139, 58, 26, 0.1); }
+.presenter-container--light .ctx-header { border-bottom-color: rgba(139, 58, 26, 0.1); }
+.presenter-container--light .ctx-tabs   { border-bottom-color: rgba(139, 58, 26, 0.1); }
+.presenter-container--light .ctx-item:hover { background: rgba(0, 0, 0, 0.04); }
+.presenter-container--light .ctx-item--live { background: rgba(201, 168, 76, 0.15); }
+.presenter-container--light .ctx-item-actions button {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(139, 58, 26, 0.15);
 }
 
 /* PIN status row inside session popover */
