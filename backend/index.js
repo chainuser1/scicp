@@ -340,7 +340,7 @@ let topicalGuideReady = false;
 function buildTopicalGuideCache() {
   if (!db_tg) return;
   try {
-    const tcount = db_tg.prepare('SELECT COUNT(*) AS c FROM topical_guide WHERE verse_id IS NOT NULL').get().c;
+    const tcount = db_tg.prepare('SELECT COUNT(*) AS c FROM topical_guide WHERE verse_id IS NOT NULL AND verse_id != -1').get().c;
     if (tcount === 0) return; // scraper still running
     const topics = db_tg.prepare('SELECT id, slug, name FROM topics').all();
     const topicSlugById = new Map();
@@ -348,7 +348,7 @@ function buildTopicalGuideCache() {
       topicNameMap.set(t.slug, t.name);
       topicSlugById.set(t.id, t.slug);
     }
-    const rows = db_tg.prepare('SELECT topic_id, verse_id FROM topical_guide WHERE verse_id IS NOT NULL').all();
+    const rows = db_tg.prepare('SELECT topic_id, verse_id FROM topical_guide WHERE verse_id IS NOT NULL AND verse_id != -1').all();
     for (const r of rows) {
       const slug = topicSlugById.get(r.topic_id);
       if (!slug) continue;
