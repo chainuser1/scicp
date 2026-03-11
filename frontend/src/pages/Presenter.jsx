@@ -979,12 +979,16 @@ const Presenter = () => {
 
   /* ── Handlers ── */
   const handleThemeChange = theme => {
-    setCurrentTheme(theme);
-    if (staged) setStaged(prev => ({ ...prev, theme: themeForVerse(theme, prev) }));
-    emitWithSession('update-theme', { theme });
+    const nextTheme = {
+      ...theme,
+      force_animations: theme.force_animations ?? currentTheme.force_animations ?? false,
+    };
+    setCurrentTheme(nextTheme);
+    if (staged) setStaged(prev => ({ ...prev, theme: themeForVerse(nextTheme, prev) }));
+    emitWithSession('update-theme', { theme: nextTheme });
     // Keep fontSizeRem slider in sync when theme is changed externally
-    if (theme.font_size) {
-      const parsed = parseFloat(theme.font_size);
+    if (nextTheme.font_size) {
+      const parsed = parseFloat(nextTheme.font_size);
       if (!isNaN(parsed)) setFontSizeRem(parsed);
     }
   };
@@ -1573,9 +1577,16 @@ const Presenter = () => {
                   <button
                     key={label}
                     className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
-                    onClick={() => { handleThemeChange(theme); setThemePopover(false); }}
+                    onClick={() => { handleThemeChange({ ...theme, force_animations: !!currentTheme.force_animations }); setThemePopover(false); }}
                   >{label}</button>
                 ))}
+                <button
+                  className={`theme-btn${currentTheme.force_animations ? ' active' : ''}`}
+                  onClick={() => handleThemeChange({ ...currentTheme, force_animations: !currentTheme.force_animations })}
+                  title="Override reduced-motion and force client animations"
+                >
+                  {currentTheme.force_animations ? 'Animations: Forced On' : 'Animations: Auto (Respect OS)'}
+                </button>
                 <div className="popover-divider" />
                 <div className="popover-label">Custom background</div>
                 <div className="popover-row">
@@ -1759,7 +1770,7 @@ const Presenter = () => {
                     <button
                       key={label}
                       className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
-                      onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
+                      onClick={() => { handleThemeChange({ ...theme, force_animations: !!currentTheme.force_animations }); setMobileMenuOpen(false); }}
                     >{label}</button>
                   ))}
                 </div>
@@ -2352,8 +2363,15 @@ const Presenter = () => {
           {themeCardOpen && (
             <>
               <div className="theme-buttons">
-                <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>☀ Light</button>
-                <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>☽ Dark</button>
+                <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange({ ...themes.light, force_animations: !!currentTheme.force_animations })}>☀ Light</button>
+                <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange({ ...themes.dark, force_animations: !!currentTheme.force_animations })}>☽ Dark</button>
+                <button
+                  className={`theme-btn${currentTheme.force_animations ? ' active' : ''}`}
+                  onClick={() => handleThemeChange({ ...currentTheme, force_animations: !currentTheme.force_animations })}
+                  title="Override reduced-motion and force client animations"
+                >
+                  {currentTheme.force_animations ? 'Animations: Forced On' : 'Animations: Auto (Respect OS)'}
+                </button>
               </div>
               {/* Font size control */}
               <div className="font-size-controls">
