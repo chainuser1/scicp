@@ -10,7 +10,11 @@ const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirnam
 // Inside Electron the DBs live in the read-only ASAR archive — open them
 // without journal/WAL writes so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
-const DB_OPTS = { fileMustExist: true, readonly: IS_ELECTRON_PKG };
+// Open DBs read-only only in Electron (ASAR archive — no writes allowed)
+const IS_READONLY = IS_ELECTRON_PKG;
+const DB_OPTS = { fileMustExist: true, readonly: IS_READONLY };
+// In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
+const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
 // english scriptures database (LDS standard works)
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
 // additional language databases (optional)
@@ -31,18 +35,24 @@ try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scripture
 let db_tg = null;
 try { db_tg = require('better-sqlite3')(path.join(DB_DIR, 'topical-guide.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
 
-// Verse Embeddings DB — separate writable file so the scripture DBs stay read-only
-// Pre-computed locally and committed via git-lfs; Railway never recomputes.
+// Verse Embeddings DB — separate file so scripture DBs stay read-only.
+// Pre-computed locally and committed via git-lfs; Railway just loads, never recomputes.
 let db_embed = null;
 if (!IS_ELECTRON_PKG) {
   try {
-    db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
-    db_embed.exec(`
-      CREATE TABLE IF NOT EXISTS verse_embeddings (
-        verse_id INTEGER PRIMARY KEY,
-        embedding BLOB NOT NULL
-      );
-    `);
+    if (SKIP_RECOMPUTE) {
+      // Production: open read-only (pre-built, never write)
+      db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'), { readonly: true, fileMustExist: true });
+    } else {
+      // Development: writable so local re-bake script can store results
+      db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
+      db_embed.exec(`
+        CREATE TABLE IF NOT EXISTS verse_embeddings (
+          verse_id INTEGER PRIMARY KEY,
+          embedding BLOB NOT NULL
+        );
+      `);
+    }
   } catch (err) {
     fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
   }
@@ -423,6 +433,23 @@ async function processBatchAsync(pipe, verses, offset) {
 async function initEmbeddings() {
   if (!db_embed) return; // no embeddings DB available
   try {
+    const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
+    const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
+
+    // Fast path: all embeddings pre-stored (production / post-local-bake) — skip model entirely
+    if (!REBUILD_EMBEDDINGS && existing >= total) {
+      fastify.log.info(`[Embeddings] ${existing}/${total} pre-stored — loading cache (no ML pipeline needed).`);
+      buildEmbeddingCache();
+      return;
+    }
+
+    // Only reach here in development when embeddings are missing or REBUILD_EMBEDDINGS=true
+    if (SKIP_RECOMPUTE) {
+      fastify.log.warn('[Embeddings] Production/Electron mode — cannot compute missing embeddings. Run scripts/compute-embeddings.js locally.');
+      if (existing > 0) buildEmbeddingCache();
+      return;
+    }
+
     fastify.log.info('[Embeddings] Loading pipeline…');
     const { pipeline } = await import('@xenova/transformers');
     const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
@@ -430,13 +457,6 @@ async function initEmbeddings() {
     if (REBUILD_EMBEDDINGS) {
       db_embed.prepare('DELETE FROM verse_embeddings').run();
       fastify.log.info('[Embeddings] Cleared for rebuild.');
-    }
-    const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
-    const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
-    if (existing >= total) {
-      fastify.log.info(`[Embeddings] ${existing}/${total} already stored — building cache.`);
-      buildEmbeddingCache();
-      return;
     }
     const embeddedIds = new Set(
       db_embed.prepare('SELECT verse_id FROM verse_embeddings').all().map(r => r.verse_id)
@@ -1578,8 +1598,8 @@ const start = async () => {
     await fastify.listen({ port, host: '0.0.0.0' })
     console.log(`Server running on ${port}`)
     // Initialize FTS in background so health checks can pass immediately.
-    // Skip in Electron — DBs are read-only (ASAR) and FTS tables are pre-built.
-    if (!IS_ELECTRON_PKG) {
+    // Skip in production/Electron — DBs are pre-built with FTS tables.
+    if (!SKIP_RECOMPUTE) {
     setImmediate(() => {
       const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
       const ftsOpts = { forceRebuild, log: fastify.log };
@@ -1593,9 +1613,11 @@ const start = async () => {
       if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
       if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
     });
-    // Initialize semantic embeddings in background (resume-safe: skips already-stored rows)
+    } else {
+      fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.');
+    }
+    // Load embedding cache (fast: just reads pre-stored data, never re-computes in production)
     setImmediate(() => initEmbeddings());
-    } // end !IS_ELECTRON_PKG
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
