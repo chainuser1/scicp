@@ -522,15 +522,15 @@ button,
 
   /* Scripture text: warm ivory — parchment-lit, not screen-white */
   --client-text:           rgba(248, 240, 222, 0.97);
-  --client-text-shadow-1:  rgba(0, 0, 0, 0.7);
-  --client-text-shadow-2:  rgba(0, 0, 0, 0.9);
+  --client-text-shadow-1:  rgba(0, 0, 0, 0.82);
+  --client-text-shadow-2:  rgba(0, 0, 0, 0.95);
 
   /* Backdrop: warm near-black — aged wood, not cold digital black */
-  --client-backdrop-solid: rgba(8, 5, 2, 0.44);
-  --client-backdrop-glass: linear-gradient(148deg, rgba(12, 7, 3, 0.36) 0%, rgba(6, 4, 2, 0.2) 100%);
-  --client-backdrop-strong-solid: rgba(4, 2, 1, 0.64);
-  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(4, 2, 1, 0.56) 0%, rgba(2, 1, 0, 0.38) 100%);
-  --client-backdrop-blur:  blur(9px) saturate(1.12) sepia(0.1);
+  --client-backdrop-solid: rgba(6, 3, 1, 0.62);
+  --client-backdrop-glass: linear-gradient(148deg, rgba(10, 6, 2, 0.58) 0%, rgba(6, 3, 1, 0.42) 100%);
+  --client-backdrop-strong-solid: rgba(3, 1, 0, 0.76);
+  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(3, 1, 0, 0.70) 0%, rgba(2, 1, 0, 0.54) 100%);
+  --client-backdrop-blur:  blur(12px) saturate(1.12) sepia(0.1);
   --client-backdrop-shadow: rgba(0, 0, 0, 0.65);
   --client-caption-text-shadow: 0 1px 2px rgba(0,0,0,0.92), 0 0 16px var(--client-accent-glow);
 
@@ -559,16 +559,16 @@ button,
   --client-highlight-glow: rgba(200, 140, 50, 0.3);
 
   /* Scripture text: deep sepia ink — the colour of words on vellum */
-  --client-text:           rgba(30, 16, 4, 0.94);
-  --client-text-shadow-1:  rgba(255, 235, 190, 0.25);
-  --client-text-shadow-2:  rgba(200, 160, 90, 0.15);
+  --client-text:           rgba(18, 8, 2, 0.97);
+  --client-text-shadow-1:  rgba(255, 240, 205, 0.55);
+  --client-text-shadow-2:  rgba(210, 175, 110, 0.35);
 
   /* Backdrop: warm ivory — a panel of aged paper before the scene */
-  --client-backdrop-solid: rgba(238, 224, 196, 0.68);
-  --client-backdrop-glass: linear-gradient(148deg, rgba(245, 233, 210, 0.72) 0%, rgba(232, 218, 192, 0.58) 100%);
-  --client-backdrop-strong-solid: rgba(230, 214, 184, 0.78);
-  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(238, 224, 198, 0.82) 0%, rgba(224, 208, 176, 0.68) 100%);
-  --client-backdrop-blur:  blur(10px) saturate(1.08) sepia(0.18) brightness(1.04);
+  --client-backdrop-solid: rgba(240, 226, 198, 0.82);
+  --client-backdrop-glass: linear-gradient(148deg, rgba(248, 236, 214, 0.86) 0%, rgba(236, 220, 192, 0.74) 100%);
+  --client-backdrop-strong-solid: rgba(234, 218, 188, 0.90);
+  --client-backdrop-strong-glass: linear-gradient(148deg, rgba(242, 228, 200, 0.92) 0%, rgba(228, 212, 180, 0.82) 100%);
+  --client-backdrop-blur:  blur(12px) saturate(1.08) sepia(0.18) brightness(1.04);
   --client-backdrop-shadow: rgba(80, 50, 10, 0.28);
   --client-caption-text-shadow: 0 1px 0 rgba(255,240,210,0.6), 0 0 10px rgba(200,150,60,0.18);
 
@@ -915,14 +915,16 @@ button,
   line-height: 1.52;
   color: var(--client-text);
   text-shadow:
-    0 2px 16px var(--client-text-shadow-1),
-    0 1px 3px var(--client-text-shadow-2);
+    0 2px 22px var(--client-text-shadow-1),
+    0 1px 4px var(--client-text-shadow-2),
+    0 0 1px var(--client-text-shadow-2);
 }
 
 .client-view.readability-strong p {
   text-shadow:
-    0 3px 20px var(--client-text-shadow-1),
-    0 1px 5px var(--client-text-shadow-2);
+    0 3px 28px var(--client-text-shadow-1),
+    0 1px 6px var(--client-text-shadow-2),
+    0 0 1px var(--client-text-shadow-2);
 }
 
 /* Dyslexia: heavier, upright, generous spacing — both themes */
@@ -5768,11 +5770,9 @@ button, [role="button"] {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 0.65rem;
   padding: 0.95rem 1.1rem;
-  display: grid;
-  grid-template-columns: 3rem 1fr;
-  grid-template-rows: auto auto auto;
-  column-gap: 0.8rem;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   transition: background 0.15s, border-color 0.15s;
 }
 .ctx-item:hover { background: rgba(201, 168, 76, 0.06); border-color: rgba(201, 168, 76, 0.22); }
@@ -5782,27 +5782,25 @@ button, [role="button"] {
 }
 
 .ctx-item-ref {
-  font-family: 'Cinzel', serif; font-size: 0.82rem; font-weight: 700;
-  color: var(--gold, #c9a84c); padding-top: 0.18rem;
-  grid-column: 1; grid-row: 1; line-height: 1.3;
+  font-family: 'Cinzel', serif; font-size: 0.78rem; font-weight: 700;
+  color: var(--gold, #c9a84c); line-height: 1.3;
+  margin-bottom: 0.38rem;
 }
 .ctx-item-text {
   font-family: 'Cormorant Garamond', serif; font-style: italic;
   font-size: 1.05rem; line-height: 1.62; color: var(--text-primary);
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
   overflow: hidden;
-  grid-column: 2; grid-row: 1;
 }
 .ctx-concept-tag {
   display: inline-block; font-size: 0.68rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.07em;
   color: var(--accent, #c9a84c); background: rgba(201, 168, 76, 0.14);
   border-radius: 0.3rem; padding: 0.12rem 0.45rem;
-  grid-column: 2; grid-row: 2; align-self: start; width: fit-content;
+  align-self: flex-start; width: fit-content;
   margin-top: 0.32rem;
 }
 .ctx-item-actions {
-  grid-column: 1 / -1; grid-row: 3;
   display: flex; gap: 0.5rem; flex-wrap: wrap;
   margin-top: 0.75rem;
   padding-top: 0.65rem;
