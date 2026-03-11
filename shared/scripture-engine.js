@@ -10,7 +10,6 @@
 // segmentVerseText, parseScriptureReference, etc.).
 
 const { BOOK_ABBREVIATIONS } = require('./data/book-abbreviations');
-const { DOCTRINE_ALIASES } = require('./data/doctrine-aliases');
 const { BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES, VOTD_POOL } = require('./data/citations');
 
 // ── Book name expansion ─────────────────────────────────────────────────────
