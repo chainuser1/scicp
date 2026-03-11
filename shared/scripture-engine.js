@@ -351,7 +351,47 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, db, log = null) => 
   return phraseSearch(input, page, pageSize, db, log);
 };
 
-// ── getAdjacentVerse ────────────────────────────────────────────────────────
+// ── topicSearch — find verses in a Topical Guide topic cluster ───────────────
+// tgDb: a DB adapter pointing at topical-guide.db
+// scriptureDb: a DB adapter pointing at lds-scriptures-sqlite.db (for verse data)
+// query: 1-3 word topic name or slug
+// Returns { results, total, matchedTopic } or null if no topic matched.
+const topicSearch = (query, page = 0, pageSize = 10, tgDb, scriptureDb) => {
+  if (!tgDb || !scriptureDb) return null;
+  const lower = query.toLowerCase().trim();
+  try {
+    // Try exact slug, exact name, prefix, then substring
+    const findTopic = (sql, ...params) => tgDb.prepare(sql).get(...params);
+    const topic =
+      findTopic('SELECT id, slug, name FROM topics WHERE slug = ? OR LOWER(name) = ? LIMIT 1', lower, lower) ??
+      findTopic('SELECT id, slug, name FROM topics WHERE slug LIKE ? OR LOWER(name) LIKE ? LIMIT 1', `${lower}%`, `${lower}%`) ??
+      findTopic('SELECT id, slug, name FROM topics WHERE slug LIKE ? OR LOWER(name) LIKE ? LIMIT 1', `%${lower}%`, `%${lower}%`);
+
+    if (!topic) return null;
+
+    const total = tgDb.prepare(
+      'SELECT COUNT(*) AS c FROM topical_guide WHERE topic_id = ? AND verse_id IS NOT NULL AND verse_id != -1'
+    ).get(topic.id)?.c ?? 0;
+    if (total === 0) return { results: [], total: 0, matchedTopic: topic.name };
+
+    const offset = page * pageSize;
+    const verseIds = tgDb.prepare(
+      'SELECT verse_id FROM topical_guide WHERE topic_id = ? AND verse_id IS NOT NULL AND verse_id != -1 LIMIT ? OFFSET ?'
+    ).all(topic.id, pageSize, offset).map(r => r.verse_id);
+
+    const stmt = scriptureDb.prepare(
+      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+    );
+    const results = verseIds
+      .map(vid => stmt.get(vid))
+      .filter(Boolean)
+      .map(row => ({ ...row, matched_concept: topic.name }));
+
+    return { results, total, matchedTopic: topic.name };
+  } catch (_) {
+    return null;
+  }
+};
 function getAdjacentVerse({ verse_id, book_id, chapter_number, verse_number, direction }, db, log = null) {
   const op = direction === 'next' ? '+' : '-';
 
@@ -578,6 +618,7 @@ module.exports = {
   browseVerses,
   initializeFts,
   getVerseOfTheDay,
+  topicSearch,
 
   // Re-export data for consumers that need raw access
   BOOK_ABBREVIATIONS,
