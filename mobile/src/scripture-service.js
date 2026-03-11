@@ -13,6 +13,7 @@ import {
   searchScripture,
   searchScriptureInDb,
   topicSearch,
+  phraseSearch,
   getAdjacentVerse,
   fetchVerseByCoords,
   browseBooks,
@@ -91,6 +92,75 @@ export function getAdjacent(verse, direction, language = 'en') {
   const adapter = resolveAdapter(language);
   if (!adapter) return null;
   return getAdjacentVerse({ ...verse, direction }, adapter);
+}
+
+// ── Related Verses (TG topic overlap, offline) ──────────────────────────────
+
+export function getRelated(verseId, language = 'en') {
+  const engAdapter = resolveAdapter('en');
+  if (!engAdapter) return { results: [], matchedConcept: null };
+  const tgRaw = getDb('tg');
+  if (!tgRaw) return { results: [], matchedConcept: null };
+  const tgAdapter = new SqlJsAdapter(tgRaw);
+
+  // Get topics for this verse
+  const liveTopicRows = tgAdapter.prepare(
+    'SELECT t.slug, t.name FROM topical_guide tg JOIN topics t ON t.id = tg.topic_id WHERE tg.verse_id = ? AND tg.verse_id != -1'
+  ).all(verseId);
+  if (!liveTopicRows.length) {
+    // No TG coverage — FTS phrase fallback
+    const meta = engAdapter.prepare('SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1').get(verseId);
+    if (!meta) return { results: [], matchedConcept: null };
+    const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
+    const log = { info: () => {}, warn: () => {}, error: console.error };
+    const { results } = phraseSearch(phrase, 0, 12, engAdapter, log);
+    return { results: results.filter(r => r.verse_id !== verseId), matchedConcept: null, fallback: true };
+  }
+
+  const liveSlugs = new Set(liveTopicRows.map(r => r.slug));
+  const matchedConcept = liveTopicRows[0]?.name ?? null;
+
+  // For each topic, fetch all verse_ids
+  const scoreMap = new Map();
+  for (const { slug } of liveTopicRows) {
+    const peers = tgAdapter.prepare(
+      'SELECT tg.verse_id FROM topical_guide tg JOIN topics t ON t.id = tg.topic_id WHERE t.slug = ? AND tg.verse_id IS NOT NULL AND tg.verse_id != -1'
+    ).all(slug);
+    for (const { verse_id: vid } of peers) {
+      if (vid === verseId) continue;
+      scoreMap.set(vid, (scoreMap.get(vid) ?? 0) + 1);
+    }
+  }
+
+  // Sort by overlap count desc, take top 12
+  const sorted = [...scoreMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const stmt = engAdapter.prepare(
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+  );
+  const results = sorted.map(([vid, overlap]) => {
+    const row = stmt.get(vid);
+    if (!row) return null;
+    // Find shared topic name
+    const shared = tgAdapter.prepare(
+      'SELECT t.name FROM topical_guide tg JOIN topics t ON t.id = tg.topic_id WHERE tg.verse_id = ? AND t.slug IN (' + [...liveSlugs].map(() => '?').join(',') + ') LIMIT 1'
+    ).get(vid, ...[...liveSlugs]);
+    return { ...row, matched_concept: shared?.name ?? null, similarity_score: +(overlap / liveSlugs.size).toFixed(4) };
+  }).filter(Boolean);
+
+  // Translate if needed
+  if (language !== 'en') {
+    const transAdapter = resolveAdapter(language);
+    if (transAdapter) {
+      return {
+        results: results.map(v => {
+          const trans = transAdapter.prepare('SELECT scripture_text FROM scriptures WHERE verse_id = ? LIMIT 1').get(v.verse_id);
+          return trans ? { ...v, scripture_text: trans.scripture_text } : v;
+        }),
+        matchedConcept,
+      };
+    }
+  }
+  return { results, matchedConcept };
 }
 
 // ── Verse of the Day ────────────────────────────────────────────────────────
