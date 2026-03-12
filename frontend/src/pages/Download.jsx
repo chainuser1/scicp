@@ -3,36 +3,36 @@ import Footer from '../components/Footer';
 
 const PLATFORM_META = [
   {
-    label: 'Android',
-    platform: 'android',
-    category: 'mobile',
-    icon: '📱',
-    note: 'For phones and tablets',
-    guide: ['Download the app file.', 'Tap the file and allow install when prompted.', 'Open the app and begin presenting scriptures.'],
-  },
-  {
     label: 'Windows',
     platform: 'windows',
     category: 'desktop',
     icon: '🪟',
-    note: 'For chapel and home PCs',
-    guide: ['Download the installer.', 'Open it and follow the on-screen steps.', 'Launch the app from Start and begin presenting.'],
-  },
-  {
-    label: 'Linux',
-    platform: 'linux',
-    category: 'desktop',
-    icon: '🐧',
-    note: 'For Linux desktop computers',
-    guide: ['Download the app package.', 'Install it using your system package/app tool.', 'Open the app from your applications menu.'],
+    note: 'Chapel computers & laptops',
+    guide: ['Download the installer.', 'Open it and follow the on-screen steps.', 'Launch from Start and begin presenting scriptures.'],
   },
   {
     label: 'Mac',
     platform: 'mac',
     category: 'desktop',
     icon: '🍎',
-    note: 'For MacBook and iMac',
+    note: 'MacBook and iMac',
     guide: ['Download the app file.', 'Open it and move the app to Applications.', 'Start the app and begin scripture display.'],
+  },
+  {
+    label: 'Linux',
+    platform: 'linux',
+    category: 'desktop',
+    icon: '🐧',
+    note: 'Linux desktop computers',
+    guide: ['Download the app package.', 'Install using your system package tool.', 'Open from your applications menu.'],
+  },
+  {
+    label: 'Android',
+    platform: 'android',
+    category: 'mobile',
+    icon: '📱',
+    note: 'Phones and tablets',
+    guide: ['Download the app file.', 'Tap it and allow installation when prompted.', 'Open and begin presenting scriptures.'],
   },
 ];
 
@@ -169,7 +169,7 @@ export default function Download() {
   }, []);
 
   const gatedMessage = useMemo(() => {
-    if (geoState.checking) return 'Verifying location and network integrity...';
+    if (geoState.checking) return 'Verifying location and network integrity…';
     if (!geoState.allowed) return geoState.reason || 'Access restricted.';
     return '';
   }, [geoState]);
@@ -182,126 +182,122 @@ export default function Download() {
     [downloadLinks]
   );
 
+  const [activeTab, setActiveTab] = useState('desktop');
+  const visiblePlatforms = activeTab === 'desktop' ? groupedDownloads.desktop : groupedDownloads.mobile;
+
   return (
-    <div className="home-page download-page">
-      <main className="home-hero">
-        <div className="home-emblem" aria-hidden="true">✦</div>
-        <p className="home-eyebrow">Download Center</p>
-        <h1 className="home-title">Offline App Downloads</h1>
-        <div className="home-divider" />
-        <p className="home-subtitle">
-          Simple and reverent tools for worship services, classes, and home scripture study.
+    <div className="dl-page">
+      {/* ── Hero ── */}
+      <section className="dl-hero" aria-labelledby="dl-hero-title">
+        <div className="dl-hero-glow" aria-hidden="true" />
+        <span className="dl-hero-emblem" aria-hidden="true">✦</span>
+        <p className="dl-hero-eyebrow">Scriptures in View</p>
+        <h1 className="dl-hero-title" id="dl-hero-title">Download the App</h1>
+        <p className="dl-hero-sub">
+          Present sacred scriptures beautifully — offline, for your chapel and home.
         </p>
-
-        {!geoState.allowed ? (
-          <section className="download-gate">
-            <h2>Restricted Access</h2>
-            <p>{gatedMessage}</p>
-          </section>
-        ) : (
-          <section className="download-panel">
-            <h2>Before You Download</h2>
-            <p className="download-agreement">
-              By downloading, you agree to use this application in full compliance with all applicable laws and regulations,
-              and only for non-commercial church and home use.
-            </p>
-            <label className="download-consent">
-              <input
-                type="checkbox"
-                checked={accepted}
-                onChange={(e) => setAccepted(e.target.checked)}
-              />
-                <span>I understand and accept this responsibility and usage policy.</span>
-            </label>
-            <p className="download-meta">{geoState.reason ? geoState.reason : `Latest release: ${releaseTag}`}</p>
-
-            <section className="download-steps" aria-label="How to use downloads">
-              <h3>How it works</h3>
-              <ol>
-                <li>Choose your device below.</li>
-                <li>Download and install the app.</li>
-                <li>Use it offline for church or home scripture use.</li>
-              </ol>
-            </section>
-
-            <section className="download-category">
-              <div className="download-category-head">
-                <h3 className="download-choose">Desktop App Downloads</h3>
-                <p>Choose Windows, Mac, or Linux for chapel computers and laptops.</p>
-              </div>
-              <div className="download-grid">
-                {groupedDownloads.desktop.map((item) => (
-                  <div key={item.platform} className="download-item">
-                    <div className="download-item-head">
-                      <span className="download-icon" aria-hidden="true">{item.icon}</span>
-                      <div className="download-item-title-wrap">
-                        <strong className="download-item-title">{item.label}</strong>
-                        <span className="download-item-note">{item.note}</span>
-                      </div>
-                    </div>
-                    <ol className="download-guide">
-                      {item.guide.map((step, i) => (
-                        <li key={step}><span className="download-step-num">{i + 1}</span><span>{step}</span></li>
-                      ))}
-                    </ol>
-                    <button
-                      type="button"
-                      className="download-btn"
-                      disabled={!accepted || !item.url}
-                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
-                    >
-                      Download for {item.label}
-                    </button>
-                    <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
-                    <details className="download-verify">
-                      <summary>File verification (advanced)</summary>
-                      <code className="download-sha">SHA256: {item.sha256}</code>
-                    </details>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="download-category">
-              <div className="download-category-head">
-                <h3 className="download-choose">Mobile App Download</h3>
-                <p>For phone and tablet scripture presentation.</p>
-              </div>
-              <div className="download-grid">
-                {groupedDownloads.mobile.map((item) => (
-                  <div key={item.platform} className="download-item">
-                    <div className="download-item-head">
-                      <span className="download-icon" aria-hidden="true">{item.icon}</span>
-                      <div className="download-item-title-wrap">
-                        <strong className="download-item-title">{item.label}</strong>
-                        <span className="download-item-note">{item.note}</span>
-                      </div>
-                    </div>
-                    <ol className="download-guide">
-                      {item.guide.map((step, i) => (
-                        <li key={step}><span className="download-step-num">{i + 1}</span><span>{step}</span></li>
-                      ))}
-                    </ol>
-                    <button
-                      type="button"
-                      className="download-btn"
-                      disabled={!accepted || !item.url}
-                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
-                    >
-                      Download for {item.label}
-                    </button>
-                    <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
-                    <details className="download-verify">
-                      <summary>File verification (advanced)</summary>
-                      <code className="download-sha">SHA256: {item.sha256}</code>
-                    </details>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </section>
+        {!geoState.checking && geoState.allowed && releaseTag !== 'fallback' && (
+          <span className="dl-version-chip">{releaseTag}</span>
         )}
-      </main>
+      </section>
+
+      {/* ── Body ── */}
+      <div className="dl-body">
+        {geoState.checking ? (
+          <div className="dl-status-card">
+            <span className="dl-status-icon" aria-hidden="true">◌</span>
+            <p>Verifying your location…</p>
+          </div>
+        ) : !geoState.allowed ? (
+          <div className="dl-status-card dl-status-card--blocked">
+            <span className="dl-status-icon" aria-hidden="true">⊘</span>
+            <p>{gatedMessage}</p>
+          </div>
+        ) : (
+          <>
+            {/* Agreement notice */}
+            <div className="dl-notice" role="region" aria-label="Usage agreement">
+              <p className="dl-notice-text">
+                This application is made available for non-commercial church and home use only.
+                By downloading, you agree to use it in compliance with all applicable laws.
+              </p>
+              <label className="dl-consent">
+                <input
+                  type="checkbox"
+                  checked={accepted}
+                  onChange={e => setAccepted(e.target.checked)}
+                />
+                <span>I understand and accept this usage policy.</span>
+              </label>
+              {geoState.reason && (
+                <p className="dl-caution">{geoState.reason}</p>
+              )}
+            </div>
+
+            {/* Platform tabs */}
+            <div className="dl-tabs" role="tablist" aria-label="Choose platform type">
+              <button
+                role="tab"
+                aria-selected={activeTab === 'desktop'}
+                className={`dl-tab${activeTab === 'desktop' ? ' dl-tab--active' : ''}`}
+                onClick={() => setActiveTab('desktop')}
+              >
+                <span aria-hidden="true">🖥</span> Desktop
+              </button>
+              <button
+                role="tab"
+                aria-selected={activeTab === 'mobile'}
+                className={`dl-tab${activeTab === 'mobile' ? ' dl-tab--active' : ''}`}
+                onClick={() => setActiveTab('mobile')}
+              >
+                <span aria-hidden="true">📱</span> Mobile
+              </button>
+            </div>
+
+            {/* Cards */}
+            <div className={`dl-grid dl-grid--${activeTab}`}>
+              {visiblePlatforms.map(item => (
+                <div key={item.platform} className="dl-card">
+                  <div className="dl-card-icon-wrap">
+                    <span className="dl-card-icon" aria-hidden="true">{item.icon}</span>
+                  </div>
+                  <h2 className="dl-card-title">{item.label}</h2>
+                  <p className="dl-card-note">{item.note}</p>
+                  <div className="dl-card-rule" aria-hidden="true" />
+                  <p className="dl-steps-label">How to get started</p>
+                  <ol className="dl-steps" aria-label={`Installation steps for ${item.label}`}>
+                    {item.guide.map((step, i) => (
+                      <li key={step} className="dl-step">
+                        <span className="dl-step-n" aria-hidden="true">{i + 1}</span>
+                        <span className="dl-step-text">{step}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="dl-card-footer">
+                    <button
+                      type="button"
+                      className="dl-btn"
+                      disabled={!accepted || !item.url}
+                      aria-disabled={!accepted || !item.url}
+                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                    >
+                      Download for {item.label}
+                    </button>
+                    <span className="dl-source">
+                      {item.source === 'release' ? `Latest · ${releaseTag}` : 'Fallback link'}
+                    </span>
+                    <details className="dl-verify">
+                      <summary>Verify file integrity</summary>
+                      <code className="dl-sha">SHA256: {item.sha256}</code>
+                    </details>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
       <Footer />
     </div>
   );
