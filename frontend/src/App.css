@@ -5863,6 +5863,127 @@ button, [role="button"] {
   .ctx-item-actions button { padding: 0.5rem 0.85rem; min-height: 2.4rem; font-size: 0.85rem; }
 }
 
+/* ── Context modal enhancements: scroll fade, back-to-top, chapter nav ── */
+
+/* Wrapper gives us a positioned ancestor for the overlay/button */
+.ctx-body-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ctx-body no longer needs flex:1 on its own — ctx-body-wrap handles it */
+.ctx-body-wrap > .ctx-body {
+  flex: 1;
+}
+
+/* Gradient glow that pulses downward, hinting there is more content */
+@keyframes ctx-fade-pulse {
+  0%   { opacity: 0.75; }
+  55%  { opacity: 1; }
+  100% { opacity: 0.75; }
+}
+.ctx-scroll-fade {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 4.5rem;
+  background: linear-gradient(to bottom, transparent, rgba(12, 8, 4, 0.92));
+  pointer-events: none;
+  animation: ctx-fade-pulse 2s ease-in-out infinite;
+  border-radius: 0 0 0.5rem 0.5rem;
+}
+
+/* Back-to-top floating button */
+.ctx-back-to-top {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: rgba(201, 168, 76, 0.18);
+  border: 1px solid rgba(201, 168, 76, 0.4);
+  color: var(--gold);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  z-index: 4;
+  animation: ctx-fade-in 0.2s ease;
+}
+.ctx-back-to-top:hover { background: rgba(201, 168, 76, 0.32); }
+@keyframes ctx-fade-in { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+
+/* Chapter navigation row */
+.ctx-chapter-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.12);
+  gap: 0.5rem;
+}
+.ctx-chapter-arrow {
+  background: rgba(201, 168, 76, 0.07);
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.4rem 0.85rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  min-height: 2.2rem;
+}
+.ctx-chapter-arrow:hover:not(:disabled) {
+  background: rgba(201, 168, 76, 0.16);
+  border-color: rgba(201, 168, 76, 0.45);
+}
+.ctx-chapter-arrow:disabled { opacity: 0.2; cursor: default; }
+.ctx-chapter-indicator {
+  font-family: 'Cinzel', serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  text-align: center;
+  flex: 1;
+}
+.ctx-chapter-indicator-of {
+  font-weight: 400;
+  opacity: 0.5;
+  font-size: 0.7rem;
+}
+
+/* Light theme overrides */
+.presenter-container--light .ctx-scroll-fade {
+  background: linear-gradient(to bottom, transparent, rgba(248, 245, 238, 0.95));
+}
+.presenter-container--light .ctx-back-to-top {
+  background: rgba(139, 58, 26, 0.1);
+  border-color: rgba(139, 58, 26, 0.3);
+  color: #8b3a1a;
+}
+.presenter-container--light .ctx-chapter-arrow {
+  background: rgba(139, 58, 26, 0.05);
+  border-color: rgba(139, 58, 26, 0.2);
+  color: #8b3a1a;
+}
+.presenter-container--light .ctx-chapter-indicator { color: #8b3a1a; }
+
+/* Mobile: larger touch targets for chapter arrows */
+@media (max-width: 600px) {
+  .ctx-chapter-arrow { min-height: 2.75rem; padding: 0.5rem 1rem; font-size: 0.8rem; }
+  .ctx-back-to-top { width: 2.6rem; height: 2.6rem; bottom: 1.5rem; font-size: 1.1rem; }
+}
+
 /* PIN status row inside session popover */
 .pin-status-label {
   font-size: 0.78rem;
