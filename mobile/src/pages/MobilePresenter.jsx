@@ -388,7 +388,9 @@ const MobilePresenter = () => {
   const [relatedVerses,  setRelatedVerses]  = useState([]);
   const [relatedConcept, setRelatedConcept] = useState(null);
   const [relatedPage,    setRelatedPage]    = useState(0);
-  // Topic navigation history inside the Related tab: [{label, verses, concept}]
+  const [relatedTotal,   setRelatedTotal]   = useState(0);
+  const [relatedBatchPage, setRelatedBatchPage] = useState(0);
+  // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
   // Floating word-explore chip: { word, top, left } | null
@@ -400,7 +402,7 @@ const MobilePresenter = () => {
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
-  const RELATED_PAGE_SIZE = 5;
+  const RELATED_PAGE_SIZE = 8;
 
   // Reset context cache when live verse changes
   useEffect(() => {
@@ -408,6 +410,8 @@ const MobilePresenter = () => {
     setRelatedVerses([]);
     setRelatedConcept(null);
     setRelatedPage(0);
+    setRelatedBatchPage(0);
+    setRelatedTotal(0);
     setCtxTopicHistory([]);
     setCtxTopicHistoryIdx(-1);
     setBookChapters([]);
@@ -832,10 +836,16 @@ const MobilePresenter = () => {
         const verses = svc.browse('verses', { chapterId }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
       } else if (tab === 'related' && !relatedVerses.length) {
-        const { results, matchedConcept: mc } = svc.getRelated(liveVerse.verse_id, currentLanguage);
-        setRelatedVerses(results ?? []);
+        const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
+        const allResults = results ?? [];
+        setRelatedVerses(allResults.slice(0, RELATED_PAGE_SIZE));
         setRelatedConcept(mc ?? null);
+        setRelatedBatchPage(0);
+        setRelatedTotal(allResults.length);
         setRelatedPage(0);
+        // store all results for page navigation (mobile frontend-paginated)
+        setCtxTopicHistory([{ label: mc ?? 'Related', concept: mc ?? 'Related', type: 'verse', payload: liveVerse.verse_id, verses: allResults, total: allResults.length, page: 0, pageSize: RELATED_PAGE_SIZE }]);
+        setCtxTopicHistoryIdx(0);
       }
     } catch (err) {
       console.error('openContextModal failed', err);
@@ -845,26 +855,44 @@ const MobilePresenter = () => {
   };
 
   // ── Topic drill-down inside Related tab (mobile/offline) ─────────────────
-  const loadTopicInModal = (topicLabel) => {
+  // Mobile uses frontend pagination: load all results, slice by batch page
+  const _mobileSetBatchFromAllVerses = (allVerses, label, concept, batchPage = 0) => {
+    const pageSlice = allVerses.slice(batchPage * RELATED_PAGE_SIZE, (batchPage + 1) * RELATED_PAGE_SIZE);
+    setRelatedVerses(pageSlice);
+    setRelatedConcept(concept);
+    setRelatedBatchPage(batchPage);
+    setRelatedTotal(allVerses.length);
+    setRelatedPage(0);
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+  };
+
+  const loadTopicInModal = (topicLabel, batchPage = 0) => {
     if (!topicLabel) return;
     setContextLoading(true);
     try {
-      const data = svc.search(topicLabel, 0, 30, currentLanguage);
-      const verses = data?.results ?? [];
-      const newEntry = { label: topicLabel, verses, concept: topicLabel };
+      const data = svc.search(topicLabel, 0, 50, currentLanguage);
+      const allVerses = data?.results ?? [];
+      const newEntry = { label: topicLabel, concept: topicLabel, type: 'topic', payload: topicLabel, verses: allVerses, total: allVerses.length, page: batchPage, pageSize: RELATED_PAGE_SIZE };
       setCtxTopicHistory(prev => {
         const base = ctxTopicHistoryIdx >= 0 ? prev.slice(0, ctxTopicHistoryIdx + 1) : [];
         const next = [...base, newEntry];
         setCtxTopicHistoryIdx(next.length - 1);
         return next;
       });
-      setRelatedVerses(verses);
-      setRelatedConcept(topicLabel);
-      setRelatedPage(0);
-      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+      _mobileSetBatchFromAllVerses(allVerses, topicLabel, topicLabel, batchPage);
     } finally {
       setContextLoading(false);
     }
+  };
+
+  // Navigate to a different batch within the current history entry (mobile frontend-paginated)
+  const loadHistoryPage = (batchPage) => {
+    const entry = ctxTopicHistory[ctxTopicHistoryIdx];
+    if (!entry) return;
+    const allVerses = entry.verses;
+    const updated = { ...entry, page: batchPage };
+    setCtxTopicHistory(prev => prev.map((e, i) => i === ctxTopicHistoryIdx ? updated : e));
+    _mobileSetBatchFromAllVerses(allVerses, entry.label, entry.concept, batchPage);
   };
 
   const ctxTopicBack = () => {
@@ -872,10 +900,7 @@ const MobilePresenter = () => {
     if (newIdx < 0) return;
     const entry = ctxTopicHistory[newIdx];
     setCtxTopicHistoryIdx(newIdx);
-    setRelatedVerses(entry.verses);
-    setRelatedConcept(entry.concept);
-    setRelatedPage(0);
-    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
   };
 
   const ctxTopicForward = () => {
@@ -883,31 +908,26 @@ const MobilePresenter = () => {
     if (newIdx >= ctxTopicHistory.length) return;
     const entry = ctxTopicHistory[newIdx];
     setCtxTopicHistoryIdx(newIdx);
-    setRelatedVerses(entry.verses);
-    setRelatedConcept(entry.concept);
-    setRelatedPage(0);
-    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
   };
 
   // ── Drill into a specific verse's related verses (mobile/offline) ─────────
-  const drillIntoVerse = (verse) => {
+  const drillIntoVerse = (verse, batchPage = 0) => {
     setContextLoading(true);
     setCtxWordChip(null);
     try {
       const data = svc.getRelated(verse.verse_id, currentLanguage);
-      const verses = data?.results ?? [];
+      const allVerses = data?.results ?? [];
       const label = verse.verse_title || `${verse.book_title} ${verse.chapter_number}:${verse.verse_number}`;
-      const newEntry = { label, verses, concept: data?.matchedConcept ?? label };
+      const concept = data?.matchedConcept ?? label;
+      const newEntry = { label, concept, type: 'verse', payload: verse.verse_id, verses: allVerses, total: allVerses.length, page: batchPage, pageSize: RELATED_PAGE_SIZE };
       setCtxTopicHistory(prev => {
         const base = ctxTopicHistoryIdx >= 0 ? prev.slice(0, ctxTopicHistoryIdx + 1) : [];
         const next = [...base, newEntry];
         setCtxTopicHistoryIdx(next.length - 1);
         return next;
       });
-      setRelatedVerses(verses);
-      setRelatedConcept(data?.matchedConcept ?? label);
-      setRelatedPage(0);
-      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+      _mobileSetBatchFromAllVerses(allVerses, label, concept, batchPage);
     } finally {
       setContextLoading(false);
     }
@@ -978,6 +998,8 @@ const MobilePresenter = () => {
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
     setRelatedConcept(null);
+    setRelatedBatchPage(0);
+    setRelatedTotal(0);
     setCtxTopicHistory([]);
     setCtxTopicHistoryIdx(-1);
     setChapterVerses([]);   // force re-fetch chapter verses in new language
@@ -2284,12 +2306,11 @@ const MobilePresenter = () => {
                 ) : (
                   <>
                     {(() => {
-                      const totalRelPages = Math.ceil(relatedVerses.length / RELATED_PAGE_SIZE);
-                      const relSlice = relatedVerses.slice(relatedPage * RELATED_PAGE_SIZE, (relatedPage + 1) * RELATED_PAGE_SIZE);
+                      const totalRelPages = relatedTotal > 0 ? Math.ceil(relatedTotal / RELATED_PAGE_SIZE) : 1;
                       return (
                         <>
                           {/* Topic history nav bar */}
-                          {ctxTopicHistory.length > 0 && (
+                          {ctxTopicHistory.length > 1 && (
                             <div className="ctx-topic-nav">
                               <button
                                 className="ctx-topic-nav-btn"
@@ -2310,18 +2331,18 @@ const MobilePresenter = () => {
                               >▶</button>
                             </div>
                           )}
-                          {relatedPage > 0 && (
-                            <button className="batch-nav batch-nav--prev" onClick={() => setRelatedPage(p => p - 1)}>
+                          {relatedBatchPage > 0 && (
+                            <button className="batch-nav batch-nav--prev" onClick={() => loadHistoryPage(relatedBatchPage - 1)}>
                               ▲ <span>Prev batch</span>
                             </button>
                           )}
                           {totalRelPages > 1 && (
-                            <div className="batch-indicator">Batch {relatedPage + 1} of {totalRelPages}</div>
+                            <div className="batch-indicator">Batch {relatedBatchPage + 1} of {totalRelPages}</div>
                           )}
                           <ul className="ctx-list">
                             {relatedVerses.length === 0
                               ? <li className="ctx-empty">No related verses found.</li>
-                              : relSlice.map(v => (
+                              : relatedVerses.map(v => (
                                   <li key={v.verse_id} className="ctx-item">
                                     <span className="ctx-item-ref">{v.verse_title}</span>
                                     <span className="ctx-item-text">{v.scripture_text}</span>
@@ -2344,8 +2365,8 @@ const MobilePresenter = () => {
                                 ))
                             }
                           </ul>
-                          {relatedPage < totalRelPages - 1 && (
-                            <button className="batch-nav batch-nav--next" onClick={() => setRelatedPage(p => p + 1)}>
+                          {relatedBatchPage < totalRelPages - 1 && (
+                            <button className="batch-nav batch-nav--next" onClick={() => loadHistoryPage(relatedBatchPage + 1)}>
                               ▼ <span>Next batch</span>
                             </button>
                           )}
