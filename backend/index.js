@@ -666,11 +666,11 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
-  if (!language || !['tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language.toLowerCase())) {
+  if (!language || !['en', 'tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language.toLowerCase())) {
     reply.code(400);
-    return { error: 'language must be tl, ceb, es, el, ilo, ja, nrsvue or war' };
+    return { error: 'language must be en, tl, ceb, es, el, ilo, ja, nrsvue or war' };
   }
-  const targetDb = resolveDbAdapter(language);
+  const targetDb = language.toLowerCase() === 'en' ? dba : resolveDbAdapter(language);
   try {
     // Resolve coordinates from the KJV DB so non-KJV versification (e.g. Japanese) is handled correctly.
     const coords = dba.prepare(

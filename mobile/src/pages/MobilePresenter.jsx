@@ -882,8 +882,16 @@ const MobilePresenter = () => {
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
     setRelatedConcept(null);
+    setExpandedTranslations(new Set());
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    // Update staged verse text to the new language
+    if (staged) {
+      try {
+        const row = svc.getVerse({ verse_id: staged.verse_id }, lang);
+        if (row?.scripture_text) setStaged(prev => prev ? { ...prev, scripture_text: row.scripture_text } : prev);
+      } catch (_) {}
+    }
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
@@ -903,8 +911,15 @@ const MobilePresenter = () => {
     const newSecondary = currentLanguage;
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
+    setExpandedTranslations(new Set());
     emitWithSession('update-language', { language: newPrimary });
     if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    if (staged) {
+      try {
+        const row = svc.getVerse({ verse_id: staged.verse_id }, newPrimary);
+        if (row?.scripture_text) setStaged(prev => prev ? { ...prev, scripture_text: row.scripture_text } : prev);
+      } catch (_) {}
+    }
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
@@ -990,10 +1005,10 @@ const MobilePresenter = () => {
     if (!translationCache[cacheKey]) {
       try {
         const row = svc.getVerse({ verse_id }, targetLang);
-        if (row?.scripture_text) {
-          setTranslationCache(c => ({ ...c, [cacheKey]: row.scripture_text }));
-        }
-      } catch { /* ignore */ }
+        setTranslationCache(c => ({ ...c, [cacheKey]: row?.scripture_text || '(translation unavailable)' }));
+      } catch {
+        setTranslationCache(c => ({ ...c, [cacheKey]: '(translation unavailable)' }));
+      }
     }
   };
 
