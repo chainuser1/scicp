@@ -1132,7 +1132,7 @@ const Presenter = () => {
           setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
         }
       } else if (tab === 'related' && !relatedVerses.length) {
-        const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related`);
+        const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?language=${currentLanguage}`);
         if (res.ok) {
           const d = await res.json();
           setRelatedVerses(d.results ?? []);
@@ -1195,6 +1195,8 @@ const Presenter = () => {
   const handleLanguageChange = e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
+    setRelatedVerses([]);   // force re-fetch in new language when modal reopened
+    setRelatedConcept(null);
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
     // Re-run the current search in the new language so results update immediately

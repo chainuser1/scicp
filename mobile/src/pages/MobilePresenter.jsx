@@ -880,6 +880,8 @@ const MobilePresenter = () => {
   const handleLanguageChange = e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
+    setRelatedVerses([]);   // force re-fetch in new language when modal reopened
+    setRelatedConcept(null);
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
     // Re-run the current search in the new language so results update immediately
