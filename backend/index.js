@@ -36,24 +36,22 @@ try { db_tg = require('better-sqlite3')(path.join(DB_DIR, 'topical-guide.db'), {
 // Verse Embeddings DB — separate file so scripture DBs stay read-only.
 // Pre-computed locally and committed via git-lfs; Railway just loads, never recomputes.
 let db_embed = null;
-if (!IS_ELECTRON_PKG) {
-  try {
-    if (SKIP_RECOMPUTE) {
-      // Production: open read-only (pre-built, never write)
-      db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'), { readonly: true, fileMustExist: true });
-    } else {
-      // Development: writable so local re-bake script can store results
-      db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
-      db_embed.exec(`
-        CREATE TABLE IF NOT EXISTS verse_embeddings (
-          verse_id INTEGER PRIMARY KEY,
-          embedding BLOB NOT NULL
-        );
-      `);
-    }
-  } catch (err) {
-    fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
+try {
+  if (SKIP_RECOMPUTE) {
+    // Production/Electron: open read-only (pre-built, never write)
+    db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'), { readonly: true, fileMustExist: true });
+  } else {
+    // Development: writable so local re-bake script can store results
+    db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
+    db_embed.exec(`
+      CREATE TABLE IF NOT EXISTS verse_embeddings (
+        verse_id INTEGER PRIMARY KEY,
+        embedding BLOB NOT NULL
+      );
+    `);
   }
+} catch (err) {
+  fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
 }
 
 // ── Wrapped adapters for the shared scripture engine ─────────────────────────

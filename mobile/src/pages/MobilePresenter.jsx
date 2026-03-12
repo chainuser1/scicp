@@ -1246,7 +1246,7 @@ const MobilePresenter = () => {
     setDrawerTab('search');
     setDrawerOpen(true);
   };
-  const presenterThemeClass = currentTheme === themes.dark
+  const presenterThemeClass = currentTheme?.tone === 'dark'
     ? 'presenter-container--dark'
     : 'presenter-container--light';
 
