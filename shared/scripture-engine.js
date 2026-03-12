@@ -9,7 +9,7 @@
 // Functions that don't touch the DB are pure helpers (expandBookName,
 // segmentVerseText, parseScriptureReference, etc.).
 
-const { BOOK_ABBREVIATIONS } = require('./data/book-abbreviations');
+const { BOOK_ABBREVIATIONS, CANONICAL_BOOK_IDS } = require('./data/book-abbreviations');
 const { BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES, VOTD_POOL } = require('./data/citations');
 
 // ── Book name expansion ─────────────────────────────────────────────────────
@@ -346,6 +346,29 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, db, log = null) => 
         : [ref.book, ref.chapter, pageSize, offset]));
 
       if (rows.length > 0 || total > 0) return { results: rows, total };
+
+      // Fallback: look up by canonical book_id (handles cross-language refs,
+      // e.g. "Numbers" typed while viewing a Tagalog DB that stores "Mga Bilang").
+      const bookId = CANONICAL_BOOK_IDS[ref.book.toLowerCase()];
+      if (bookId) {
+        const fbCount = db.prepare(`
+          SELECT COUNT(*) AS total FROM scriptures
+          WHERE book_id = ? AND chapter_number = ?
+          ${ref.verse !== null ? 'AND verse_number = ?' : ''}
+          LIMIT 200
+        `).get(...(ref.verse !== null ? [bookId, ref.chapter, ref.verse] : [bookId, ref.chapter]))?.total ?? 0;
+        const fbRows = db.prepare(`
+          SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
+                 scripture_text, verse_title, verse_short_title, verse_id
+          FROM scriptures
+          WHERE book_id = ? AND chapter_number = ?
+          ${ref.verse !== null ? 'AND verse_number = ?' : ''}
+          ORDER BY verse_id ASC LIMIT ? OFFSET ?
+        `).all(...(ref.verse !== null
+          ? [bookId, ref.chapter, ref.verse, pageSize, offset]
+          : [bookId, ref.chapter, pageSize, offset]));
+        if (fbRows.length > 0 || fbCount > 0) return { results: fbRows, total: fbCount };
+      }
     } catch (_e) { /* fall through to phrase search */ }
   }
 
@@ -623,6 +646,7 @@ module.exports = {
 
   // Re-export data for consumers that need raw access
   BOOK_ABBREVIATIONS,
+  CANONICAL_BOOK_IDS,
   BIBLE_CITATIONS,
   TRIPLE_CITATIONS,
   LANGUAGE_NAMES,
