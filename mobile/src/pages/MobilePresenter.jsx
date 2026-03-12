@@ -934,15 +934,27 @@ const MobilePresenter = () => {
     setRelatedConcept(null);
     setCtxTopicHistory([]);
     setCtxTopicHistoryIdx(-1);
+    setChapterVerses([]);   // force re-fetch chapter verses in new language
     setExpandedTranslations(new Set());
     emitWithSession('update-language', { language: lang });
-    if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    // Update live verse text directly (handles offline / no session case)
+    if (liveVerse) {
+      try {
+        const row = svc.getVerse({ verse_id: liveVerse.verse_id }, lang);
+        if (row?.scripture_text) setLiveVerse(prev => prev ? { ...prev, scripture_text: row.scripture_text, segments: null, language: lang } : prev);
+      } catch (_) {}
+      emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    }
     // Update staged verse text to the new language
     if (staged) {
       try {
         const row = svc.getVerse({ verse_id: staged.verse_id }, lang);
         if (row?.scripture_text) setStaged(prev => prev ? { ...prev, scripture_text: row.scripture_text } : prev);
       } catch (_) {}
+    }
+    // Re-fetch chapter tab if modal is open on chapter tab
+    if (contextOpen && contextTab === 'chapter' && liveVerse) {
+      openContextModal('chapter');
     }
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
@@ -964,8 +976,18 @@ const MobilePresenter = () => {
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
     setExpandedTranslations(new Set());
+    setChapterVerses([]);
+    setRelatedVerses([]);
+    setCtxTopicHistory([]);
+    setCtxTopicHistoryIdx(-1);
     emitWithSession('update-language', { language: newPrimary });
-    if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    if (liveVerse) {
+      try {
+        const row = svc.getVerse({ verse_id: liveVerse.verse_id }, newPrimary);
+        if (row?.scripture_text) setLiveVerse(prev => prev ? { ...prev, scripture_text: row.scripture_text, segments: null, language: newPrimary } : prev);
+      } catch (_) {}
+      emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    }
     if (staged) {
       try {
         const row = svc.getVerse({ verse_id: staged.verse_id }, newPrimary);
