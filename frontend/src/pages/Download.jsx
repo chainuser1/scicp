@@ -30,6 +30,17 @@ export default function Download() {
 
   useEffect(() => {
     document.title = 'Downloads | Scriptures in View';
+    const metaDesc = document.querySelector('meta[name="description"]');
+    const description = 'Download offline Scriptures in View apps for Android, Windows, Linux, and Mac. Non-commercial church and home use only.';
+    if (metaDesc) metaDesc.setAttribute('content', description);
+    else {
+      const meta = document.createElement('meta');
+      meta.name = 'description';
+      meta.content = description;
+      document.head.appendChild(meta);
+    }
+    const robotsMeta = document.querySelector('meta[name="robots"]');
+    if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
     const canonical = document.querySelector('link[rel="canonical"]');
     if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/download');
   }, []);
@@ -124,4 +135,3 @@ export default function Download() {
     </div>
   );
 }
-
