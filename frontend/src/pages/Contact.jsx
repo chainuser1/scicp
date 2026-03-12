@@ -51,7 +51,7 @@ function Contact() {
 
         <main className="contact-content">
           <p>
-            <a href="mailto:contact@scicp.dev">contact@scicp.dev</a>
+            <a href="mailto:lumpsam47@gmail.com">lumpsam47@gmail.com</a>
           </p>
           <p>
             Team: Dagami Ward Dev

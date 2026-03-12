@@ -16,8 +16,8 @@ export default function Footer() {
       <nav className="home-footer-links" style={{display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '0.3rem', fontSize: '0.68rem'}}>
         <ul style={{display: 'flex', flexWrap: 'wrap', gap: '0.3rem', margin: 0, padding: 0, listStyle: 'none'}}>
           <li><Link to="/">Home</Link></li>
-          <li><Link to="/presenter">Chapel Control</Link></li>
-          <li><Link to="/client">Sacred Display</Link></li>
+          <li><Link to="/presenter">Present</Link></li>
+          <li><Link to="/client">Display</Link></li>
           <li><Link to="/about">About</Link></li>
           <li><Link to="/download">Downloads</Link></li>
           <li><Link to="/contact">Contact</Link></li>

@@ -2736,8 +2736,8 @@ const Presenter = () => {
       <footer className="presenter-footer">
         <nav className="presenter-footer-links">
           <a href="/">Home</a>
-          <a href="/presenter">Chapel Control</a>
-          <a href="/client">Sacred Display</a>
+          <a href="/presenter">Present</a>
+          <a href="/client">Display</a>
           <a href="/about">About</a>
           <a href="/contact">Contact</a>
           <a href="/privacy">Privacy Policy</a>
