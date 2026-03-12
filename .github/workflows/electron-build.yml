@@ -53,7 +53,7 @@ jobs:
         run: npm run build --workspace=frontend
 
       - name: Build Electron (${{ matrix.platform }})
-        run: npx electron-builder --${{ matrix.platform }} --publish always
+        run: npx electron-builder --${{ matrix.platform }} --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -67,3 +67,16 @@ jobs:
             dist-electron/*.AppImage
             dist-electron/*.dmg
           if-no-files-found: ignore
+
+      - name: Publish desktop installers to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-electron/*.exe
+            dist-electron/*.deb
+            dist-electron/*.AppImage
+            dist-electron/*.dmg
+          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
