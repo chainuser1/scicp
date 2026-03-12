@@ -106,11 +106,15 @@ describe('Backend API Tests', () => {
       if (db) db.close();
     });
 
-    test('2026 uses OT + Moses/Abraham grouping', () => {
-      const v = getVerseOfTheDay(db, new Date(Date.UTC(2026, 0, 7)));
+    test('2026 week 11 uses Genesis 37–41 weekly block', () => {
+      const v = getVerseOfTheDay(db, new Date(Date.UTC(2026, 2, 12)));
       expect(v).toBeTruthy();
-      expect(inOtGroup(v)).toBe(true);
+      expect((v.book_title || '').toLowerCase()).toBe('genesis');
+      expect(Number(v.chapter_number)).toBeGreaterThanOrEqual(37);
+      expect(Number(v.chapter_number)).toBeLessThanOrEqual(41);
       expect(v.cfm_group).toBe('ot');
+      expect(v.cfm_week).toBe(11);
+      expect(v.cfm_block).toBe('Genesis 37–41');
     });
 
     test('2028 uses Book of Mormon grouping', () => {
