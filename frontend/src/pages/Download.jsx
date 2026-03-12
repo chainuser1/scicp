@@ -6,21 +6,25 @@ const DOWNLOAD_LINKS = [
     label: 'Android (Offline App)',
     platform: 'android',
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000059743/artifacts/5889562783',
+    sha256: '11a670361a6426981391d5250895d06977a99b697480127ff1cd4b0c4463a604',
   },
   {
     label: 'Windows Installer',
     platform: 'windows',
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889590639',
+    sha256: '4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd',
   },
   {
     label: 'Linux Installer',
     platform: 'linux',
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
+    sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
   },
   {
     label: 'Mac Installer',
     platform: 'mac',
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889569130',
+    sha256: 'ec5d380ce6200833887d8d5c5ae8403644b9829d62d80265d44bcd20453f77b2',
   },
 ];
 
@@ -117,15 +121,17 @@ export default function Download() {
 
             <div className="download-grid">
               {DOWNLOAD_LINKS.map((item) => (
-                <button
-                  key={item.platform}
-                  type="button"
-                  className="download-btn"
-                  disabled={!accepted}
-                  onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
-                >
-                  {item.label}
-                </button>
+                <div key={item.platform} className="download-item">
+                  <button
+                    type="button"
+                    className="download-btn"
+                    disabled={!accepted}
+                    onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                  >
+                    {item.label}
+                  </button>
+                  <code className="download-sha">SHA256: {item.sha256}</code>
+                </div>
               ))}
             </div>
           </section>

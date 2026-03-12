@@ -1,47 +1,29 @@
 # Scriptures in View (scicp)
 
-A real-time scripture projection engine for church and worship services. A **Presenter** operator searches and pushes verses live to a **Client** TV/display screen via WebSockets.
+Scriptures in View is a scripture presentation app for church worship, lessons, talks, and home study.  
+One person controls the verses, and the congregation sees a clean display screen.
 
-**Desktop app** (Electron) works fully offline with an embedded server. **Web app** runs on any browser. **Mobile app** (PWA/Android) works offline via bundled SQLite databases.
+Built and maintained by **Dagami Ward Dev**.
 
 ---
 
-## Features
+## What the app can do
 
-### Search
-- **Exact scripture reference** — `John 3:16`, `1 Ne 1:1`, `D&C 76:4`, `1 ne 1 1` (space-separated)
-- **Topical Guide search** — single words or phrases matching any of the 3,512 LDS Topical Guide topics (e.g. `faith`, `missionary work`, `baptism for the dead`) return the authoritative verse cluster
-- **Phrase / keyword FTS5** — full-text search with BM25 ranking across all 41,995 verses
-- **Multi-language search** — search in any of 9 languages; non-English uses FTS5 against that language's DB
+- Search scripture references quickly (example: `John 3:16`)
+- Search by topic and related ideas
+- Stage verses first, then send them live to the display
+- Show primary and secondary language together
+- Move to previous/next verse or segment for long passages
+- Highlight words or phrases during teaching
+- Save visual themes and prepared verse lists
+- Run on Web, Desktop, and Android, including offline use
 
-### Presentation
-- **Live push** — Presenter pushes the current verse to all connected Client screens in real time
-- **Dual-language display** — show a primary and secondary language side by side
-- **Segment navigation** — long verses auto-split into 200-word segments; Presenter navigates forward/back
-- **Verse navigation** — previous/next verse within the same chapter
-- **Highlight mode** — highlight a word or phrase on the Client screen
-- **Clear screen** — blank the Client display between slides
-- **Go Live toggle** — hold a verse in staging before pushing it live
+---
 
-### Context Modal
-- **Chapter tab** — browse all verses in the same chapter
-- **Related tab** — verses sharing Topical Guide topic clusters with the live verse, scored by overlap; powered by ML embeddings as a secondary signal
-- **Translation tab** — same verse in any of the 9 supported languages
+## Allowed Use
 
-### Themes & Sets
-- **Custom themes** — font, size, color, background, gradient, blur, overlay opacity — saved to SQLite
-- **Set lists** — create ordered playlists of verses for a service; push any verse in the set with one click
-
-### Session Management
-- **Multi-client** — unlimited Client viewers per session
-- **QR code** — scan to open the Client display URL on any device
-- **Session grace period** — sessions survive presenter disconnections for 30 minutes
-- **Presenter takeover protection** — a second Presenter gets a confirmation prompt before taking over
-
-### Platforms
-- **Web** — hosted on Railway, served as a static SPA + WebSocket backend
-- **Desktop** — Electron app with embedded server; auto-updates via GitHub Releases; dual-monitor support (Presenter on primary, Client on secondary)
-- **Mobile / PWA** — offline-capable Android APK and installable PWA; all 9 scripture databases bundled; Topical Guide included
+This software is for **non-commercial church use and home use only**.  
+Users are responsible for using the app in accordance with applicable laws and regulations.
 
 ---
 
@@ -90,6 +72,12 @@ npm run electron:build:linux     # Linux (AppImage + .deb)
 
 Installers are written to `dist-electron/`.
 
+### Release Checksum Digests
+
+- Windows SHA256: `4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd`
+- Linux SHA256: `e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4`
+- Mac SHA256: `ec5d380ce6200833887d8d5c5ae8403644b9829d62d80265d44bcd20453f77b2`
+
 ### Auto-Updates
 
 The desktop app checks for updates on startup. Updates are published to [GitHub Releases](https://github.com/chainuser1/scicp/releases). On Linux AppImage, the app directs you to the releases page instead.
@@ -113,6 +101,8 @@ npx cap open android   # open in Android Studio
 ```
 
 The mobile app is a fully offline PWA/Android app. All 9 scripture databases and the Topical Guide are bundled as static assets loaded via sql.js WASM.
+
+- Android SHA256: `11a670361a6426981391d5250895d06977a99b697480127ff1cd4b0c4463a604`
 
 ---
 
@@ -195,4 +185,3 @@ For developer workspace details, see [`.github/copilot-instructions.md`](.github
 ## License
 
 ISC
-
