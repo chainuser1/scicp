@@ -6,6 +6,7 @@ import About from './pages/About';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import Download from './pages/Download';
 import './App.css';
 import Footer from './components/Footer';
 
@@ -129,6 +130,7 @@ function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/terms" element={<Terms />} />
+        <Route path="/download" element={<Download />} />
       </Routes>
     </Router>
   );
