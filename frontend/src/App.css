@@ -6634,11 +6634,13 @@ button, [role="button"] {
 .download-page .download-panel {
   width: min(820px, 100%);
   margin-top: 1.2rem;
-  border: 1px solid rgba(201, 168, 76, 0.35);
-  border-radius: 16px;
-  padding: 1rem 1.1rem;
-  background: linear-gradient(180deg, rgba(16, 13, 20, 0.92), rgba(10, 9, 14, 0.95));
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42), inset 0 0 0 1px rgba(232, 201, 122, 0.08);
+  border: 1px solid rgba(201, 168, 76, 0.3);
+  border-radius: 20px;
+  padding: 1.25rem 1.25rem;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(232, 201, 122, 0.1), transparent 60%),
+    linear-gradient(180deg, rgba(16, 13, 20, 0.96), rgba(9, 8, 13, 0.97));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(232, 201, 122, 0.06);
 }
 
 .download-page .download-gate h2,
@@ -6672,6 +6674,31 @@ button, [role="button"] {
   color: #cdbb87;
 }
 
+.download-page .download-steps {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.download-page .download-steps h3,
+.download-page .download-choose {
+  margin: 0 0 0.4rem;
+  color: #ead39b;
+  font-family: "Cinzel", serif;
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+}
+
+.download-page .download-steps ol {
+  margin: 0.1rem 0 0;
+  padding-left: 1.1rem;
+  color: #e7dcc0;
+  line-height: 1.65;
+  font-size: 0.86rem;
+}
+
 .download-page .download-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -6686,10 +6713,10 @@ button, [role="button"] {
 
 .download-page .download-btn {
   border: 1px solid rgba(201, 168, 76, 0.5);
-  background: radial-gradient(circle at top, rgba(56, 40, 18, 0.95), rgba(31, 24, 14, 0.95));
+  background: linear-gradient(180deg, rgba(72, 52, 22, 0.96), rgba(35, 25, 13, 0.96));
   color: #f5e6bf;
   border-radius: 12px;
-  padding: 0.75rem 0.9rem;
+  padding: 0.78rem 0.92rem;
   font-weight: 700;
   cursor: pointer;
   transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
