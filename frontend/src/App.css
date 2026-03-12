@@ -5972,6 +5972,31 @@ button, [role="button"] {
   font-size: 0.7rem;
 }
 
+/* Chapter slide transition */
+@keyframes ctx-chapter-enter-from-right {
+  from { opacity: 0; transform: translateX(28px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes ctx-chapter-enter-from-left {
+  from { opacity: 0; transform: translateX(-28px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ctx-list--enter {
+  animation: ctx-chapter-enter-from-right 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ctx-list--exit-next {
+  opacity: 0;
+  transform: translateX(-28px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+.ctx-list--exit-prev {
+  opacity: 0;
+  transform: translateX(28px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+}
+
 /* Light theme overrides */
 .presenter-container--light .ctx-scroll-fade {
   background: linear-gradient(to bottom, transparent, rgba(248, 245, 238, 0.95));
