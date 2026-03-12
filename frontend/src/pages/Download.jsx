@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Footer from '../components/Footer';
 
 const PLATFORM_META = [
-  { label: 'Android (Offline App)', platform: 'android' },
-  { label: 'Windows Installer', platform: 'windows' },
-  { label: 'Linux Installer', platform: 'linux' },
-  { label: 'Mac Installer', platform: 'mac' },
+  { label: 'Android', platform: 'android', icon: '📱', note: 'Best for phones and tablets' },
+  { label: 'Windows', platform: 'windows', icon: '🪟', note: 'Best for chapel and home PCs' },
+  { label: 'Linux', platform: 'linux', icon: '🐧', note: 'For Linux desktop computers' },
+  { label: 'Mac', platform: 'mac', icon: '🍎', note: 'For MacBook and iMac devices' },
 ];
 
 const FALLBACK_BY_PLATFORM = {
@@ -151,10 +151,10 @@ export default function Download() {
       <main className="home-hero">
         <div className="home-emblem" aria-hidden="true">✦</div>
         <p className="home-eyebrow">Download Center</p>
-        <h1 className="home-title">Get the App</h1>
+        <h1 className="home-title">Offline App Downloads</h1>
         <div className="home-divider" />
         <p className="home-subtitle">
-          Simple offline apps for worship services, classes, and home scripture study.
+          Simple and reverent tools for worship services, classes, and home scripture study.
         </p>
 
         {!geoState.allowed ? (
@@ -177,10 +177,7 @@ export default function Download() {
               />
                 <span>I understand and accept this responsibility and usage policy.</span>
             </label>
-            <p className="download-meta">
-              Release source: {releaseTag}
-              {geoState.reason ? ` • ${geoState.reason}` : ''}
-            </p>
+            <p className="download-meta">{geoState.reason ? geoState.reason : `Latest release: ${releaseTag}`}</p>
 
             <section className="download-steps" aria-label="How to use downloads">
               <h3>How it works</h3>
@@ -195,16 +192,26 @@ export default function Download() {
             <div className="download-grid">
               {downloadLinks.map((item) => (
                 <div key={item.platform} className="download-item">
+                  <div className="download-item-head">
+                    <span className="download-icon" aria-hidden="true">{item.icon}</span>
+                    <div className="download-item-title-wrap">
+                      <strong className="download-item-title">{item.label}</strong>
+                      <span className="download-item-note">{item.note}</span>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     className="download-btn"
                     disabled={!accepted || !item.url}
                     onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
                   >
-                    {item.label}
+                    Download for {item.label}
                   </button>
-                  <code className="download-sha">SHA256: {item.sha256}</code>
                   <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
+                  <details className="download-verify">
+                    <summary>File verification (advanced)</summary>
+                    <code className="download-sha">SHA256: {item.sha256}</code>
+                  </details>
                 </div>
               ))}
             </div>
