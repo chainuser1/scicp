@@ -488,6 +488,8 @@ const Presenter = () => {
   // Topic navigation history inside the Related tab: [{label, verses, concept}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
+  // Floating word-explore chip: { word, x, y } | null
+  const [ctxWordChip, setCtxWordChip] = useState(null);
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
@@ -1196,6 +1198,51 @@ const Presenter = () => {
     setRelatedConcept(entry.concept);
     setRelatedPage(0);
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+  };
+
+  // ── Drill into a specific verse's related verses ──────────────────────────
+  const drillIntoVerse = async (verse) => {
+    setContextLoading(true);
+    setCtxWordChip(null);
+    try {
+      const res = await fetch(`${API_URL}/verse/${verse.verse_id}/related?language=${currentLanguage}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const verses = d.results ?? [];
+      const label = verse.verse_title || `${verse.book_title} ${verse.chapter_number}:${verse.verse_number}`;
+      const newEntry = { label, verses, concept: d.matchedConcept ?? label };
+      setCtxTopicHistory(prev => {
+        const base = ctxTopicHistoryIdx >= 0 ? prev.slice(0, ctxTopicHistoryIdx + 1) : [];
+        const next = [...base, newEntry];
+        setCtxTopicHistoryIdx(next.length - 1);
+        return next;
+      });
+      setRelatedVerses(verses);
+      setRelatedConcept(d.matchedConcept ?? label);
+      setRelatedPage(0);
+      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    } finally {
+      setContextLoading(false);
+    }
+  };
+
+  // ── Word-selection explore chip ────────────────────────────────────────────
+  const handleCtxTextMouseUp = (e) => {
+    const sel = window.getSelection();
+    const word = sel?.toString().trim().replace(/[^\w\s'-]/g, '').trim();
+    if (!word || word.split(/\s+/).length > 4 || word.length < 2) {
+      setCtxWordChip(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    const containerRect = e.currentTarget.getBoundingClientRect();
+    setCtxWordChip({
+      word,
+      // position relative to the ctx-body container
+      top: rect.bottom - containerRect.top + 6,
+      left: Math.max(4, Math.min(rect.left - containerRect.left, containerRect.width - 180)),
+    });
   };
 
   const loadCtxChapterByIdx = async (idx) => {
@@ -2783,7 +2830,7 @@ const Presenter = () => {
 
             <div className="ctx-tabs">
               <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('chapter'); if (!chapterVerses.length) openContextModal('chapter'); }}>
+                onClick={() => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); }}>
                 Chapter {liveVerse.chapter_number}
               </button>
               <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
@@ -2802,7 +2849,8 @@ const Presenter = () => {
                 ref={ctxBodyRef}
                 onScroll={handleCtxBodyScroll}
                 onTouchStart={handleCtxTouchStart}
-                onTouchEnd={handleCtxTouchEnd}>
+                onTouchEnd={handleCtxTouchEnd}
+                onMouseUp={contextTab === 'related' ? handleCtxTextMouseUp : undefined}>
                 {contextLoading ? (
                   <div className="ctx-loading">Loading…</div>
                 ) : contextTab === 'chapter' ? (
@@ -2892,6 +2940,7 @@ const Presenter = () => {
                                       </button>
                                     )}
                                     <div className="ctx-item-actions">
+                                      <button onClick={() => drillIntoVerse(v)} title="Find verses related to this verse" className="ctx-drill-btn">🔬 Related</button>
                                       <button onClick={() => { setStaged({...v, theme: themeForVerse(currentTheme, v)}); setContextOpen(false); }}>Stage</button>
                                       <button onClick={() => addToSetlist(v)}>+ List</button>
                                       <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
@@ -2920,6 +2969,19 @@ const Presenter = () => {
                 <button className="ctx-back-to-top"
                   onClick={() => { if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0; }}
                   aria-label="Back to top">↑</button>
+              )}
+              {/* Floating word-explore chip */}
+              {ctxWordChip && contextTab === 'related' && (
+                <div
+                  className="ctx-word-chip"
+                  style={{ top: ctxWordChip.top, left: ctxWordChip.left }}
+                >
+                  <button
+                    className="ctx-word-chip-btn"
+                    onClick={() => { loadTopicInModal(ctxWordChip.word); setCtxWordChip(null); window.getSelection()?.removeAllRanges(); }}
+                  >🔍 Explore &ldquo;{ctxWordChip.word}&rdquo;</button>
+                  <button className="ctx-word-chip-close" onClick={() => setCtxWordChip(null)} aria-label="Dismiss">✕</button>
+                </div>
               )}
             </div>
           </div>
