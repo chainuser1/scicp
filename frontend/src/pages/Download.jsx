@@ -2,10 +2,38 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Footer from '../components/Footer';
 
 const PLATFORM_META = [
-  { label: 'Android', platform: 'android', icon: '📱', note: 'Best for phones and tablets' },
-  { label: 'Windows', platform: 'windows', icon: '🪟', note: 'Best for chapel and home PCs' },
-  { label: 'Linux', platform: 'linux', icon: '🐧', note: 'For Linux desktop computers' },
-  { label: 'Mac', platform: 'mac', icon: '🍎', note: 'For MacBook and iMac devices' },
+  {
+    label: 'Android',
+    platform: 'android',
+    category: 'mobile',
+    icon: '📱',
+    note: 'For phones and tablets',
+    guide: ['Download the app file.', 'Tap the file and allow install when prompted.', 'Open the app and begin presenting scriptures.'],
+  },
+  {
+    label: 'Windows',
+    platform: 'windows',
+    category: 'desktop',
+    icon: '🪟',
+    note: 'For chapel and home PCs',
+    guide: ['Download the installer.', 'Open it and follow the on-screen steps.', 'Launch the app from Start and begin presenting.'],
+  },
+  {
+    label: 'Linux',
+    platform: 'linux',
+    category: 'desktop',
+    icon: '🐧',
+    note: 'For Linux desktop computers',
+    guide: ['Download the app package.', 'Install it using your system package/app tool.', 'Open the app from your applications menu.'],
+  },
+  {
+    label: 'Mac',
+    platform: 'mac',
+    category: 'desktop',
+    icon: '🍎',
+    note: 'For MacBook and iMac',
+    guide: ['Download the app file.', 'Open it and move the app to Applications.', 'Start the app and begin scripture display.'],
+  },
 ];
 
 const FALLBACK_BY_PLATFORM = {
@@ -146,6 +174,14 @@ export default function Download() {
     return '';
   }, [geoState]);
 
+  const groupedDownloads = useMemo(
+    () => ({
+      desktop: downloadLinks.filter(item => item.category === 'desktop'),
+      mobile: downloadLinks.filter(item => item.category === 'mobile'),
+    }),
+    [downloadLinks]
+  );
+
   return (
     <div className="home-page download-page">
       <main className="home-hero">
@@ -188,33 +224,81 @@ export default function Download() {
               </ol>
             </section>
 
-            <h3 className="download-choose">Choose your device</h3>
-            <div className="download-grid">
-              {downloadLinks.map((item) => (
-                <div key={item.platform} className="download-item">
-                  <div className="download-item-head">
-                    <span className="download-icon" aria-hidden="true">{item.icon}</span>
-                    <div className="download-item-title-wrap">
-                      <strong className="download-item-title">{item.label}</strong>
-                      <span className="download-item-note">{item.note}</span>
+            <section className="download-category">
+              <div className="download-category-head">
+                <h3 className="download-choose">Desktop App Downloads</h3>
+                <p>Choose Windows, Mac, or Linux for chapel computers and laptops.</p>
+              </div>
+              <div className="download-grid">
+                {groupedDownloads.desktop.map((item) => (
+                  <div key={item.platform} className="download-item">
+                    <div className="download-item-head">
+                      <span className="download-icon" aria-hidden="true">{item.icon}</span>
+                      <div className="download-item-title-wrap">
+                        <strong className="download-item-title">{item.label}</strong>
+                        <span className="download-item-note">{item.note}</span>
+                      </div>
                     </div>
+                    <ol className="download-guide">
+                      {item.guide.map((step, i) => (
+                        <li key={step}><span className="download-step-num">{i + 1}</span><span>{step}</span></li>
+                      ))}
+                    </ol>
+                    <button
+                      type="button"
+                      className="download-btn"
+                      disabled={!accepted || !item.url}
+                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                    >
+                      Download for {item.label}
+                    </button>
+                    <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
+                    <details className="download-verify">
+                      <summary>File verification (advanced)</summary>
+                      <code className="download-sha">SHA256: {item.sha256}</code>
+                    </details>
                   </div>
-                  <button
-                    type="button"
-                    className="download-btn"
-                    disabled={!accepted || !item.url}
-                    onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
-                  >
-                    Download for {item.label}
-                  </button>
-                  <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
-                  <details className="download-verify">
-                    <summary>File verification (advanced)</summary>
-                    <code className="download-sha">SHA256: {item.sha256}</code>
-                  </details>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="download-category">
+              <div className="download-category-head">
+                <h3 className="download-choose">Mobile App Download</h3>
+                <p>For phone and tablet scripture presentation.</p>
+              </div>
+              <div className="download-grid">
+                {groupedDownloads.mobile.map((item) => (
+                  <div key={item.platform} className="download-item">
+                    <div className="download-item-head">
+                      <span className="download-icon" aria-hidden="true">{item.icon}</span>
+                      <div className="download-item-title-wrap">
+                        <strong className="download-item-title">{item.label}</strong>
+                        <span className="download-item-note">{item.note}</span>
+                      </div>
+                    </div>
+                    <ol className="download-guide">
+                      {item.guide.map((step, i) => (
+                        <li key={step}><span className="download-step-num">{i + 1}</span><span>{step}</span></li>
+                      ))}
+                    </ol>
+                    <button
+                      type="button"
+                      className="download-btn"
+                      disabled={!accepted || !item.url}
+                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                    >
+                      Download for {item.label}
+                    </button>
+                    <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
+                    <details className="download-verify">
+                      <summary>File verification (advanced)</summary>
+                      <code className="download-sha">SHA256: {item.sha256}</code>
+                    </details>
+                  </div>
+                ))}
+              </div>
+            </section>
           </section>
         )}
       </main>
