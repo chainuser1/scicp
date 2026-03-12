@@ -1252,9 +1252,22 @@ const Presenter = () => {
     setRelatedConcept(null);
     setCtxTopicHistory([]);
     setCtxTopicHistoryIdx(-1);
+    setChapterVerses([]);   // force re-fetch chapter verses in new language
     setExpandedTranslations(new Set()); // stale cache keys become invalid on language change
     emitWithSession('update-language', { language: lang });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    // Update live verse text directly (handles the case where presenter has no connected session)
+    if (liveVerse) {
+      try {
+        const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/translation?language=${lang}`).catch(() => null);
+        if (res?.ok) {
+          const d = await res.json();
+          setLiveVerse(prev => prev ? { ...prev, scripture_text: d.scripture_text, segments: null, language: lang } : prev);
+        }
+      } catch { // ignore
+      }
+      // Also broadcast to connected clients (server will re-segment and send back proper update-verse)
+      emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    }
     // Update staged verse text to the new language
     if (staged) {
       try {
@@ -1265,6 +1278,10 @@ const Presenter = () => {
         }
       } catch { // ignore
       }
+    }
+    // Re-fetch chapter tab if modal is open on chapter tab
+    if (contextOpen && contextTab === 'chapter' && liveVerse) {
+      openContextModal('chapter');
     }
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
@@ -1286,8 +1303,22 @@ const Presenter = () => {
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
     setExpandedTranslations(new Set());
+    setChapterVerses([]);
+    setRelatedVerses([]);
+    setCtxTopicHistory([]);
+    setCtxTopicHistoryIdx(-1);
     emitWithSession('update-language', { language: newPrimary });
-    if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    if (liveVerse) {
+      try {
+        const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/translation?language=${newPrimary}`).catch(() => null);
+        if (res?.ok) {
+          const d = await res.json();
+          setLiveVerse(prev => prev ? { ...prev, scripture_text: d.scripture_text, segments: null, language: newPrimary } : prev);
+        }
+      } catch { // ignore
+      }
+      emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    }
     if (staged) {
       try {
         const res = await fetch(`${API_URL}/verse/${staged.verse_id}/translation?language=${newPrimary}`).catch(() => null);
