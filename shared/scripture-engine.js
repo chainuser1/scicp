@@ -580,17 +580,54 @@ function getVersionCitation(language, volumeId, secondaryLanguage) {
   return BIBLE_CITATIONS[language] || (language ? language.toUpperCase() : '');
 }
 
+function getComeFollowMeGroupForYear(year) {
+  // 2026 anchor:
+  // 2026 OT (+Moses/Abraham), 2027 NT (+JS-M), 2028 BoM, 2029 D&C (+JS-H/AoF)
+  const groups = ['ot', 'nt', 'bom', 'dc'];
+  const idx = ((Number(year) - 2026) % 4 + 4) % 4;
+  return groups[idx];
+}
+
+function isVerseInComeFollowMeGroup(row, group) {
+  const volume = Number(row?.volume_id);
+  const book = String(row?.book_title || '').toLowerCase();
+  const isJSM = /joseph smith\s*[—-]?\s*matthew|\bjs[-\s]?m\b/i.test(book);
+  const isJSH = /joseph smith\s*[—-]?\s*history|\bjs[-\s]?h\b/i.test(book);
+  const isAof = /articles?\s+of\s+faith/i.test(book);
+  const isMosesOrAbraham = /\bmoses\b|\babraham\b/i.test(book);
+
+  if (group === 'ot') return volume === 1 || isMosesOrAbraham;
+  if (group === 'nt') return volume === 2 || isJSM;
+  if (group === 'bom') return volume === 3;
+  if (group === 'dc') return volume === 4 || isJSH || isAof;
+  return false;
+}
+
 // ── Verse of the Day ────────────────────────────────────────────────────────
-function getVerseOfTheDay(db) {
-  const now = new Date();
+function getVerseOfTheDay(db, now = new Date()) {
   const start = Date.UTC(now.getUTCFullYear(), 0, 0);
   const dayOfYear = Math.floor(
     (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
   );
+  const weekOfYear = Math.floor((dayOfYear - 1) / 7);
+  const cfmGroup = getComeFollowMeGroupForYear(now.getUTCFullYear());
 
   const LCG_A = 1664525, LCG_C = 1013904223, MOD = 2 ** 32;
-  const seed   = ((LCG_A * dayOfYear + LCG_C) % MOD + MOD) % MOD;
-  const poolId = VOTD_POOL[seed % VOTD_POOL.length];
+  const weekSeed = ((LCG_A * (weekOfYear + now.getUTCFullYear()) + LCG_C) % MOD + MOD) % MOD;
+
+  // Build CFM-year candidate pool from curated ids.
+  const placeholders = VOTD_POOL.map(() => '?').join(',');
+  const poolRows = db.prepare(`
+    SELECT verse_id, volume_id, book_title
+    FROM scriptures
+    WHERE verse_id IN (${placeholders})
+  `).all(...VOTD_POOL);
+  const cfmPool = poolRows
+    .filter(r => isVerseInComeFollowMeGroup(r, cfmGroup))
+    .map(r => r.verse_id);
+
+  const activePool = cfmPool.length ? cfmPool : VOTD_POOL;
+  const poolId = activePool[weekSeed % activePool.length];
 
   const verse = db.prepare(`
     SELECT book_id, book_title, chapter_id, chapter_number, verse_number,
@@ -599,7 +636,13 @@ function getVerseOfTheDay(db) {
   `).get(poolId);
 
   if (verse) {
-    return { ...verse, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', verse.volume_id) };
+    return {
+      ...verse,
+      date: now.toISOString().slice(0, 10),
+      version_citation: getVersionCitation('en', verse.volume_id),
+      cfm_group: cfmGroup,
+      cfm_week: weekOfYear + 1,
+    };
   }
 
   // Fallback — random verse from full canon
@@ -613,7 +656,13 @@ function getVerseOfTheDay(db) {
   `).get((fallbackSeed % total) + 1);
 
   if (!fallback) return null;
-  return { ...fallback, date: now.toISOString().slice(0, 10), version_citation: getVersionCitation('en', fallback.volume_id) };
+  return {
+    ...fallback,
+    date: now.toISOString().slice(0, 10),
+    version_citation: getVersionCitation('en', fallback.volume_id),
+    cfm_group: cfmGroup,
+    cfm_week: weekOfYear + 1,
+  };
 }
 
 module.exports = {
@@ -642,6 +691,7 @@ module.exports = {
   browseVerses,
   initializeFts,
   getVerseOfTheDay,
+  getComeFollowMeGroupForYear,
   topicSearch,
 
   // Re-export data for consumers that need raw access
