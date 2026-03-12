@@ -516,6 +516,62 @@ function topicSearch(query, page = 0, pageSize = 10) {
   return { results, total, matchedTopic: topicName };
 }
 
+// ── HTTP route: topic search (TG-first, FTS fallback, paginated) ─────────────
+fastify.get('/topic-search', async (request, reply) => {
+  const { q, language = 'en' } = request.query;
+  const page     = Math.max(0, parseInt(request.query.page     ?? 0,  10) || 0);
+  const pageSize = Math.min(20, Math.max(1, parseInt(request.query.pageSize ?? 10, 10) || 10));
+
+  if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
+
+  const lang = language.toLowerCase();
+  const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : null;
+
+  // Helpers for language translation
+  const stmtCoords = targetDb
+    ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
+    : null;
+  const stmtTransText = targetDb
+    ? targetDb.prepare('SELECT scripture_text FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1')
+    : null;
+
+  const translateResults = (results) => {
+    if (!stmtCoords || !stmtTransText) return results;
+    return results.map(r => {
+      const coords = stmtCoords.get(r.verse_id);
+      if (!coords) return r;
+      const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
+      return t?.scripture_text ? { ...r, scripture_text: t.scripture_text } : r;
+    });
+  };
+
+  // ── 1. TG topic lookup ────────────────────────────────────────────────────
+  const tgResult = topicSearch(q.trim(), page, pageSize);
+  if (tgResult) {
+    return {
+      results:      translateResults(tgResult.results),
+      total:        tgResult.total,
+      matchedTopic: tgResult.matchedTopic ?? null,
+      page,
+      pageSize,
+      fallback:     false,
+    };
+  }
+
+  // ── 2. FTS fallback ───────────────────────────────────────────────────────
+  const db = lang !== 'en' && targetDb ? targetDb : dba;
+  const { results: ftsResults, total: ftsTotal } =
+    phraseSearch(q.trim(), page, pageSize, dba, fastify.log);
+  return {
+    results:      translateResults(ftsResults),
+    total:        ftsTotal ?? ftsResults.length,
+    matchedTopic: null,
+    page,
+    pageSize,
+    fallback:     true,
+  };
+});
+
 // ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
     const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
@@ -547,6 +603,9 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
 
   const language = (request.query.language || 'en').toLowerCase();
+  const page     = Math.max(0, parseInt(request.query.page     ?? 0,  10) || 0);
+  const pageSize = Math.min(20, Math.max(1, parseInt(request.query.pageSize ?? 10, 10) || 10));
+  const offset   = page * pageSize;
   const targetDb = resolveDbAdapter(language);
 
   const meta = verseMetaCache.get(verseId);
@@ -619,7 +678,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     }
     scores.sort((a, b) => b.score - a.score);
 
-    const results = scores.slice(0, 12).map(({ verse_id, score }) => {
+    const results = scores.slice(offset, offset + pageSize).map(({ verse_id, score }) => {
       const row = resolveRow(verse_id);
       const cTopics = verseTopicCache.get(verse_id);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
@@ -627,15 +686,14 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       return { ...row, similarity_score: +score.toFixed(4), matched_concept: matchedConcept };
     });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
-    return { results, matchedConcept };
+    return { results, total: scores.length, matchedConcept, page, pageSize };
   }
 
   // ── Fallback: TG-only (embeddings still computing) ───────────────────────
   if (tgScores.size > 0) {
-    const sorted = [...tgScores.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12);
-    const results = sorted.map(([vid, overlap]) => {
+    const allSorted = [...tgScores.entries()].sort((a, b) => b[1] - a[1]);
+    const paged = allSorted.slice(offset, offset + pageSize);
+    const results = paged.map(([vid, overlap]) => {
       const row = resolveRow(vid);
       const cTopics = verseTopicCache.get(vid);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
@@ -643,12 +701,12 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       return { ...row, similarity_score: +(overlap / liveTopics.size).toFixed(4), matched_concept: matchedConcept };
     });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
-    return { results, matchedConcept, fallback: true };
+    return { results, total: allSorted.length, matchedConcept, page, pageSize, fallback: true };
   }
 
   // ── Last resort: FTS phrase on verse text ────────────────────────────────
   const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
-  const { results: ftsResults } = phraseSearch(phrase, 0, 12, dba, fastify.log);
+  const { results: ftsResults, total: ftsTotal } = phraseSearch(phrase, page, pageSize, dba, fastify.log);
   const filtered = ftsResults.filter(r => r.verse_id !== verseId);
   if (stmtCoords && stmtTransText) {
     for (const r of filtered) {
@@ -659,7 +717,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       }
     }
   }
-  return { results: filtered, fallback: true };
+  return { results: filtered, total: ftsTotal ?? filtered.length, page, pageSize, fallback: true };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
