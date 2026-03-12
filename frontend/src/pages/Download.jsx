@@ -150,11 +150,11 @@ export default function Download() {
     <div className="home-page download-page">
       <main className="home-hero">
         <div className="home-emblem" aria-hidden="true">✦</div>
-        <p className="home-eyebrow">Offline Installers</p>
-        <h1 className="home-title">Sacred Deployment Downloads</h1>
+        <p className="home-eyebrow">Download Center</p>
+        <h1 className="home-title">Get the App</h1>
         <div className="home-divider" />
         <p className="home-subtitle">
-          Download offline builds for worship services and home scripture study.
+          Simple offline apps for worship services, classes, and home scripture study.
         </p>
 
         {!geoState.allowed ? (
@@ -164,7 +164,7 @@ export default function Download() {
           </section>
         ) : (
           <section className="download-panel">
-            <h2>Usage Agreement</h2>
+            <h2>Before You Download</h2>
             <p className="download-agreement">
               By downloading, you agree to use this application in full compliance with all applicable laws and regulations,
               and only for non-commercial church and home use.
@@ -175,13 +175,23 @@ export default function Download() {
                 checked={accepted}
                 onChange={(e) => setAccepted(e.target.checked)}
               />
-              <span>I understand and accept this responsibility and usage policy.</span>
+                <span>I understand and accept this responsibility and usage policy.</span>
             </label>
             <p className="download-meta">
               Release source: {releaseTag}
               {geoState.reason ? ` • ${geoState.reason}` : ''}
             </p>
 
+            <section className="download-steps" aria-label="How to use downloads">
+              <h3>How it works</h3>
+              <ol>
+                <li>Choose your device below.</li>
+                <li>Download and install the app.</li>
+                <li>Use it offline for church or home scripture use.</li>
+              </ol>
+            </section>
+
+            <h3 className="download-choose">Choose your device</h3>
             <div className="download-grid">
               {downloadLinks.map((item) => (
                 <div key={item.platform} className="download-item">
