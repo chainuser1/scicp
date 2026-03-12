@@ -6701,14 +6701,50 @@ button, [role="button"] {
 
 .download-page .download-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.85rem;
 }
 
 .download-page .download-item {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.45rem;
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.75rem;
+}
+
+.download-page .download-item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.download-page .download-icon {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(201, 168, 76, 0.15);
+  border: 1px solid rgba(201, 168, 76, 0.25);
+  font-size: 1.05rem;
+}
+
+.download-page .download-item-title-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.download-page .download-item-title {
+  color: #f2dfae;
+  letter-spacing: 0.02em;
+}
+
+.download-page .download-item-note {
+  color: #d2c39a;
+  font-size: 0.72rem;
 }
 
 .download-page .download-btn {
@@ -6745,4 +6781,10 @@ button, [role="button"] {
 .download-page .download-source {
   font-size: 0.66rem;
   color: #b5a06d;
+}
+
+.download-page .download-verify summary {
+  cursor: pointer;
+  color: #d9c48f;
+  font-size: 0.68rem;
 }
