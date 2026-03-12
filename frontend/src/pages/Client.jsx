@@ -69,7 +69,6 @@ function Client() {
   const estimateAverageLuminance = (imageUrl) => new Promise((resolve) => {
     if (!imageUrl) { resolve(null); return; }
     const img = new Image();
-    img.crossOrigin = 'anonymous';
     img.referrerPolicy = 'no-referrer';
     img.onload = () => {
       try {
