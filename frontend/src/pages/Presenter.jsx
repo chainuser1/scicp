@@ -491,6 +491,7 @@ const Presenter = () => {
   const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
+  const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 6;
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
@@ -1147,7 +1148,10 @@ const Presenter = () => {
   const loadCtxChapterByIdx = async (idx) => {
     const ch = bookChapters[idx];
     if (!ch) return;
-    setContextLoading(true);
+    const dir = idx > ctxChapterIdx ? 'next' : 'prev';
+    setCtxSlideDir(dir);               // trigger exit animation
+    await new Promise(r => setTimeout(r, 210)); // match CSS duration
+    setCtxSlideDir(null);
     setCtxScrolled(false);
     setCtxAtBottom(false);
     try {
@@ -1158,9 +1162,7 @@ const Presenter = () => {
         setCtxChapterIdx(idx);
         if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
       }
-    } finally {
-      setContextLoading(false);
-    }
+    } catch { /* ignore */ }
   };
 
   const handleCtxBodyScroll = (e) => {
@@ -2708,7 +2710,7 @@ const Presenter = () => {
                           aria-label="Next chapter">Next ›</button>
                       </div>
                     )}
-                    <ul className="ctx-list">
+                    <ul className={`ctx-list${ctxSlideDir ? ` ctx-list--exit-${ctxSlideDir}` : ' ctx-list--enter'}`}>
                       {chapterVerses.map(v => (
                         <li key={v.verse_id}
                           className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>

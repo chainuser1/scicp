@@ -394,6 +394,7 @@ const MobilePresenter = () => {
   const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
+  const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 5;
 
   // Reset context cache when live verse changes
@@ -839,19 +840,21 @@ const MobilePresenter = () => {
   const loadCtxChapterByIdx = (idx) => {
     const ch = bookChapters[idx];
     if (!ch) return;
-    setContextLoading(true);
-    setCtxScrolled(false);
-    setCtxAtBottom(false);
-    try {
-      const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
-      setChapterVerses(Array.isArray(verses) ? verses : []);
-      setCtxChapterIdx(idx);
-      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
-    } catch (err) {
-      console.error('loadCtxChapterByIdx failed', err);
-    } finally {
-      setContextLoading(false);
-    }
+    const dir = idx > ctxChapterIdx ? 'next' : 'prev';
+    setCtxSlideDir(dir);
+    setTimeout(() => {
+      setCtxSlideDir(null);
+      setCtxScrolled(false);
+      setCtxAtBottom(false);
+      try {
+        const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
+        setChapterVerses(Array.isArray(verses) ? verses : []);
+        setCtxChapterIdx(idx);
+        if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+      } catch (err) {
+        console.error('loadCtxChapterByIdx failed', err);
+      }
+    }, 210);
   };
 
   const handleCtxBodyScroll = (e) => {
@@ -2125,7 +2128,7 @@ const MobilePresenter = () => {
                           aria-label="Next chapter">Next ›</button>
                       </div>
                     )}
-                    <ul className="ctx-list">
+                    <ul className={`ctx-list${ctxSlideDir ? ` ctx-list--exit-${ctxSlideDir}` : ' ctx-list--enter'}`}>
                       {chapterVerses.map(v => (
                         <li key={v.verse_id}
                           className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>
