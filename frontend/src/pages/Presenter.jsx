@@ -188,27 +188,21 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
 
 // SearchResults — results are already the correct page from the server.
 // No client-side slicing. onPageChange(newPage) triggers a fresh socket request.
-// Pip dots are capped at MAX_PIPS to avoid rendering 300 dots for broad queries.
-const MAX_PIPS = 7;
-
 const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang }) => {
   if (results.length === 0) return null;
-
-  // Build a compact pip sequence around the current page
-  const buildPips = () => {
-    if (totalPages <= MAX_PIPS) {
-      return Array.from({ length: totalPages }, (_, i) => i);
-    }
-    // Always show first, last, current, and neighbours
-    const set = new Set([0, totalPages - 1, currentPage]);
-    if (currentPage > 0) set.add(currentPage - 1);
-    if (currentPage < totalPages - 1) set.add(currentPage + 1);
-    return Array.from(set).sort((a, b) => a - b);
-  };
-  const pips = buildPips();
+  const hasPrev = currentPage > 0;
+  const hasNext = currentPage < totalPages - 1;
 
   return (
     <>
+      {hasPrev && (
+        <button className="batch-nav batch-nav--prev" onClick={() => onPageChange(currentPage - 1)} aria-label="Previous batch">
+          ▲ <span>Prev batch</span>
+        </button>
+      )}
+      {totalPages > 1 && (
+        <div className="batch-indicator">Batch {currentPage + 1} of {totalPages}</div>
+      )}
       <ul className="results-ul">
         {results.map(verse => (
           <li
@@ -243,28 +237,10 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
           </li>
         ))}
       </ul>
-      {totalPages > 1 && (
-        <div className="results-pagination">
-          <button className="pagination-arrow" onClick={() => onPageChange(Math.max(0, currentPage - 1))} disabled={currentPage === 0}>‹</button>
-          <div className="pagination-track">
-            {pips.map((pageIdx, i) => {
-              const prevPip = pips[i - 1];
-              const gap = prevPip !== undefined && pageIdx - prevPip > 1;
-              return (
-                <React.Fragment key={pageIdx}>
-                  {gap && <span className="pagination-ellipsis">…</span>}
-                  <button
-                    className={`pagination-pip${pageIdx === currentPage ? ' active' : ''}`}
-                    onClick={() => onPageChange(pageIdx)}
-                    aria-label={`Page ${pageIdx + 1}`}
-                  />
-                </React.Fragment>
-              );
-            })}
-          </div>
-          <span className="pagination-label">{currentPage + 1}<span className="pagination-sep">/</span>{totalPages}</span>
-          <button className="pagination-arrow" onClick={() => onPageChange(Math.min(totalPages - 1, currentPage + 1))} disabled={currentPage === totalPages - 1}>›</button>
-        </div>
+      {hasNext && (
+        <button className="batch-nav batch-nav--next" onClick={() => onPageChange(currentPage + 1)} aria-label="Next batch">
+          ▼ <span>Next batch</span>
+        </button>
       )}
     </>
   );
@@ -651,7 +627,7 @@ const Presenter = () => {
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
-  const PAGE_SIZE = 5; // 5 results/page keeps pagination controls clear of the mobile nav bar
+  const PAGE_SIZE = 8; // 8 results/batch on desktop — glide navigation
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
 
   // ── Toast notification ───────────────────────────────────────────────────
