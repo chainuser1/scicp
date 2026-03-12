@@ -387,12 +387,25 @@ const MobilePresenter = () => {
   const [chapterVerses,  setChapterVerses]  = useState([]);
   const [relatedVerses,  setRelatedVerses]  = useState([]);
   const [relatedConcept, setRelatedConcept] = useState(null);
+  const [relatedPage,    setRelatedPage]    = useState(0);
+  const [bookChapters,   setBookChapters]   = useState([]);
+  const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
+  const [ctxScrolled,    setCtxScrolled]    = useState(false);
+  const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
+  const ctxBodyRef     = useRef(null);
+  const ctxTouchStartX = useRef(null);
+  const RELATED_PAGE_SIZE = 5;
 
   // Reset context cache when live verse changes
   useEffect(() => {
     setChapterVerses([]);
     setRelatedVerses([]);
     setRelatedConcept(null);
+    setRelatedPage(0);
+    setBookChapters([]);
+    setCtxChapterIdx(0);
+    setCtxScrolled(false);
+    setCtxAtBottom(false);
   }, [liveVerse?.verse_id]);
   // Persist setlist to localStorage
   useEffect(() => {
@@ -787,16 +800,23 @@ const MobilePresenter = () => {
     setContextOpen(true);
     setContextTab(tab);
     setContextLoading(true);
+    setCtxScrolled(false);
+    setCtxAtBottom(false);
     try {
       if (tab === 'chapter' && !chapterVerses.length) {
         let chapterId = liveVerse.chapter_id;
-        // Resolve chapter_id from book+chapter if missing (e.g. verse came from socket or old search result)
-        if (!chapterId && liveVerse.book_id && liveVerse.chapter_number) {
-          const chapters = svc.browse('chapters', { bookId: liveVerse.book_id }, currentLanguage);
-          const matched = Array.isArray(chapters)
-            ? chapters.find(c => Number(c.chapter_number) === Number(liveVerse.chapter_number))
-            : null;
+        let chapters  = bookChapters;
+        if (!chapters.length && liveVerse.book_id) {
+          chapters = svc.browse('chapters', { bookId: liveVerse.book_id }, currentLanguage);
+          if (Array.isArray(chapters)) setBookChapters(chapters);
+        }
+        if (!chapterId && Array.isArray(chapters) && liveVerse.chapter_number) {
+          const matched = chapters.find(c => Number(c.chapter_number) === Number(liveVerse.chapter_number));
           chapterId = matched?.chapter_id ?? null;
+        }
+        if (Array.isArray(chapters)) {
+          const idx = chapters.findIndex(c => c.chapter_id === chapterId);
+          if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
         const verses = svc.browse('verses', { chapterId }, currentLanguage);
@@ -805,12 +825,51 @@ const MobilePresenter = () => {
         const { results, matchedConcept: mc } = svc.getRelated(liveVerse.verse_id, currentLanguage);
         setRelatedVerses(results ?? []);
         setRelatedConcept(mc ?? null);
+        setRelatedPage(0);
       }
     } catch (err) {
       console.error('openContextModal failed', err);
     } finally {
       setContextLoading(false);
     }
+  };
+
+  const loadCtxChapterByIdx = (idx) => {
+    const ch = bookChapters[idx];
+    if (!ch) return;
+    setContextLoading(true);
+    setCtxScrolled(false);
+    setCtxAtBottom(false);
+    try {
+      const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
+      setChapterVerses(Array.isArray(verses) ? verses : []);
+      setCtxChapterIdx(idx);
+      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    } catch (err) {
+      console.error('loadCtxChapterByIdx failed', err);
+    } finally {
+      setContextLoading(false);
+    }
+  };
+
+  const handleCtxBodyScroll = (e) => {
+    const el = e.currentTarget;
+    setCtxScrolled(el.scrollTop > 80);
+    setCtxAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 16);
+  };
+
+  const handleCtxTouchStart = (e) => {
+    if (contextTab !== 'chapter') return;
+    ctxTouchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleCtxTouchEnd = (e) => {
+    if (contextTab !== 'chapter' || ctxTouchStartX.current === null) return;
+    const delta = e.changedTouches[0].clientX - ctxTouchStartX.current;
+    ctxTouchStartX.current = null;
+    if (Math.abs(delta) < 60) return;
+    const nextIdx = ctxChapterIdx + (delta < 0 ? 1 : -1);
+    if (nextIdx >= 0 && nextIdx < bookChapters.length) loadCtxChapterByIdx(nextIdx);
   };
 
   const handleLanguageChange = e => {
@@ -2006,7 +2065,9 @@ const MobilePresenter = () => {
           <div className="ctx-modal" onClick={e => e.stopPropagation()}>
             <div className="ctx-header">
               <span className="ctx-title">
-                {liveVerse.book_title} {liveVerse.chapter_number}:{liveVerse.verse_number}
+                {contextTab === 'chapter' && bookChapters[ctxChapterIdx]
+                  ? `${liveVerse.book_title} ${bookChapters[ctxChapterIdx].chapter_number}`
+                  : `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`}
               </span>
               <button className="ctx-close" onClick={() => setContextOpen(false)}>✕</button>
             </div>
@@ -2025,46 +2086,103 @@ const MobilePresenter = () => {
                 )}
               </button>
             </div>
-            <div className="ctx-body">
-              {contextLoading ? (
-                <div className="ctx-loading">Loading…</div>
-              ) : contextTab === 'chapter' ? (
-                <ul className="ctx-list">
-                  {chapterVerses.map(v => (
-                    <li key={v.verse_id}
-                      className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>
-                      <span className="ctx-item-ref">{v.verse_number}</span>
-                      <span className="ctx-item-text">{v.scripture_text}</span>
-                      <div className="ctx-item-actions">
-                        <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
-                        <button onClick={() => addToSetlist(v)}>+ List</button>
-                        <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
+            <div className="ctx-body-wrap">
+              <div className="ctx-body"
+                ref={ctxBodyRef}
+                onScroll={handleCtxBodyScroll}
+                onTouchStart={handleCtxTouchStart}
+                onTouchEnd={handleCtxTouchEnd}>
+                {contextLoading ? (
+                  <div className="ctx-loading">Loading…</div>
+                ) : contextTab === 'chapter' ? (
+                  <>
+                    {bookChapters.length > 1 && (
+                      <div className="ctx-chapter-nav">
+                        <button className="ctx-chapter-arrow"
+                          disabled={ctxChapterIdx <= 0}
+                          onClick={() => loadCtxChapterByIdx(ctxChapterIdx - 1)}
+                          aria-label="Previous chapter">‹ Prev</button>
+                        <span className="ctx-chapter-indicator">
+                          Ch {bookChapters[ctxChapterIdx]?.chapter_number ?? liveVerse.chapter_number}
+                          {' '}<span className="ctx-chapter-indicator-of">of {bookChapters.length}</span>
+                        </span>
+                        <button className="ctx-chapter-arrow"
+                          disabled={ctxChapterIdx >= bookChapters.length - 1}
+                          onClick={() => loadCtxChapterByIdx(ctxChapterIdx + 1)}
+                          aria-label="Next chapter">Next ›</button>
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="ctx-list">
-                  {relatedVerses.length === 0
-                    ? <li className="ctx-empty">No related verses found.</li>
-                    : relatedVerses.map(v => (
-                        <li key={v.verse_id} className="ctx-item">
-                          <span className="ctx-item-ref">{v.verse_title}</span>
+                    )}
+                    <ul className="ctx-list">
+                      {chapterVerses.map(v => (
+                        <li key={v.verse_id}
+                          className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>
+                          <span className="ctx-item-ref">{v.verse_number}</span>
                           <span className="ctx-item-text">{v.scripture_text}</span>
-                          {v.matched_concept && (
-                            <span className="ctx-concept-tag">
-                              {v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}
-                            </span>
-                          )}
                           <div className="ctx-item-actions">
                             <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
                             <button onClick={() => addToSetlist(v)}>+ List</button>
                             <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
                           </div>
                         </li>
-                      ))
-                  }
-                </ul>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <>
+                    {(() => {
+                      const totalRelPages = Math.ceil(relatedVerses.length / RELATED_PAGE_SIZE);
+                      const relSlice = relatedVerses.slice(relatedPage * RELATED_PAGE_SIZE, (relatedPage + 1) * RELATED_PAGE_SIZE);
+                      return (
+                        <>
+                          {relatedPage > 0 && (
+                            <button className="batch-nav batch-nav--prev" onClick={() => setRelatedPage(p => p - 1)}>
+                              ▲ <span>Prev batch</span>
+                            </button>
+                          )}
+                          {totalRelPages > 1 && (
+                            <div className="batch-indicator">Batch {relatedPage + 1} of {totalRelPages}</div>
+                          )}
+                          <ul className="ctx-list">
+                            {relatedVerses.length === 0
+                              ? <li className="ctx-empty">No related verses found.</li>
+                              : relSlice.map(v => (
+                                  <li key={v.verse_id} className="ctx-item">
+                                    <span className="ctx-item-ref">{v.verse_title}</span>
+                                    <span className="ctx-item-text">{v.scripture_text}</span>
+                                    {v.matched_concept && (
+                                      <span className="ctx-concept-tag">
+                                        {v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}
+                                      </span>
+                                    )}
+                                    <div className="ctx-item-actions">
+                                      <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                                      <button onClick={() => addToSetlist(v)}>+ List</button>
+                                      <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
+                                    </div>
+                                  </li>
+                                ))
+                            }
+                          </ul>
+                          {relatedPage < totalRelPages - 1 && (
+                            <button className="batch-nav batch-nav--next" onClick={() => setRelatedPage(p => p + 1)}>
+                              ▼ <span>Next batch</span>
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+              {/* Scroll fade hint */}
+              {!ctxAtBottom && chapterVerses.length > 3 && contextTab === 'chapter' && (
+                <div className="ctx-scroll-fade" aria-hidden="true" />
+              )}
+              {/* Back to top */}
+              {ctxScrolled && (
+                <button className="ctx-back-to-top"
+                  onClick={() => { if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0; }}
+                  aria-label="Back to top">↑</button>
               )}
             </div>
           </div>
