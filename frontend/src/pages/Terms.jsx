@@ -3,28 +3,14 @@ import Footer from '../components/Footer';
 
 export default function Terms() {
   useEffect(() => {
-    document.title = "Terms of Service | Scripture Projection Engine";
-    
-    const metaDescription = document.createElement('meta');
-    metaDescription.name = "description";
-    metaDescription.content = "Terms governing use of Scripture Projection Engine: free service, user responsibility, and no liability.";
-    document.head.appendChild(metaDescription);
-
-    const metaRobots = document.createElement('meta');
-    metaRobots.name = "robots";
-    metaRobots.content = "index,follow";
-    document.head.appendChild(metaRobots);
-
-    const canonicalLink = document.createElement('link');
-    canonicalLink.rel = "canonical";
-    canonicalLink.href = "https://cap-teyyko.live/terms";
-    document.head.appendChild(canonicalLink);
-
-    return () => {
-      document.head.removeChild(metaDescription);
-      document.head.removeChild(metaRobots);
-      document.head.removeChild(canonicalLink);
-    };
+    document.title = "Terms of Service | Scriptures in View";
+    const metaDesc = document.querySelector('meta[name="description"]');
+    const description = "Terms for using Scriptures in View for non-commercial church and home use.";
+    if (metaDesc) metaDesc.setAttribute('content', description);
+    const robots = document.querySelector('meta[name="robots"]');
+    if (robots) robots.setAttribute('content', 'index,follow');
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/terms');
   }, []);
 
   return (
@@ -43,7 +29,7 @@ export default function Terms() {
           </svg>
         </div>
 
-        <p className="home-eyebrow">Scripture Projector</p>
+        <p className="home-eyebrow">Scriptures in View</p>
 
         <h1 className="home-title">
           Terms of Service
@@ -52,30 +38,35 @@ export default function Terms() {
         <div className="home-divider" />
 
         <p className="home-subtitle">
-          Please read these terms carefully before using our service.
+          Please read these terms before using the software.
         </p>
 
         <div className="home-divider" />
 
         <main className="terms-content">
           <section>
-            <h2>Free Service</h2>
-            <p>Scripture Projection Engine is provided free of charge to all users. We intend to maintain this service at no cost indefinitely. However, we reserve the right to modify or discontinue any aspect of the service at our discretion without prior notice.</p>
+            <h2>Allowed Use</h2>
+            <p>This software is for non-commercial church use and home use only.</p>
           </section>
           
           <section>
             <h2>User Responsibility</h2>
-            <p>You are solely responsible for your use of this service. You agree to use Scripture Projection Engine in compliance with all applicable laws and regulations. You acknowledge that the content displayed is for religious and educational purposes only.</p>
+            <p>You are fully responsible for how you use this software and you agree to follow all applicable laws and regulations.</p>
           </section>
           
           <section>
-            <h2>No Liability</h2>
-            <p>To the fullest extent permitted by law, Scripture Projection Engine and its developers shall not be liable for any direct, indirect, incidental, special, or consequential damages arising from your use of or inability to use the service.</p>
+            <h2>No Commercial Use</h2>
+            <p>You may not sell, resell, rent, or commercially license this software without written permission from Dagami Ward Dev.</p>
           </section>
           
+          <section>
+            <h2>Software Provided As Is</h2>
+            <p>The software is provided as is, without guarantees of uninterrupted operation in all environments.</p>
+          </section>
+
           <section>
             <h2>Changes to Terms</h2>
-            <p>We may update these Terms of Service periodically. Continued use of the service after changes constitutes acceptance of the revised terms.</p>
+            <p>These terms may be updated from time to time. Continuing to use the software means you accept the updated terms.</p>
           </section>
         </main>
       </main>

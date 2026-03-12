@@ -6672,6 +6672,12 @@ button, [role="button"] {
   gap: 0.65rem;
 }
 
+.download-page .download-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 .download-page .download-btn {
   border: 1px solid rgba(201, 168, 76, 0.5);
   background: radial-gradient(circle at top, rgba(56, 40, 18, 0.95), rgba(31, 24, 14, 0.95));
@@ -6691,4 +6697,14 @@ button, [role="button"] {
 .download-page .download-btn:disabled {
   opacity: 0.42;
   cursor: not-allowed;
+}
+
+.download-page .download-sha {
+  font-size: 0.62rem;
+  color: #d8cba2;
+  word-break: break-all;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
 }
