@@ -430,7 +430,7 @@ const Presenter = () => {
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
   const [totalResults, setTotalResults]     = useState(0);
-  const [currentTheme, setCurrentTheme]     = useState(themes.light);
+  const [currentTheme, setCurrentTheme]     = useState(themes.dark);
   const PRESENTER_HISTORY_KEY = 'scicp.presenter_history_v1';
   const [history, setHistory] = useState(() => {
     try {
