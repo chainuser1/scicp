@@ -93,6 +93,11 @@ function Home() {
             <span className="home-card-label">Sacred Display</span>
             <span className="home-card-desc">Share scriptures<br />with reverence</span>
           </Link>
+          <Link to="/download" className="home-card">
+            <span className="home-card-icon">⬇️</span>
+            <span className="home-card-label">Offline Downloads</span>
+            <span className="home-card-desc">Get desktop and mobile apps<br />for offline church use</span>
+          </Link>
         </nav>
       </main>
 
