@@ -632,6 +632,8 @@ const Presenter = () => {
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
   const adjacentAbortRef = useRef(null); // cancels in-flight fetchAdjacent when a newer one fires
+  const resultsListRef  = useRef(null);
+  const [resultsScrolled, setResultsScrolled] = useState(false);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
@@ -1992,30 +1994,41 @@ const Presenter = () => {
                 spellCheck={false}
                 autoFocus={drawerOpen && drawerTab === 'search'}
               />
-              <div className="results-list">
-                {results.length > 0
-                  ? <SearchResults
-                      results={results}
-                      currentPage={currentPage}
-                      totalPages={totalPages}
-                      totalResults={totalResults}
-                      onSelect={selectVerse}
-                      onGoLive={goLiveDirectly}
-                      onAddToSetlist={addToSetlist}
-                      onPageChange={(newPage) => {
-                        setCurrentPage(newPage);
-                        emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE, language: currentLanguage });
-                      }}
-                      stagedVerseId={staged?.verse_id}
-                      onToggleTranslation={toggleTranslation}
-                      expandedTranslations={expandedTranslations}
-                      translationCache={translationCache}
-                      currentLanguage={currentLanguage}
-                    />
-                  : <div className="empty-state">
-                      {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin…</>}
-                    </div>
-                }
+              <div className="results-list-wrap">
+                <div className="results-list"
+                  ref={resultsListRef}
+                  onScroll={e => setResultsScrolled(e.currentTarget.scrollTop > 120)}>
+                  {results.length > 0
+                    ? <SearchResults
+                        results={results}
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalResults={totalResults}
+                        onSelect={selectVerse}
+                        onGoLive={goLiveDirectly}
+                        onAddToSetlist={addToSetlist}
+                        onPageChange={(newPage) => {
+                          setCurrentPage(newPage);
+                          setResultsScrolled(false);
+                          if (resultsListRef.current) resultsListRef.current.scrollTop = 0;
+                          emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE, language: currentLanguage });
+                        }}
+                        stagedVerseId={staged?.verse_id}
+                        onToggleTranslation={toggleTranslation}
+                        expandedTranslations={expandedTranslations}
+                        translationCache={translationCache}
+                        currentLanguage={currentLanguage}
+                      />
+                    : <div className="empty-state">
+                        {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin…</>}
+                      </div>
+                  }
+                </div>
+                {resultsScrolled && (
+                  <button className="ctx-back-to-top"
+                    onClick={() => { if (resultsListRef.current) { resultsListRef.current.scrollTop = 0; setResultsScrolled(false); } }}
+                    aria-label="Back to top">↑</button>
+                )}
               </div>
             </div>
           ) : drawerTab === 'history' ? (
