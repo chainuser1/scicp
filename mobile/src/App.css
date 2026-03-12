@@ -6467,6 +6467,34 @@ button, [role="button"] {
   letter-spacing: 0.07em; color: var(--accent, #c9a84c);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.ctx-drill-btn {
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  color: #b8c8e8 !important;
+}
+.ctx-drill-btn:active { background: rgba(255,255,255,0.12) !important; }
+.ctx-word-chip {
+  position: absolute; z-index: 20;
+  display: flex; align-items: center; gap: 0;
+  background: #1a1f2e; border: 1px solid var(--accent, #c9a84c);
+  border-radius: 2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  overflow: hidden; animation: ctx-chip-pop 0.15s ease;
+}
+@keyframes ctx-chip-pop {
+  from { opacity: 0; transform: scale(0.85) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.ctx-word-chip-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--accent, #c9a84c); font-size: 0.78rem; font-weight: 700;
+  padding: 0.4rem 0.85rem; font-family: inherit; white-space: nowrap;
+}
+.ctx-word-chip-btn:active { background: rgba(201,168,76,0.15); }
+.ctx-word-chip-close {
+  background: none; border: none; border-left: 1px solid rgba(201,168,76,0.3);
+  cursor: pointer; color: rgba(255,255,255,0.45); font-size: 0.72rem;
+  padding: 0.4rem 0.65rem; font-family: inherit;
+}
 .ctx-item-actions {
   display: flex; gap: 0.5rem; flex-wrap: wrap;
   margin-top: 0.75rem; padding-top: 0.65rem;
