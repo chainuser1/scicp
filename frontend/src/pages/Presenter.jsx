@@ -1192,13 +1192,25 @@ const Presenter = () => {
     emitWithSession('highlight-text', { text: sel });
   };
 
-  const handleLanguageChange = e => {
+  const handleLanguageChange = async e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
     setRelatedConcept(null);
+    setExpandedTranslations(new Set()); // stale cache keys become invalid on language change
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
+    // Update staged verse text to the new language
+    if (staged) {
+      try {
+        const res = await fetch(`${API_URL}/verse/${staged.verse_id}/translation?language=${lang}`).catch(() => null);
+        if (res?.ok) {
+          const d = await res.json();
+          setStaged(prev => prev ? { ...prev, scripture_text: d.scripture_text } : prev);
+        }
+      } catch { // ignore
+      }
+    }
     // Re-run the current search in the new language so results update immediately
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
@@ -1212,14 +1224,25 @@ const Presenter = () => {
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
   };
 
-  const handleSwapLanguages = () => {
+  const handleSwapLanguages = async () => {
     if (!secondaryLanguage) return;
     const newPrimary   = secondaryLanguage;
     const newSecondary = currentLanguage;
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
+    setExpandedTranslations(new Set());
     emitWithSession('update-language', { language: newPrimary });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
+    if (staged) {
+      try {
+        const res = await fetch(`${API_URL}/verse/${staged.verse_id}/translation?language=${newPrimary}`).catch(() => null);
+        if (res?.ok) {
+          const d = await res.json();
+          setStaged(prev => prev ? { ...prev, scripture_text: d.scripture_text } : prev);
+        }
+      } catch { // ignore
+      }
+    }
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
@@ -1313,6 +1336,8 @@ const Presenter = () => {
       if (res?.ok) {
         const d = await res.json();
         setTranslationCache(c => ({ ...c, [cacheKey]: d.scripture_text }));
+      } else {
+        setTranslationCache(c => ({ ...c, [cacheKey]: '(translation unavailable)' }));
       }
     }
   };
