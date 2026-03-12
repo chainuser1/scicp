@@ -543,8 +543,11 @@ fastify.get('/verse/adjacent', async (request, reply) => {
 
 // ── HTTP route: semantically related verses ───────────────────────────────────
 fastify.get('/verse/:verse_id/related', async (request, reply) => {
-  const verseId = parseInt(request.params.verse_id, 10);
+  const verseId  = parseInt(request.params.verse_id, 10);
   if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
+
+  const language = (request.query.language || 'en').toLowerCase();
+  const targetDb = resolveDbAdapter(language);
 
   const meta = verseMetaCache.get(verseId);
   if (!meta) { reply.code(404); return { error: 'Verse not found' }; }
@@ -552,11 +555,37 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   const liveTopics  = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
   const liveChapter = meta.chapter_id;
 
-  const stmt = dba.prepare(`
+  // Fetch canonical metadata (coords, title) always from English DB;
+  // swap scripture_text from the requested language DB when not English.
+  const stmtMeta = dba.prepare(`
     SELECT verse_id, verse_title, scripture_text, book_title,
            chapter_number, verse_number, chapter_id
     FROM scriptures WHERE verse_id = ?
   `);
+  // For non-English: resolve coords from English, then fetch text from target DB
+  const stmtCoords = language !== 'en'
+    ? dba.prepare('SELECT book_title, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
+    : null;
+  const stmtTransText = language !== 'en'
+    ? targetDb.prepare(`
+        SELECT scripture_text FROM scriptures
+        WHERE book_title = ? AND chapter_number = ? AND verse_number = ?
+        LIMIT 1
+      `)
+    : null;
+
+  const resolveRow = (verse_id) => {
+    const row = stmtMeta.get(verse_id);
+    if (!row) return null;
+    if (stmtCoords && stmtTransText) {
+      const coords = stmtCoords.get(verse_id);
+      if (coords) {
+        const t = stmtTransText.get(coords.book_title, coords.chapter_number, coords.verse_number);
+        if (t?.scripture_text) row.scripture_text = t.scripture_text;
+      }
+    }
+    return row;
+  };
 
   // ── TG-based scoring (always available once TG is loaded) ────────────────
   // Build overlap map: verse_id → count of shared topics
@@ -591,7 +620,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     scores.sort((a, b) => b.score - a.score);
 
     const results = scores.slice(0, 12).map(({ verse_id, score }) => {
-      const row = stmt.get(verse_id);
+      const row = resolveRow(verse_id);
       const cTopics = verseTopicCache.get(verse_id);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
       const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
@@ -607,7 +636,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 12);
     const results = sorted.map(([vid, overlap]) => {
-      const row = stmt.get(vid);
+      const row = resolveRow(vid);
       const cTopics = verseTopicCache.get(vid);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
       const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? null) : null;
@@ -620,7 +649,17 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   // ── Last resort: FTS phrase on verse text ────────────────────────────────
   const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
   const { results: ftsResults } = phraseSearch(phrase, 0, 12, dba, fastify.log);
-  return { results: ftsResults.filter(r => r.verse_id !== verseId), fallback: true };
+  const filtered = ftsResults.filter(r => r.verse_id !== verseId);
+  if (stmtCoords && stmtTransText) {
+    for (const r of filtered) {
+      const coords = stmtCoords.get(r.verse_id);
+      if (coords) {
+        const t = stmtTransText.get(coords.book_title, coords.chapter_number, coords.verse_number);
+        if (t?.scripture_text) r.scripture_text = t.scripture_text;
+      }
+    }
+  }
+  return { results: filtered, fallback: true };
 });
 
 // ── verse translation endpoint (F4) ───────────────────────────────────────────
