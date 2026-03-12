@@ -95,28 +95,45 @@ export default function Download() {
     let active = true;
     const checkAccess = async () => {
       try {
-        const res = await fetch('https://ipwho.is/?security=1');
-        const data = await res.json();
+        const [rWho, rApi] = await Promise.allSettled([
+          fetch('https://ipwho.is/?security=1').then(r => r.json()),
+          fetch('https://ipapi.co/json/').then(r => r.json()),
+        ]);
         if (!active) return;
-        if (!data?.success) {
-          setGeoState({ checking: false, allowed: false, reason: 'Location check unavailable.' });
+
+        const who = rWho.status === 'fulfilled' ? rWho.value : null;
+        const api = rApi.status === 'fulfilled' ? rApi.value : null;
+        const countries = [
+          String(who?.country_code || '').toUpperCase(),
+          String(api?.country_code || '').toUpperCase(),
+        ].filter(Boolean);
+
+        if (!countries.length) {
+          // Fail-open to avoid false lockouts when geo services are down.
+          setGeoState({ checking: false, allowed: true, reason: 'Location provider unavailable. Proceed responsibly.' });
           return;
         }
 
-        const country = String(data.country_code || '').toUpperCase();
-        const vpnOrProxy = Boolean(data?.security?.vpn || data?.security?.proxy || data?.security?.tor);
-        if (country !== 'PH') {
+        const anyPH = countries.includes('PH');
+        const allNonPH = countries.every(c => c !== 'PH');
+        if (allNonPH) {
           setGeoState({ checking: false, allowed: false, reason: 'Downloads are available in the Philippines only.' });
           return;
         }
-        if (vpnOrProxy) {
+
+        const isTor = Boolean(who?.security?.tor);
+        const isVpnOrProxy = Boolean(who?.security?.vpn || who?.security?.proxy);
+        if (isTor || (isVpnOrProxy && !anyPH)) {
           setGeoState({ checking: false, allowed: false, reason: 'Please disable VPN/proxy to access downloads.' });
           return;
         }
-        setGeoState({ checking: false, allowed: true, reason: '' });
+
+        // Allow PH users even when one provider flags proxy (common ISP false positive).
+        const caution = isVpnOrProxy && anyPH ? 'Network flagged as proxy by one provider; downloads are allowed.' : '';
+        setGeoState({ checking: false, allowed: true, reason: caution });
       } catch {
         if (!active) return;
-        setGeoState({ checking: false, allowed: false, reason: 'Unable to verify your location.' });
+        setGeoState({ checking: false, allowed: true, reason: 'Unable to verify location. Proceed responsibly.' });
       }
     };
     checkAccess();
@@ -160,7 +177,10 @@ export default function Download() {
               />
               <span>I understand and accept this responsibility and usage policy.</span>
             </label>
-            <p className="download-meta">Release source: {releaseTag}</p>
+            <p className="download-meta">
+              Release source: {releaseTag}
+              {geoState.reason ? ` • ${geoState.reason}` : ''}
+            </p>
 
             <div className="download-grid">
               {downloadLinks.map((item) => (
