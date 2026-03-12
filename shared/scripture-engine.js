@@ -603,6 +603,31 @@ function isVerseInComeFollowMeGroup(row, group) {
   return false;
 }
 
+// Minimal weekly block override (can be expanded as full CFM calendars are added)
+const CFM_2026_OT_WEEKLY_BLOCKS = {
+  // Mar 9–15, 2026
+  11: { book: 'Genesis', chapterStart: 37, chapterEnd: 41, label: 'Genesis 37–41' },
+};
+
+function getComeFollowMeWeeklyBlock(year, group, weekNumber) {
+  if (Number(year) === 2026 && group === 'ot') {
+    return CFM_2026_OT_WEEKLY_BLOCKS[weekNumber] || null;
+  }
+  return null;
+}
+
+function getVerseIdsForWeeklyBlock(db, block) {
+  if (!block) return [];
+  const rows = db.prepare(`
+    SELECT verse_id
+    FROM scriptures
+    WHERE lower(book_title) = lower(?)
+      AND chapter_number BETWEEN ? AND ?
+    ORDER BY verse_id
+  `).all(block.book, Number(block.chapterStart), Number(block.chapterEnd));
+  return rows.map(r => r.verse_id);
+}
+
 // ── Verse of the Day ────────────────────────────────────────────────────────
 function getVerseOfTheDay(db, now = new Date()) {
   const start = Date.UTC(now.getUTCFullYear(), 0, 0);
@@ -610,7 +635,9 @@ function getVerseOfTheDay(db, now = new Date()) {
     (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
   );
   const weekOfYear = Math.floor((dayOfYear - 1) / 7);
+  const weekNumber = weekOfYear + 1;
   const cfmGroup = getComeFollowMeGroupForYear(now.getUTCFullYear());
+  const weeklyBlock = getComeFollowMeWeeklyBlock(now.getUTCFullYear(), cfmGroup, weekNumber);
 
   const LCG_A = 1664525, LCG_C = 1013904223, MOD = 2 ** 32;
   const weekSeed = ((LCG_A * (weekOfYear + now.getUTCFullYear()) + LCG_C) % MOD + MOD) % MOD;
@@ -626,7 +653,10 @@ function getVerseOfTheDay(db, now = new Date()) {
     .filter(r => isVerseInComeFollowMeGroup(r, cfmGroup))
     .map(r => r.verse_id);
 
-  const activePool = cfmPool.length ? cfmPool : VOTD_POOL;
+  const weeklyBlockPool = getVerseIdsForWeeklyBlock(db, weeklyBlock);
+  const activePool = weeklyBlockPool.length
+    ? weeklyBlockPool
+    : (cfmPool.length ? cfmPool : VOTD_POOL);
   const poolId = activePool[weekSeed % activePool.length];
 
   const verse = db.prepare(`
@@ -641,7 +671,8 @@ function getVerseOfTheDay(db, now = new Date()) {
       date: now.toISOString().slice(0, 10),
       version_citation: getVersionCitation('en', verse.volume_id),
       cfm_group: cfmGroup,
-      cfm_week: weekOfYear + 1,
+      cfm_week: weekNumber,
+      cfm_block: weeklyBlock?.label || null,
     };
   }
 
@@ -661,7 +692,8 @@ function getVerseOfTheDay(db, now = new Date()) {
     date: now.toISOString().slice(0, 10),
     version_citation: getVersionCitation('en', fallback.volume_id),
     cfm_group: cfmGroup,
-    cfm_week: weekOfYear + 1,
+    cfm_week: weekNumber,
+    cfm_block: weeklyBlock?.label || null,
   };
 }
 
