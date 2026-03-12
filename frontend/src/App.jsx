@@ -85,13 +85,13 @@ function Home() {
         <nav className="home-nav">
           <Link to="/presenter" className="home-card">
             <span className="home-card-icon">🏛️</span>
-            <span className="home-card-label">Chapel Control</span>
-            <span className="home-card-desc">Manage presentations,<br />stage testimonies</span>
+            <span className="home-card-label">Present</span>
+            <span className="home-card-desc">Search, stage, and go live<br />during your meeting</span>
           </Link>
           <Link to="/client" className="home-card">
             <span className="home-card-icon">⛪</span>
-            <span className="home-card-label">Sacred Display</span>
-            <span className="home-card-desc">Share scriptures<br />with reverence</span>
+            <span className="home-card-label">Display</span>
+            <span className="home-card-desc">Show scriptures on the<br />screen for everyone</span>
           </Link>
           <Link to="/download" className="home-card">
             <span className="home-card-icon">⬇️</span>
@@ -108,7 +108,7 @@ function Home() {
         <aside className="home-tour-prompt" aria-live="polite">
           <div className="home-tour-prompt-title">First Time Here?</div>
           <div className="home-tour-prompt-body">
-            Open Chapel Control and we will show a short walkthrough of sessions, search, and going live.
+            Open Present and we will show a short walkthrough of sessions, search, and going live.
           </div>
           <div className="home-tour-prompt-actions">
             <Link to="/presenter?tour=1" className="home-tour-btn home-tour-btn--primary" onClick={dismissHomeTourPrompt}>

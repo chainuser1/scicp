@@ -4,8 +4,8 @@ This is the web interface for Scriptures in View.
 
 ## What users can do here
 
-- Open **Chapel Control** to search, stage, and send verses live
-- Open **Sacred Display** for projection screens
+- Open **Present** to search, stage, and send verses live
+- Open **Display** for projection screens
 - Read About, Contact, Privacy, Terms, and Downloads pages
 
 ## Run locally
