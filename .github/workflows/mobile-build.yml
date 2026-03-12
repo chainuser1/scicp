@@ -5,6 +5,12 @@ on:
   push:
     tags: [ 'v*' ]
 
+env:
+  # Opt into the upcoming GitHub Actions runtime now.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Emergency fallback: set repository variable ALLOW_UNSECURE_NODE20=true
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: ${{ vars.ALLOW_UNSECURE_NODE20 == 'true' && 'true' || 'false' }}
+
 permissions:
   contents: write
 
@@ -13,13 +19,13 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -73,7 +79,7 @@ jobs:
           cp "$SRC" "$DST"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: scriptures-in-view-android-apk-${{ env.ARTIFACT_SUFFIX }}
           path: mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk
@@ -83,13 +89,13 @@ jobs:
   ios:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -129,7 +135,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload xcarchive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: scriptures-in-view-ios-xcarchive-${{ env.ARTIFACT_SUFFIX }}
           path: ${{ runner.temp }}/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}.xcarchive

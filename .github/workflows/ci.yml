@@ -6,17 +6,23 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  # Opt into the upcoming GitHub Actions runtime now.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Emergency fallback: set repository variable ALLOW_UNSECURE_NODE20=true
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: ${{ vars.ALLOW_UNSECURE_NODE20 == 'true' && 'true' || 'false' }}
+
 jobs:
   check-prod:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
