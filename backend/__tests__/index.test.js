@@ -1,4 +1,6 @@
 const { parseScriptureReference, searchScripture, segmentVerseText, fastify, registerSocketHandlers } = require('../index');
+const { getVerseOfTheDay } = require('../../shared/scripture-engine');
+const Database = require('better-sqlite3');
 
 describe('Backend API Tests', () => {
   describe('parseScriptureReference function', () => {
@@ -88,6 +90,41 @@ describe('Backend API Tests', () => {
       expect(Array.isArray(results)).toBe(true);
       expect(results).toHaveLength(0);
       expect(total).toBe(0);
+    });
+  });
+
+  describe('getVerseOfTheDay CFM cycle', () => {
+    let db;
+    const dbPath = '../resources/db/lds-scriptures-sqlite.db';
+    const inDcGroup = (v) => Number(v.volume_id) === 4 || /joseph smith\s*[—-]?\s*history|articles?\s+of\s+faith/i.test(v.book_title || '');
+    const inOtGroup = (v) => Number(v.volume_id) === 1 || /\bmoses\b|\babraham\b/i.test(v.book_title || '');
+
+    beforeAll(() => {
+      db = new Database(dbPath, { fileMustExist: true });
+    });
+    afterAll(() => {
+      if (db) db.close();
+    });
+
+    test('2026 uses OT + Moses/Abraham grouping', () => {
+      const v = getVerseOfTheDay(db, new Date(Date.UTC(2026, 0, 7)));
+      expect(v).toBeTruthy();
+      expect(inOtGroup(v)).toBe(true);
+      expect(v.cfm_group).toBe('ot');
+    });
+
+    test('2028 uses Book of Mormon grouping', () => {
+      const v = getVerseOfTheDay(db, new Date(Date.UTC(2028, 0, 7)));
+      expect(v).toBeTruthy();
+      expect(Number(v.volume_id)).toBe(3);
+      expect(v.cfm_group).toBe('bom');
+    });
+
+    test('2029 uses D&C + JS-H + AoF grouping', () => {
+      const v = getVerseOfTheDay(db, new Date(Date.UTC(2029, 0, 7)));
+      expect(v).toBeTruthy();
+      expect(inDcGroup(v)).toBe(true);
+      expect(v.cfm_group).toBe('dc');
     });
   });
 
