@@ -564,12 +564,12 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   `);
   // For non-English: resolve coords from English, then fetch text from target DB
   const stmtCoords = language !== 'en'
-    ? dba.prepare('SELECT book_title, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
+    ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
     : null;
   const stmtTransText = language !== 'en'
     ? targetDb.prepare(`
         SELECT scripture_text FROM scriptures
-        WHERE book_title = ? AND chapter_number = ? AND verse_number = ?
+        WHERE book_id = ? AND chapter_number = ? AND verse_number = ?
         LIMIT 1
       `)
     : null;
@@ -580,7 +580,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     if (stmtCoords && stmtTransText) {
       const coords = stmtCoords.get(verse_id);
       if (coords) {
-        const t = stmtTransText.get(coords.book_title, coords.chapter_number, coords.verse_number);
+        const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
         if (t?.scripture_text) row.scripture_text = t.scripture_text;
       }
     }
@@ -654,7 +654,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     for (const r of filtered) {
       const coords = stmtCoords.get(r.verse_id);
       if (coords) {
-        const t = stmtTransText.get(coords.book_title, coords.chapter_number, coords.verse_number);
+        const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
         if (t?.scripture_text) r.scripture_text = t.scripture_text;
       }
     }
