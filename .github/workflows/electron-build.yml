@@ -54,7 +54,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ matrix.platform }}
+          name: scriptures-in-view-${{ matrix.platform }}-installer-${{ github.ref_name }}
           path: |
             dist-electron/*.exe
             dist-electron/*.deb
