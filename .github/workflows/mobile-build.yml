@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute artifact suffix
+        run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -63,11 +66,17 @@ jobs:
         working-directory: mobile/android
         run: ./gradlew assembleDebug
 
+      - name: Version-stamp APK filename
+        run: |
+          SRC="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          DST="mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk"
+          cp "$SRC" "$DST"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: scriptures-in-view-android-apk-${{ github.ref_name }}
-          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          name: scriptures-in-view-android-apk-${{ env.ARTIFACT_SUFFIX }}
+          path: mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk
           if-no-files-found: warn
 
   # ── iOS Archive ─────────────────────────────────────────────────────────
@@ -75,6 +84,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute artifact suffix
+        run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -112,13 +124,13 @@ jobs:
             -workspace App.xcworkspace \
             -scheme App \
             -configuration Release \
-            -archivePath "${{ runner.temp }}/App.xcarchive" \
+            -archivePath "${{ runner.temp }}/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}.xcarchive" \
             -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Upload xcarchive
         uses: actions/upload-artifact@v4
         with:
-          name: scriptures-in-view-ios-xcarchive-${{ github.ref_name }}
-          path: ${{ runner.temp }}/App.xcarchive
+          name: scriptures-in-view-ios-xcarchive-${{ env.ARTIFACT_SUFFIX }}
+          path: ${{ runner.temp }}/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}.xcarchive
           if-no-files-found: warn
