@@ -485,6 +485,9 @@ const Presenter = () => {
   const [relatedConcept, setRelatedConcept] = useState(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [relatedPage,    setRelatedPage]    = useState(0);
+  // Topic navigation history inside the Related tab: [{label, verses, concept}]
+  const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
+  const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
@@ -1092,6 +1095,8 @@ const Presenter = () => {
     setRelatedVerses([]);
     setRelatedConcept(null);
     setRelatedPage(0);
+    setCtxTopicHistory([]);
+    setCtxTopicHistoryIdx(-1);
     setBookChapters([]);
     setCtxChapterIdx(0);
     setCtxScrolled(false);
@@ -1143,6 +1148,54 @@ const Presenter = () => {
     } finally {
       setContextLoading(false);
     }
+  };
+
+  // ── Topic drill-down inside Related tab ──────────────────────────────────
+  const loadTopicInModal = async (topicLabel) => {
+    if (!topicLabel) return;
+    setContextLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/search?q=${encodeURIComponent(topicLabel)}&page=0&pageSize=30&language=${currentLanguage}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const verses = d.results ?? [];
+      const newEntry = { label: topicLabel, verses, concept: topicLabel };
+      setCtxTopicHistory(prev => {
+        // Truncate forward history when branching from a mid-history position
+        const base = ctxTopicHistoryIdx >= 0 ? prev.slice(0, ctxTopicHistoryIdx + 1) : [];
+        const next = [...base, newEntry];
+        setCtxTopicHistoryIdx(next.length - 1);
+        return next;
+      });
+      setRelatedVerses(verses);
+      setRelatedConcept(topicLabel);
+      setRelatedPage(0);
+      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    } finally {
+      setContextLoading(false);
+    }
+  };
+
+  const ctxTopicBack = () => {
+    const newIdx = ctxTopicHistoryIdx - 1;
+    if (newIdx < 0) return;
+    const entry = ctxTopicHistory[newIdx];
+    setCtxTopicHistoryIdx(newIdx);
+    setRelatedVerses(entry.verses);
+    setRelatedConcept(entry.concept);
+    setRelatedPage(0);
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+  };
+
+  const ctxTopicForward = () => {
+    const newIdx = ctxTopicHistoryIdx + 1;
+    if (newIdx >= ctxTopicHistory.length) return;
+    const entry = ctxTopicHistory[newIdx];
+    setCtxTopicHistoryIdx(newIdx);
+    setRelatedVerses(entry.verses);
+    setRelatedConcept(entry.concept);
+    setRelatedPage(0);
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
   const loadCtxChapterByIdx = async (idx) => {
@@ -1197,6 +1250,8 @@ const Presenter = () => {
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
     setRelatedConcept(null);
+    setCtxTopicHistory([]);
+    setCtxTopicHistoryIdx(-1);
     setExpandedTranslations(new Set()); // stale cache keys become invalid on language change
     emitWithSession('update-language', { language: lang });
     if (liveVerse) emitWithSession('go-live', { verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
@@ -2759,6 +2814,28 @@ const Presenter = () => {
                       const relSlice = relatedVerses.slice(relatedPage * RELATED_PAGE_SIZE, (relatedPage + 1) * RELATED_PAGE_SIZE);
                       return (
                         <>
+                          {/* Topic history nav bar */}
+                          {ctxTopicHistory.length > 0 && (
+                            <div className="ctx-topic-nav">
+                              <button
+                                className="ctx-topic-nav-btn"
+                                disabled={ctxTopicHistoryIdx <= 0}
+                                onClick={ctxTopicBack}
+                                title="Previous topic"
+                              >◀</button>
+                              <span className="ctx-topic-nav-label">
+                                {relatedConcept
+                                  ? relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')
+                                  : 'Related'}
+                              </span>
+                              <button
+                                className="ctx-topic-nav-btn"
+                                disabled={ctxTopicHistoryIdx >= ctxTopicHistory.length - 1}
+                                onClick={ctxTopicForward}
+                                title="Next topic"
+                              >▶</button>
+                            </div>
+                          )}
                           {relatedPage > 0 && (
                             <button className="batch-nav batch-nav--prev" onClick={() => setRelatedPage(p => p - 1)}>
                               ▲ <span>Prev batch</span>
@@ -2775,9 +2852,13 @@ const Presenter = () => {
                                     <span className="ctx-item-ref">{v.verse_title}</span>
                                     <span className="ctx-item-text">{v.scripture_text}</span>
                                     {v.matched_concept && (
-                                      <span className="ctx-concept-tag">
-                                        {v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}
-                                      </span>
+                                      <button
+                                        className="ctx-concept-tag ctx-concept-tag--link"
+                                        onClick={() => loadTopicInModal(v.matched_concept)}
+                                        title={`Explore topic: ${v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}`}
+                                      >
+                                        🏷 {v.matched_concept.replace(/^_+/, '').replace(/_/g, ' ')}
+                                      </button>
                                     )}
                                     <div className="ctx-item-actions">
                                       <button onClick={() => { setStaged({...v, theme: themeForVerse(currentTheme, v)}); setContextOpen(false); }}>Stage</button>
