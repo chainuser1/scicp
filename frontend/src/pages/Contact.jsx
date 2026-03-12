@@ -3,14 +3,14 @@ import Footer from '../components/Footer';
 
 function Contact() {
   useEffect(() => {
-    document.title = 'Contact | Scripture Projection Engine';
+    document.title = 'Contact | Scriptures in View';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-      metaDesc.setAttribute('content', 'Contact the Scripture Projection Engine team for support, feedback, or collaboration opportunities. We are here to help spread the Word of God through technology.');
+      metaDesc.setAttribute('content', 'Contact Dagami Ward Dev for support and feedback about Scriptures in View.');
     } else {
       const meta = document.createElement('meta');
       meta.name = 'description';
-      meta.content = 'Contact the Scripture Projection Engine team for support, feedback, or collaboration opportunities. We are here to help spread the Word of God through technology.';
+      meta.content = 'Contact Dagami Ward Dev for support and feedback about Scriptures in View.';
       document.head.appendChild(meta);
     }
     const robotsMeta = document.querySelector('meta[name="robots"]');
@@ -35,7 +35,7 @@ function Contact() {
           </svg>
         </div>
 
-        <p className="home-eyebrow">Scripture Projector</p>
+        <p className="home-eyebrow">Scriptures in View</p>
 
         <h1 className="home-title">
           Contact Us
@@ -44,17 +44,17 @@ function Contact() {
         <div className="home-divider" />
 
         <p className="home-subtitle">
-          For any inquiries or support, please reach out to our team via email:
+          For questions, support, and feedback, contact Dagami Ward Dev:
         </p>
 
         <div className="home-divider" />
 
         <main className="contact-content">
           <p>
-            <a href="mailto:contact@scicp_dev.com">********@scip_dev.com</a>
+            <a href="mailto:contact@scicp.dev">contact@scicp.dev</a>
           </p>
           <p>
-            Lead Developer: Jayson Ramos (alias)
+            Team: Dagami Ward Dev
           </p>
         </main>
       </main>
