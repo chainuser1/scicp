@@ -1,36 +1,43 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Footer from '../components/Footer';
 
-const DOWNLOAD_LINKS = [
-  {
-    label: 'Android (Offline App)',
-    platform: 'android',
+const PLATFORM_META = [
+  { label: 'Android (Offline App)', platform: 'android' },
+  { label: 'Windows Installer', platform: 'windows' },
+  { label: 'Linux Installer', platform: 'linux' },
+  { label: 'Mac Installer', platform: 'mac' },
+];
+
+const FALLBACK_BY_PLATFORM = {
+  android: {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000059743/artifacts/5889562783',
     sha256: '11a670361a6426981391d5250895d06977a99b697480127ff1cd4b0c4463a604',
   },
-  {
-    label: 'Windows Installer',
-    platform: 'windows',
+  windows: {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889590639',
     sha256: '4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd',
   },
-  {
-    label: 'Linux Installer',
-    platform: 'linux',
+  linux: {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
     sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
   },
-  {
-    label: 'Mac Installer',
-    platform: 'mac',
+  mac: {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889569130',
     sha256: 'ec5d380ce6200833887d8d5c5ae8403644b9829d62d80265d44bcd20453f77b2',
   },
-];
+};
 
 export default function Download() {
   const [geoState, setGeoState] = useState({ checking: true, allowed: false, reason: '' });
   const [accepted, setAccepted] = useState(false);
+  const [releaseTag, setReleaseTag] = useState('fallback');
+  const [downloadLinks, setDownloadLinks] = useState(
+    PLATFORM_META.map(item => ({
+      ...item,
+      ...FALLBACK_BY_PLATFORM[item.platform],
+      source: 'fallback',
+    }))
+  );
 
   useEffect(() => {
     document.title = 'Downloads | Scriptures in View';
@@ -47,6 +54,41 @@ export default function Download() {
     if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
     const canonical = document.querySelector('link[rel="canonical"]');
     if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/download');
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadLatestReleaseAssets = async () => {
+      try {
+        const res = await fetch('https://api.github.com/repos/chainuser1/scicp/releases/latest', {
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const assets = Array.isArray(data?.assets) ? data.assets : [];
+        const find = (matcher) => assets.find(a => matcher(String(a.name || '').toLowerCase()))?.browser_download_url || null;
+        const found = {
+          android: find(n => n.endsWith('.apk')),
+          windows: find(n => n.endsWith('.exe')),
+          mac: find(n => n.endsWith('.dmg')),
+          linux: find(n => n.endsWith('.appimage')) || find(n => n.endsWith('.deb')),
+        };
+        if (!active) return;
+        setReleaseTag(data?.tag_name || 'latest');
+        setDownloadLinks(
+          PLATFORM_META.map(item => ({
+            ...item,
+            url: found[item.platform] || FALLBACK_BY_PLATFORM[item.platform].url,
+            sha256: FALLBACK_BY_PLATFORM[item.platform].sha256,
+            source: found[item.platform] ? 'release' : 'fallback',
+          }))
+        );
+      } catch {
+        // Keep fallback links
+      }
+    };
+    loadLatestReleaseAssets();
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -118,19 +160,21 @@ export default function Download() {
               />
               <span>I understand and accept this responsibility and usage policy.</span>
             </label>
+            <p className="download-meta">Release source: {releaseTag}</p>
 
             <div className="download-grid">
-              {DOWNLOAD_LINKS.map((item) => (
+              {downloadLinks.map((item) => (
                 <div key={item.platform} className="download-item">
                   <button
                     type="button"
                     className="download-btn"
-                    disabled={!accepted}
+                    disabled={!accepted || !item.url}
                     onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
                   >
                     {item.label}
                   </button>
                   <code className="download-sha">SHA256: {item.sha256}</code>
+                  <span className="download-source">{item.source === 'release' ? 'Auto-updated from latest release' : 'Using fallback link'}</span>
                 </div>
               ))}
             </div>

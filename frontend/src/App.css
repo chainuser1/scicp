@@ -6666,6 +6666,12 @@ button, [role="button"] {
   margin-top: 0.2rem;
 }
 
+.download-page .download-meta {
+  margin: 0 0 0.9rem;
+  font-size: 0.72rem;
+  color: #cdbb87;
+}
+
 .download-page .download-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -6707,4 +6713,9 @@ button, [role="button"] {
   border: 1px solid rgba(201, 168, 76, 0.2);
   border-radius: 8px;
   padding: 0.4rem 0.5rem;
+}
+
+.download-page .download-source {
+  font-size: 0.66rem;
+  color: #b5a06d;
 }
