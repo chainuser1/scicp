@@ -3,14 +3,14 @@ import Footer from '../components/Footer';
 
 function About() {
   useEffect(() => {
-    document.title = 'About | Scripture Projection Engine';
+    document.title = 'About | Scriptures in View';
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
-      metaDesc.setAttribute('content', 'Learn about Scripture Projection Engine (scicp), our mission to spread the Word of God through technology, and our vision for real-time scripture presentation.');
+      metaDesc.setAttribute('content', 'Learn what Scriptures in View can do for church worship, talks, lessons, and home scripture study.');
     } else {
       const meta = document.createElement('meta');
       meta.name = 'description';
-      meta.content = 'Learn about Scripture Projection Engine (scicp), our mission to spread the Word of God through technology, and our vision for real-time scripture presentation.';
+      meta.content = 'Learn what Scriptures in View can do for church worship, talks, lessons, and home scripture study.';
       document.head.appendChild(meta);
     }
     const robotsMeta = document.querySelector('meta[name="robots"]');
@@ -35,16 +35,16 @@ function About() {
           </svg>
         </div>
 
-        <p className="home-eyebrow">Scripture Projector</p>
+        <p className="home-eyebrow">Scriptures in View</p>
 
         <h1 className="home-title">
-          About Scripture Projection Engine
+          About Scriptures in View
         </h1>
 
         <div className="home-divider" />
 
         <p className="home-subtitle">
-          Our mission is to spread the Word of God through innovative technology, providing accessible and reliable tools for churches and religious communities to enhance their worship and study experiences.
+          Scriptures in View helps teachers, speakers, and leaders share scriptures clearly during worship, classes, and home study.
         </p>
 
         <div className="home-divider" />
@@ -52,40 +52,31 @@ function About() {
         <main className="about-content">
           <section className="mission">
             <h2>Our Mission</h2>
-            <p>Our mission is to spread the Word of God through innovative technology, providing accessible and reliable tools for churches and religious communities to enhance their worship and study experiences.</p>
+            <p>Our mission is to help people focus on the word of God with clear, reverent, and easy scripture presentation tools.</p>
           </section>
           <section className="vision">
             <h2>Our Vision</h2>
-            <p>We envision a world where technology seamlessly bridges the gap between traditional religious practices and modern digital capabilities, enabling global communities to engage with scripture in real-time, regardless of location or resources.</p>
+            <p>We want every ward, branch, family, and home to have dependable scripture presentation that is simple to run and respectful in worship settings.</p>
           </section>
           
           <section className="faq">
             <h2>Frequently Asked Questions</h2>
             <div className="faq-item">
-              <h3>What does Scripture Projection Engine do?</h3>
-              <p>A sacred display tool for churches and religious communities to project scripture verses during services with customizable themes, layouts, and multilingual support (including Cebuano).</p>
+              <h3>What can the app do?</h3>
+              <p>You can search scriptures fast, stage verses before showing them, go live to displays, switch languages, highlight text, and prepare set lists for talks or lessons.</p>
             </div>
             <div className="faq-item">
-              <h3>Is this service free?</h3>
-              <p>Yes — Scripture Projection Engine is provided completely free of charge. We intend to keep it free forever, supported by non-intrusive Google AdSense advertising.</p>
+              <h3>Where can it be used?</h3>
+              <p>It can be used on web, desktop, and Android, including offline use for church and home settings.</p>
             </div>
-       
+        
             <div className="faq-item">
-              <h3>How many volumes of scripture do you have?</h3>
-              <p>We have over 4 volumes of scripture, including the Old and New Testaments, the Book of Mormon, the Doctrine and Covenants, and the Pearl of Great Price.</p>
-            </div>
-            <div className="faq-item">
-              <h3>How does it support languages?</h3>
-              <p>We support Cebuano, English, and Tagalog.</p>
-            </div>
-           
-           <div className="faq-item">
-              <h3>Will it support other languages soon?</h3>
-              <p>Yes, we are working on adding support for other languages.</p>
+              <h3>What scriptures are available?</h3>
+              <p>The app supports the standard works used in lessons and worship, including the Bible, Book of Mormon, Doctrine and Covenants, and Pearl of Great Price.</p>
             </div>
             <div className="faq-item">
-              <h3>How does it support doctrine and practice?</h3>
-              <p>Designed specifically for classes, our engine integrates doctrinal aliases, FTS5-powered scripture search, and visual themes aligned with LDS symbolism (gold accents, Cinzel typography, and sacred imagery).</p>
+              <h3>Who built this?</h3>
+              <p>Scriptures in View is maintained by Dagami Ward Dev.</p>
             </div>
           </section>
         </main>

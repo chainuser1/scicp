@@ -3,28 +3,14 @@ import Footer from '../components/Footer';
 
 export default function Privacy() {
   useEffect(() => {
-    document.title = "Privacy Policy | Scripture Projection Engine";
-    
-    const metaDescription = document.createElement('meta');
-    metaDescription.name = "description";
-    metaDescription.content = "We do not collect any user data. Google AdSense interactions are governed by third-party policies.";
-    document.head.appendChild(metaDescription);
-
-    const metaRobots = document.createElement('meta');
-    metaRobots.name = "robots";
-    metaRobots.content = "index,follow";
-    document.head.appendChild(metaRobots);
-
-    const canonicalLink = document.createElement('link');
-    canonicalLink.rel = "canonical";
-    canonicalLink.href = "https://cap-teyyko.live/privacy";
-    document.head.appendChild(canonicalLink);
-
-    return () => {
-      document.head.removeChild(metaDescription);
-      document.head.removeChild(metaRobots);
-      document.head.removeChild(canonicalLink);
-    };
+    document.title = "Privacy Policy | Scriptures in View";
+    const metaDesc = document.querySelector('meta[name="description"]');
+    const description = "Privacy policy for Scriptures in View, including location checks for restricted downloads.";
+    if (metaDesc) metaDesc.setAttribute('content', description);
+    const robots = document.querySelector('meta[name="robots"]');
+    if (robots) robots.setAttribute('content', 'index,follow');
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/privacy');
   }, []);
 
   return (
@@ -43,7 +29,7 @@ export default function Privacy() {
           </svg>
         </div>
 
-        <p className="home-eyebrow">Scripture Projector</p>
+        <p className="home-eyebrow">Scriptures in View</p>
 
         <h1 className="home-title">
           Privacy Policy
@@ -52,7 +38,7 @@ export default function Privacy() {
         <div className="home-divider" />
 
         <p className="home-subtitle">
-          Your privacy is important to us. This policy explains how we handle your data.
+          Your privacy matters to us. This page explains what we collect and what we do not collect.
         </p>
 
         <div className="home-divider" />
@@ -60,23 +46,22 @@ export default function Privacy() {
         <main className="privacy-content">
           <section>
             <h2>Data Collection</h2>
-            <p>We do not collect, store, or process any personal data from users of Scripture Projection Engine. Our service operates without cookies, tracking scripts, or user identifiers.</p>
+            <p>For normal scripture presentation use, we do not ask for accounts and we do not collect personal profiles.</p>
           </section>
           
           <section>
-            <h2>Google AdSense</h2>
-            <p>This website utilizes Google AdSense for monetization. Your interactions with advertisements are governed solely by <a href="https://policies.google.com/technologies/ads" target="_blank" rel="noopener">Google's privacy policies</a>. We have no access to or control over data collected by third-party advertisers.</p>
+            <h2>Download Page Checks</h2>
+            <p>On the downloads page, we check country and network risk flags (such as VPN/proxy) to enforce access rules. This check is used only to allow or block access and is not used for user profiling.</p>
           </section>
           
           <section>
-            <h2>Service Terms</h2>
-            <p>By using this service, you acknowledge that:
-              <ul>
-                <li>No user data is collected by our platform</li>
-                <li>Ad interactions are independent of our site operations</li>
-                <li>We reserve the right to modify service terms with notice</li>
-              </ul>
-            </p>
+            <h2>Third-Party Services</h2>
+            <p>If a third-party service is used (for example, hosting or download providers), their own privacy policies apply to their systems.</p>
+          </section>
+
+          <section>
+            <h2>Policy Updates</h2>
+            <p>We may update this policy as the software changes. Continued use means you accept the latest published policy.</p>
           </section>
         </main>
       </main>
