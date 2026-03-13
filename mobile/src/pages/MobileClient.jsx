@@ -96,6 +96,7 @@ export default function MobileClient() {
   const [highlightedText, setHighlightedText] = useState('');
   const [fontsReady, setFontsReady]           = useState(false);
   const [readabilityMode, setReadabilityMode] = useState('balanced');
+  const [autoHighlight, setAutoHighlight] = useState(null);
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
   // F2 — Custom text / announcement mode
@@ -304,6 +305,13 @@ export default function MobileClient() {
       if (weightedPrimaryLength > 420) pressure += 1;
       if (pressure > 0) mode = pushReadabilityMode(mode, pressure >= 2 ? 2 : 1);
       setReadabilityMode(mode);
+      if (typeof lum === 'number' && !verse?.theme?.highlight_color) {
+        if (lum >= 0.55) setAutoHighlight('rgba(120, 60, 10, 0.92)');
+        else if (lum <= 0.30) setAutoHighlight('rgba(255, 232, 182, 0.97)');
+        else setAutoHighlight('rgba(220, 168, 80, 0.95)');
+      } else if (verse?.theme?.highlight_color) {
+        setAutoHighlight(null);
+      }
       const words   = displayText.trim().split(/\s+/).filter(Boolean);
       const avgWord = words.length ? words.join('').length / words.length : 0;
       setDyslexiaMode(viewport.w <= 1024 && (weightedPrimaryLength > 260 || avgWord >= 5.6));
@@ -391,7 +399,9 @@ export default function MobileClient() {
   })();
 
   const fittingRem       = fontSizeThatFits * 0.95;
-  const rawFloorBase     = vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82;
+  const hour = new Date().getHours();
+  const timeFloorAdj = (hour >= 20 || hour < 6) ? -0.08 : (hour >= 10 && hour < 18) ? 0.05 : 0;
+  const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
   const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
@@ -422,11 +432,13 @@ export default function MobileClient() {
   return (
     <div className={viewClass} style={{
       fontSize: computedFontSize,
-      fontFamily: verse.theme?.font_family || undefined,
-      ...(verse.theme?.highlight_color ? {
-        '--client-highlight': verse.theme.highlight_color,
-        '--client-highlight-glow': verse.theme.highlight_color + '88',
-      } : {}),
+      fontFamily: hasCjk
+        ? (verse.theme?.font_family || "'Noto Serif CJK SC', 'Noto Serif', Georgia, serif")
+        : (verse.theme?.font_family || undefined),
+      ...((() => {
+        const hc = verse.theme?.highlight_color || autoHighlight;
+        return hc ? { '--client-highlight': hc, '--client-highlight-glow': hc + '88' } : {};
+      })()),
     }}>
 
       <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
