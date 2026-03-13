@@ -293,7 +293,10 @@ const MobilePresenter = () => {
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
   const [totalResults, setTotalResults]     = useState(0);
-  const [currentTheme, setCurrentTheme]     = useState(themes.dark);
+  const [currentTheme, setCurrentTheme]     = useState(() => {
+    try { if (window.matchMedia('(prefers-color-scheme: light)').matches) return themes.light; } catch { /* ignore */ }
+    return themes.dark;
+  });
   const PRESENTER_HISTORY_KEY = 'scicp.presenter_history_v1';
   const [history, setHistory] = useState(() => {
     try {
@@ -493,6 +496,7 @@ const MobilePresenter = () => {
   const toastTimer                             = React.useRef(null);
   const [themeCardOpen, setThemeCardOpen]     = useState(true);
   const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
+  const [uiFontSize, setUiFontSize]           = useState(1.0); // reading font size for presenter UI
   const pendingGoLivePayload                   = useRef(null);
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
@@ -537,7 +541,9 @@ const MobilePresenter = () => {
     });
   };
 
-  // ── Copy verse text to clipboard ─────────────────────────────────────────
+  const adjustUiFontSize = (delta) => {
+    setUiFontSize(prev => Math.min(2.2, Math.max(0.75, parseFloat((prev + delta).toFixed(2)))));
+  };
   const copyVerseText = (verseObj, label = '') => {
     if (!verseObj) return;
     const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
@@ -1255,7 +1261,7 @@ const MobilePresenter = () => {
 
   return (
     <>
-    <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`}>
+    <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER
@@ -2132,6 +2138,12 @@ const MobilePresenter = () => {
                 <button className="font-size-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">-</button>
                 <span className="font-size-badge">{fontSizeRem.toFixed(1)}rem</span>
                 <button className="font-size-btn" onClick={() => adjustFontSize(0.3)} title="Larger text" aria-label="Increase font size">+</button>
+              </div>
+              <div className="font-size-controls">
+                <span className="font-size-label">Reading Size</span>
+                <button className="font-size-btn" onClick={() => adjustUiFontSize(-0.1)} title="Smaller reading text" aria-label="Decrease reading font size">-</button>
+                <span className="font-size-badge">{uiFontSize.toFixed(1)}×</span>
+                <button className="font-size-btn" onClick={() => adjustUiFontSize(0.1)} title="Larger reading text" aria-label="Increase reading font size">+</button>
               </div>
               <div className="theme-inputs">
                 <div className="theme-control-group">
