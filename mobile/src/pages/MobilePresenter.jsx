@@ -478,13 +478,6 @@ const MobilePresenter = () => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
   }, [secondaryLanguage]);
 
-  // Persist display preferences
-  useEffect(() => {
-    try {
-      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
-    } catch { /* ignore */ }
-  }, [currentTheme, fontSizeRem, uiFontSize]);
-
   // Watch OS theme changes at runtime and sync if user hasn't customized the theme
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: light)');
@@ -569,6 +562,13 @@ const MobilePresenter = () => {
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
   const resultsListRef  = useRef(null);
   const [resultsScrolled, setResultsScrolled] = useState(false);
+
+  // Persist display preferences — must be after fontSizeRem/uiFontSize declarations
+  useEffect(() => {
+    try {
+      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
+    } catch { /* ignore */ }
+  }, [currentTheme, fontSizeRem, uiFontSize]);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
