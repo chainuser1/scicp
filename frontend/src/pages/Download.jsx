@@ -80,8 +80,8 @@ export default function Download() {
     }
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/download');
+    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
+    canonical.setAttribute('href', 'https://cap-teyyko.live/download');
   }, []);
 
   useEffect(() => {
