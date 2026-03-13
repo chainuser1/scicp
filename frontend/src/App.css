@@ -3484,6 +3484,32 @@ button,
 .input-group input::placeholder { color: var(--text-dim); font-size: 0.75rem; }
 .input-group input:focus { outline: none; border-color: var(--gold-border); box-shadow: 0 0 0 2px var(--gold-dim); }
 
+.theme-select {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-family: 'Inter', sans-serif;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.theme-select:focus { outline: none; border-color: var(--gold-border); box-shadow: 0 0 0 2px var(--gold-dim); }
+
+.theme-color-input {
+  width: 100%;
+  height: 2.4rem;
+  padding: 0.2rem 0.4rem;
+  background: var(--surface-2);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.theme-color-input:focus { outline: none; border-color: var(--gold-border); }
+
 .about-content,
 .privacy-content,
 .terms-content {
@@ -4340,6 +4366,19 @@ button,
 .presenter-container--light .input-group input:focus {
   border-color: rgba(139, 58, 26, 0.45);
   box-shadow: 0 0 0 2px rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .theme-select {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #2a1c14;
+}
+.presenter-container--light .theme-select:focus {
+  border-color: rgba(139, 58, 26, 0.45);
+  box-shadow: 0 0 0 2px rgba(139, 58, 26, 0.08);
+}
+.presenter-container--light .theme-color-input {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.18);
 }
 .presenter-container--light .control-button {
   background: #ede7dc;
