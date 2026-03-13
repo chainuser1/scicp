@@ -420,7 +420,14 @@ export default function MobileClient() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className={viewClass} style={{ fontSize: computedFontSize }}>
+    <div className={viewClass} style={{
+      fontSize: computedFontSize,
+      fontFamily: verse.theme?.font_family || undefined,
+      ...(verse.theme?.highlight_color ? {
+        '--client-highlight': verse.theme.highlight_color,
+        '--client-highlight-glow': verse.theme.highlight_color + '88',
+      } : {}),
+    }}>
 
       <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
       {bgFading && prevBgUrl && (
