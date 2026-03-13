@@ -54,6 +54,20 @@ const VOLUME_THEME_BACKGROUNDS = {
   },
 };
 
+// Per-volume visual tokens: highlight colour + font pairing
+const VOLUME_THEME_TOKENS = {
+  ot:  { dark: { highlight: '#e8c97a', font: "'EB Garamond', Georgia, serif" },
+         light: { highlight: '#7a3a10', font: "'EB Garamond', Georgia, serif" } },
+  nt:  { dark: { highlight: '#d4c5f9', font: "'Cormorant Garamond', Georgia, serif" },
+         light: { highlight: '#4a3080', font: "'Cormorant Garamond', Georgia, serif" } },
+  bom: { dark: { highlight: '#f0d080', font: "'Cinzel', serif" },
+         light: { highlight: '#6b3a00', font: "'Cinzel', serif" } },
+  dc:  { dark: { highlight: '#b8e0ff', font: "Georgia, serif" },
+         light: { highlight: '#1a3a6b', font: "Georgia, serif" } },
+  pgp: { dark: { highlight: '#c8f0c8', font: "'Cormorant Garamond', Georgia, serif" },
+         light: { highlight: '#1a5a1a', font: "'Cormorant Garamond', Georgia, serif" } },
+};
+
 function resolveVolumeKey(verse) {
   const rawVolume = `${verse?.volume_short_title || ''} ${verse?.volume_title || ''}`.toLowerCase();
   if (/(^|\W)ot(\W|$)|old testament/.test(rawVolume)) return 'ot';
@@ -75,8 +89,19 @@ function themeForVerse(baseTheme, verse) {
   const volumeKey = resolveVolumeKey(verse);
   const tone = baseTheme?.tone === 'dark' ? 'dark' : 'light';
   const imageUrl = volumeKey ? VOLUME_THEME_BACKGROUNDS[volumeKey]?.[tone] : null;
-  if (!imageUrl) return baseTheme;
-  return { ...baseTheme, background_url: `url('${imageUrl}')` };
+  const tokens = volumeKey ? VOLUME_THEME_TOKENS[volumeKey]?.[tone] : null;
+
+  // Only apply volume tokens if user hasn't overridden them from defaults
+  const defaultFont = themes[tone]?.font_family;
+  const shouldApplyFont = tokens && (!baseTheme?.font_family || baseTheme.font_family === defaultFont);
+  const shouldApplyHighlight = tokens && !baseTheme?.highlight_color;
+
+  return {
+    ...baseTheme,
+    ...(imageUrl ? { background_url: `url('${imageUrl}')` } : {}),
+    ...(shouldApplyFont ? { font_family: tokens.font } : {}),
+    ...(shouldApplyHighlight ? { highlight_color: tokens.highlight } : {}),
+  };
 }
 
 /* ─── Emblem ─── */
@@ -305,6 +330,10 @@ const MobilePresenter = () => {
   const [results, setResults]               = useState([]);
   const [totalResults, setTotalResults]     = useState(0);
   const [currentTheme, setCurrentTheme]     = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('scicp.display_prefs_v1'));
+      if (saved?.theme) return saved.theme;
+    } catch { /* ignore */ }
     try { if (window.matchMedia('(prefers-color-scheme: light)').matches) return themes.light; } catch { /* ignore */ }
     return themes.dark;
   });
@@ -449,6 +478,30 @@ const MobilePresenter = () => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
   }, [secondaryLanguage]);
 
+  // Persist display preferences
+  useEffect(() => {
+    try {
+      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
+    } catch { /* ignore */ }
+  }, [currentTheme, fontSizeRem, uiFontSize]);
+
+  // Watch OS theme changes at runtime and sync if user hasn't customized the theme
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)');
+    const onOsThemeChange = (e) => {
+      setCurrentTheme(prev => {
+        // Only auto-switch if current theme is still a default (not user-customized)
+        const isDefaultDark = prev === themes.dark || (prev?.tone === 'dark' && !prev?.highlight_color && !prev?.font_family?.includes('Cinzel'));
+        const isDefaultLight = prev === themes.light || (prev?.tone === 'light' && !prev?.highlight_color);
+        if (e.matches && isDefaultDark) return themes.light;
+        if (!e.matches && isDefaultLight) return themes.dark;
+        return prev;
+      });
+    };
+    media.addEventListener('change', onOsThemeChange);
+    return () => media.removeEventListener('change', onOsThemeChange);
+  }, []);
+
   // F1 — reset book list when language changes
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
 
@@ -505,9 +558,12 @@ const MobilePresenter = () => {
   }, [history]);
   const [toastMsg, setToastMsg]               = useState('');
   const toastTimer                             = React.useRef(null);
-  const [themeCardOpen, setThemeCardOpen]     = useState(true);
-  const [fontSizeRem, setFontSizeRem]         = useState(4.1); // mirrors currentTheme.font_size
-  const [uiFontSize, setUiFontSize]           = useState(1.0); // reading font size for presenter UI
+  const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
+  const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
+  const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
+  const [autoAdvance, setAutoAdvance]         = useState(false);
+  const [autoAdvanceSec, setAutoAdvanceSec]   = useState(5);
+  const autoAdvanceTimer                       = useRef(null);
   const pendingGoLivePayload                   = useRef(null);
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
@@ -1250,6 +1306,31 @@ const MobilePresenter = () => {
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
+
+  // Auto-advance segments
+  useEffect(() => {
+    clearTimeout(autoAdvanceTimer.current);
+    if (!autoAdvance || !liveVerse) return;
+    const seg = liveVerse.segments?.[liveVerse.currentSegment] || liveVerse.scripture_text || '';
+    const wordCount = seg.trim().split(/\s+/).filter(Boolean).length;
+    const dwell = Math.max(autoAdvanceSec * 1000, wordCount * 420);
+    const hasNext = liveVerse.segments && liveVerse.currentSegment < liveVerse.segments.length - 1;
+    if (!hasNext) return;
+    autoAdvanceTimer.current = setTimeout(() => {
+      fetchAdjacent('next', false);
+    }, dwell);
+    return () => clearTimeout(autoAdvanceTimer.current);
+  }, [autoAdvance, liveVerse, autoAdvanceSec]);
+
+  // Auto-suggest layout based on text length
+  useEffect(() => {
+    if (!staged) return;
+    const wordCount = (staged.scripture_text || '').trim().split(/\s+/).filter(Boolean).length;
+    const currentLayout = currentTheme?.layout || 'centered';
+    if (wordCount > 80 && currentLayout === 'lower-third') {
+      showToast('💡 Long verse — consider switching to "Centered" layout for readability');
+    }
+  }, [staged?.verse_id]);
 
   const hasSegments = liveVerse?.segments?.length > 1;
   const totalPages  = totalResults > 0 ? Math.ceil(totalResults / PAGE_SIZE) : (results.length > 0 ? 1 : 0);
@@ -2143,6 +2224,17 @@ const MobilePresenter = () => {
                 <button className={`theme-btn${currentTheme === themes.light ? ' active' : ''}`} onClick={() => handleThemeChange(themes.light)}>Light</button>
                 <button className={`theme-btn${currentTheme === themes.dark ? ' active' : ''}`} onClick={() => handleThemeChange(themes.dark)}>Dark</button>
               </div>
+              {/* Live preview tile */}
+              <div className="theme-preview-tile" style={{
+                backgroundImage: currentTheme?.background_url || undefined,
+                fontFamily: currentTheme?.font_family || undefined,
+              }}>
+                <span className="theme-preview-text" style={{
+                  color: currentTheme?.tone === 'light' ? 'rgba(18,8,2,0.95)' : 'rgba(248,240,222,0.97)',
+                }}>
+                  {staged?.scripture_text?.slice(0, 60) || liveVerse?.scripture_text?.slice(0, 60) || 'Scripture preview…'}
+                </span>
+              </div>
               {/* Font size control */}
               <div className="font-size-controls">
                 <span className="font-size-label">Text Size</span>
@@ -2155,6 +2247,18 @@ const MobilePresenter = () => {
                 <button className="font-size-btn" onClick={() => adjustUiFontSize(-0.1)} title="Smaller reading text" aria-label="Decrease reading font size">-</button>
                 <span className="font-size-badge">{uiFontSize.toFixed(1)}×</span>
                 <button className="font-size-btn" onClick={() => adjustUiFontSize(0.1)} title="Larger reading text" aria-label="Increase reading font size">+</button>
+              </div>
+              <div className="font-size-controls">
+                <span className="font-size-label">Auto-Advance</span>
+                <button
+                  className={`font-size-btn${autoAdvance ? ' active' : ''}`}
+                  onClick={() => setAutoAdvance(v => !v)}
+                  title={autoAdvance ? 'Disable auto-advance' : 'Enable auto-advance segments'}
+                  style={{ minWidth: '3.5rem', fontSize: '0.7rem' }}
+                >{autoAdvance ? 'ON' : 'OFF'}</button>
+                <button className="font-size-btn" onClick={() => setAutoAdvanceSec(s => Math.max(3, s - 1))} title="Shorter dwell time">−</button>
+                <span className="font-size-badge">{autoAdvanceSec}s</span>
+                <button className="font-size-btn" onClick={() => setAutoAdvanceSec(s => Math.min(30, s + 1))} title="Longer dwell time">+</button>
               </div>
               <div className="theme-inputs">
                 <div className="theme-control-group">
