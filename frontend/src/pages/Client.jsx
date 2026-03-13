@@ -771,7 +771,7 @@ function Client() {
     };
     tune();
     return () => { active = false; };
-  }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
+  }, [verse?.theme?.background_url, verse?.theme?.highlight_color, displayText, viewport.w, prefersReducedMotion]);
 
   // ─── Derived display props ────────────────────────────────────────────────
   // True when currently displaying the VOTD (no real verse has been sent yet)
