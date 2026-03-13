@@ -882,7 +882,14 @@ function Client() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className={viewClass} style={{ fontSize: computedFontSize }}
+    <div className={viewClass} style={{
+      fontSize: computedFontSize,
+      fontFamily: verse.theme?.font_family || undefined,
+      ...(verse.theme?.highlight_color ? {
+        '--client-highlight': verse.theme.highlight_color,
+        '--client-highlight-glow': verse.theme.highlight_color + '88',
+      } : {}),
+    }}
       onClick={isScreensaver ? resetScreensaver : undefined}
       onKeyDown={isScreensaver ? resetScreensaver : undefined}
       tabIndex={isScreensaver ? 0 : undefined}

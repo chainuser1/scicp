@@ -20,6 +20,17 @@ const themes = {
   }
 };
 
+const FONT_FAMILIES = [
+  { label: 'Cormorant Garamond (Sacred)',  value: "'Cormorant Garamond', Georgia, serif" },
+  { label: 'Cinzel (Classic Roman)',        value: "'Cinzel', serif" },
+  { label: 'EB Garamond (Traditional)',     value: "'EB Garamond', Georgia, serif" },
+  { label: 'Palatino (Elegant)',            value: "Palatino Linotype, Palatino, Book Antiqua, serif" },
+  { label: 'Georgia (Readable)',            value: "Georgia, serif" },
+  { label: 'Times New Roman (Classic)',     value: "'Times New Roman', Times, serif" },
+  { label: 'Arial (Clean Sans)',            value: "Arial, Helvetica, sans-serif" },
+  { label: 'OpenDyslexic (Accessible)',     value: "OpenDyslexic, Arial, sans-serif" },
+];
+
 const VOLUME_THEME_BACKGROUNDS = {
   ot: {
     light: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default',
@@ -2734,6 +2745,30 @@ const Presenter = () => {
                       setBgUrlInput('');
                     }}>Apply</button>
                   </div>
+                </div>
+                <div className="theme-control-group">
+                  <label htmlFor="font-family-sel">Font Family</label>
+                  <select
+                    id="font-family-sel"
+                    className="theme-select"
+                    value={currentTheme?.font_family || FONT_FAMILIES[0].value}
+                    onChange={e => handleThemeChange({ ...currentTheme, font_family: e.target.value })}
+                  >
+                    {FONT_FAMILIES.map(f => (
+                      <option key={f.value} value={f.value}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="theme-control-group">
+                  <label htmlFor="highlight-color">Highlight Color</label>
+                  <input
+                    id="highlight-color"
+                    type="color"
+                    className="theme-color-input"
+                    value={currentTheme?.highlight_color || '#ffe8b6'}
+                    onChange={e => handleThemeChange({ ...currentTheme, highlight_color: e.target.value })}
+                    title="Choose highlight text color for client display"
+                  />
                 </div>
               </div>
             </>
