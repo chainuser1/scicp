@@ -694,6 +694,8 @@ const Presenter = () => {
     document.title = 'Presenter | Scriptures in View';
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
+    // Remove any canonical — this is an app screen, not a crawlable content page.
+    document.querySelector('link[rel="canonical"]')?.remove();
   }, []);
 
   useEffect(() => {

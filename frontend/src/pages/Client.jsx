@@ -328,6 +328,8 @@ function Client() {
     document.title = 'Client Display | Scriptures in View';
     const m = document.querySelector('meta[name="robots"]');
     if (m) m.setAttribute('content', 'noindex,nofollow');
+    // Remove any canonical — this is an app screen, not a crawlable content page.
+    document.querySelector('link[rel="canonical"]')?.remove();
   }, []);
 
   // ─── PWA service worker registration ─────────────────────────────────────
