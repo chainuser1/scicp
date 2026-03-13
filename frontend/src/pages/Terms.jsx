@@ -9,8 +9,8 @@ export default function Terms() {
     if (metaDesc) metaDesc.setAttribute('content', description);
     const robots = document.querySelector('meta[name="robots"]');
     if (robots) robots.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/terms');
+    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
+    canonical.setAttribute('href', 'https://cap-teyyko.live/terms');
   }, []);
 
   return (
