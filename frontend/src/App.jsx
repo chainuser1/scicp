@@ -57,8 +57,8 @@ function Home() {
     document.title = 'Scriptures in View | Real-Time Scripture Presentation';
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) canonical.setAttribute('href', 'https://cap-teyyko.live/');
+    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
+    canonical.setAttribute('href', 'https://cap-teyyko.live/');
   }, []);
 
   return (
