@@ -1848,6 +1848,39 @@ fastify.get('/chapter/:chapter_id/entities', async (request, reply) => {
   } catch { return { chapter_id: chapterId, people: [], places: [], ready: false }; }
 });
 
+// ── HTTP route: sermon topic search (chapter-level) ──────────────────────────
+fastify.get('/sermon-search', async (request, reply) => {
+  const { q, limit: lim = '12' } = request.query;
+  if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
+  if (!db_tags) return { results: [], total: 0, ready: false };
+  const limit = Math.min(30, Math.max(1, parseInt(lim, 10) || 12));
+  const term = q.trim().toLowerCase();
+  try {
+    const rows = db_tags.prepare(`
+      SELECT chapter_id, book_id, chapter_num, summary_text, top_topics_json
+      FROM chapter_summaries
+      WHERE lower(summary_text) LIKE ? OR lower(top_topics_json) LIKE ?
+      LIMIT ?
+    `).all(`%${term}%`, `%${term}%`, limit);
+    const stmtTitle = dba.prepare('SELECT book_title FROM scriptures WHERE book_id = ? LIMIT 1');
+    const results = rows.map(r => {
+      const meta = stmtTitle.get(r.book_id);
+      return {
+        chapter_id:   r.chapter_id,
+        book_id:      r.book_id,
+        chapter_num:  r.chapter_num,
+        book_title:   meta?.book_title || '',
+        summary_text: r.summary_text || '',
+        top_topics:   JSON.parse(r.top_topics_json || '[]').slice(0, 5),
+      };
+    });
+    return { results, total: results.length, query: q };
+  } catch (err) {
+    fastify.log.error(err);
+    return { results: [], total: 0, query: q };
+  }
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
