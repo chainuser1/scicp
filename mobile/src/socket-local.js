@@ -210,6 +210,13 @@ function emit(event, payload, ackCallback) {
       break;
     }
 
+    case 'now-reading': {
+      const { on, verse_id } = payload || {};
+      fire('now-reading', { on: !!on, verse_id: verse_id || null });
+      sendToDisplay({ type: 'now-reading', data: { on: !!on, verse_id: verse_id || null } });
+      break;
+    }
+
     // ── Session events (no-op on mobile — single local session) ───────────
     case 'join-session': {
       if (typeof ackCallback === 'function') {

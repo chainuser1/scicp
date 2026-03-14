@@ -106,6 +106,7 @@ function Client() {
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
   const [versePov, setVersePov] = useState(null);
+  const [nowReadingOn, setNowReadingOn] = useState(false); // presenter-controlled "Now Reading" label
 
   const [verse, setVerse] = useState({
     scripture_text: '',
@@ -626,6 +627,7 @@ function Client() {
       setPresenterSessionLocked(false);
       // Stop kiosk cycling unconditionally — no leftover timer should fire after join
       setIsKioskMode(false);
+      setNowReadingOn(false); // auto-disable Now Reading when presenter connects
       if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
       setShowQrOverlay(false); // hide QR regardless — a presenter is in the room
       if (presenterJoinedRef.current) return; // rest only runs on first join
@@ -699,6 +701,8 @@ function Client() {
       img.src = background_url;
     };
 
+    const handleNowReading = ({ on }) => setNowReadingOn(!!on);
+
     socket.on('update-verse',         handleVerse);
     socket.on('update-theme',         handleTheme);
     socket.on('highlight-text',       handleHighlight);
@@ -713,6 +717,7 @@ function Client() {
     socket.on('connect_error',        handleConnectError);
     socket.on('custom-text',          handleCustomText);
     socket.on('preload-background',   handlePreloadBackground);
+    socket.on('now-reading',          handleNowReading);
 
     if (socket.connected) handleConnect();
 
@@ -731,6 +736,7 @@ function Client() {
       socket.off('connect_error',        handleConnectError);
       socket.off('custom-text',          handleCustomText);
       socket.off('preload-background',   handlePreloadBackground);
+      socket.off('now-reading',          handleNowReading);
       if (screensaverTimerRef.current)   clearTimeout(screensaverTimerRef.current);
       if (kioskTimerRef.current)         clearTimeout(kioskTimerRef.current);
       if (bgFadeTimer.current)           clearTimeout(bgFadeTimer.current);
@@ -985,9 +991,9 @@ function Client() {
                   {isShowingVotd && (
                     <span className="client-votd-label">✦ Verse of the Day</span>
                   )}
-                  {isKioskMode && !presenterJoined && !isShowingVotd && (
+                  {(isKioskMode && !presenterJoined && !isShowingVotd) || nowReadingOn ? (
                     <span className="client-votd-label">✦ Now Reading</span>
-                  )}
+                  ) : null}
                 </div>
               )}
               {/* F7 — segment dots replacing single › indicator */}
