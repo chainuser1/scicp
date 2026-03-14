@@ -535,9 +535,11 @@ const Presenter = () => {
   // Floating word-explore chip: { word, x, y } | null
   const [ctxWordChip, setCtxWordChip] = useState(null);
   // ── Entity (named person/place) state ────────────────────────────────────
-  const [verseEntities, setVerseEntities]   = useState({ people: [], places: [] });
-  const [verseTags,     setVerseTags]       = useState({ pov: null, labels: [] });
-  const [entitySearch,  setEntitySearch]    = useState(null); // { name, type, results, total }
+  const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
+  const [verseTags,       setVerseTags]       = useState({ pov: null, labels: [] });
+  const [entitySearch,    setEntitySearch]    = useState(null);
+  const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
+  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
@@ -644,9 +646,18 @@ const Presenter = () => {
     return () => media.removeEventListener('change', onOsThemeChange);
   }, []);
 
-  // Fetch entities and doctrine tags for the live verse
+  // Fetch entities and doctrine tags for the live verse; reset chapter-level state on chapter change
   useEffect(() => {
-    if (!liveVerse?.verse_id) { setVerseEntities({ people: [], places: [] }); setVerseTags({ pov: null, labels: [] }); return; }
+    if (!liveVerse?.verse_id) {
+      setVerseEntities({ people: [], places: [] });
+      setVerseTags({ pov: null, labels: [] });
+      setChapterEntities({ people: [], places: [], ready: false });
+      setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+      return;
+    }
+    // Reset chapter-level data when chapter changes
+    setChapterEntities({ people: [], places: [], ready: false });
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
     let cancelled = false;
     Promise.all([
       fetch(`${API_URL}/verse/${liveVerse.verse_id}/entities`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -1231,10 +1242,22 @@ const Presenter = () => {
           if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
-        const res = await fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`);
-        if (res.ok) {
-          const d = await res.json();
+        const [versesRes, summaryRes, entitiesRes] = await Promise.all([
+          fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`),
+          fetch(`${API_URL}/chapter/${chapterId}/summary`),
+          fetch(`${API_URL}/chapter/${chapterId}/entities`),
+        ]);
+        if (versesRes.ok) {
+          const d = await versesRes.json();
           setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
+        }
+        if (summaryRes.ok) {
+          const d = await summaryRes.json();
+          setChapterSummary(d);
+        }
+        if (entitiesRes.ok) {
+          const d = await entitiesRes.json();
+          setChapterEntities(d);
         }
       } else if (tab === 'related' && !relatedVerses.length) {
         const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?page=0&pageSize=${RELATED_PAGE_SIZE}&language=${currentLanguage}`);
@@ -2697,16 +2720,19 @@ const Presenter = () => {
                 )}
               </div>
             </div>
-            {/* Entity chips on staged verse */}
-            {(verseEntities.people.length > 0 || verseEntities.places.length > 0) && (
+            {/* POV mood badge + doctrine chips on staged verse */}
+            {(verseEntities.people.length > 0 || verseEntities.places.length > 0 || verseTags.pov) && (
               <div className="preview-entity-chips">
-                {verseEntities.people.slice(0, 4).map(p => (
+                {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                {verseTags.labels.slice(0, 3).map(t => (
+                  <span key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview">{t.label}</span>
+                ))}
+                {verseEntities.people.slice(0, 3).map(p => (
                   <span key={p} className="ctx-entity-chip ctx-entity-chip--person">{p}</span>
                 ))}
-                {verseEntities.places.slice(0, 3).map(p => (
+                {verseEntities.places.slice(0, 2).map(p => (
                   <span key={p} className="ctx-entity-chip ctx-entity-chip--place">{p}</span>
                 ))}
-                {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
               </div>
             )}
             <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
@@ -3076,8 +3102,12 @@ const Presenter = () => {
                   </span>
                 )}
               </button>
+              <button className={`ctx-tab${contextTab === 'summary' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); }}>
+                Summary
+              </button>
               <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('entities'); setEntitySearch(null); }}>
+                onClick={() => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); }}>
                 People &amp; Places
               </button>
             </div>
@@ -3195,10 +3225,55 @@ const Presenter = () => {
                       );
                     })()}
                   </>
+                ) : contextTab === 'summary' ? (
+                  /* ── Summary tab ── */
+                  <div className="ctx-summary-panel">
+                    {!chapterSummary.ready && <p className="ctx-empty">Loading summary…</p>}
+                    {chapterSummary.ready && (
+                      <>
+                        {/* Top doctrine topics */}
+                        {chapterSummary.top_topics.length > 0 && (
+                          <div className="ctx-tag-row ctx-tag-row--topics">
+                            {chapterSummary.top_topics.map(t => (
+                              <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>
+                                {t.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {/* Summary prose / key verses */}
+                        {chapterSummary.summary_text && (
+                          <div className="ctx-summary-text">
+                            <span className="ctx-summary-method-badge">
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Key Verses'}
+                            </span>
+                            <p>{chapterSummary.summary_text}</p>
+                          </div>
+                        )}
+                        {/* Key verses (extractive highlights) */}
+                        {chapterSummary.key_verses.length > 0 && chapterSummary.summary_method !== 'extractive' && (
+                          <div className="ctx-key-verses">
+                            <span className="ctx-entity-label">📌 Key Verses</span>
+                            <ul className="ctx-items-list">
+                              {chapterSummary.key_verses.map(v => (
+                                <li key={v.verse_id} className="ctx-item">
+                                  <span className="ctx-item-ref">v.{v.verse_number}</span>
+                                  <span className="ctx-item-text">{v.text}</span>
+                                  <div className="ctx-item-actions">
+                                    <button onClick={() => { setStaged({ ...v, scripture_text: v.text, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 ) : (
-                  /* ── People & Places tab ── */
+                  /* ── People & Places tab — chapter level ── */
                   <div className="ctx-entities-panel">
-                    {/* POV + Doctrine badges */}
+                    {/* POV + Doctrine badges from live verse */}
                     {verseTags.pov && (
                       <div className="ctx-tag-row">
                         <span className="ctx-pov-badge">{verseTags.pov}</span>
@@ -3210,12 +3285,12 @@ const Presenter = () => {
                       </div>
                     )}
 
-                    {/* Named people */}
-                    {verseEntities.people.length > 0 && (
+                    {/* Named people — chapter level */}
+                    {chapterEntities.people.length > 0 && (
                       <div className="ctx-entity-group">
-                        <span className="ctx-entity-label">👤 People</span>
+                        <span className="ctx-entity-label">👤 People in this chapter</span>
                         <div className="ctx-entity-chips">
-                          {verseEntities.people.map(p => (
+                          {chapterEntities.people.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
                               onClick={() => {
                                 setEntitySearch({ name: p, type: 'person', loading: true, results: [], total: 0 });
@@ -3230,12 +3305,12 @@ const Presenter = () => {
                       </div>
                     )}
 
-                    {/* Named places */}
-                    {verseEntities.places.length > 0 && (
+                    {/* Named places — chapter level */}
+                    {chapterEntities.places.length > 0 && (
                       <div className="ctx-entity-group">
-                        <span className="ctx-entity-label">📍 Places</span>
+                        <span className="ctx-entity-label">📍 Places in this chapter</span>
                         <div className="ctx-entity-chips">
-                          {verseEntities.places.map(p => (
+                          {chapterEntities.places.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
                               onClick={() => {
                                 setEntitySearch({ name: p, type: 'place', loading: true, results: [], total: 0 });
@@ -3273,8 +3348,9 @@ const Presenter = () => {
                       </div>
                     )}
 
-                    {verseEntities.people.length === 0 && verseEntities.places.length === 0 && !verseTags.pov && (
-                      <p className="ctx-empty">{liveVerse?.verse_id ? 'No named entities found in this verse.' : 'No verse selected.'}</p>
+                    {!chapterEntities.ready && <p className="ctx-empty">Loading people &amp; places…</p>}
+                    {chapterEntities.ready && chapterEntities.people.length === 0 && chapterEntities.places.length === 0 && !verseTags.pov && (
+                      <p className="ctx-empty">No named people or places found in this chapter.</p>
                     )}
                   </div>
                 )}

@@ -1808,6 +1808,46 @@ fastify.get('/verse/:verse_id/tags', async (request, reply) => {
   } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; }
 });
 
+// ── HTTP route: get chapter summary + key verses + top topics ─────────────────
+fastify.get('/chapter/:chapter_id/summary', async (request, reply) => {
+  const chapterId = parseInt(request.params.chapter_id, 10);
+  if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; }
+  if (!db_tags) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
+  try {
+    const row = db_tags.prepare('SELECT summary_text, summary_method, key_verses_json, top_topics_json FROM chapter_summaries WHERE chapter_id = ?').get(chapterId);
+    if (!row) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
+    return {
+      chapter_id:     chapterId,
+      summary_text:   row.summary_text,
+      summary_method: row.summary_method || 'extractive',
+      key_verses:     JSON.parse(row.key_verses_json  || '[]'),
+      top_topics:     JSON.parse(row.top_topics_json  || '[]'),
+      ready: true
+    };
+  } catch { return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false }; }
+});
+
+// ── HTTP route: get people & places for a chapter (aggregated from verse_entities) ──
+fastify.get('/chapter/:chapter_id/entities', async (request, reply) => {
+  const chapterId = parseInt(request.params.chapter_id, 10);
+  if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; }
+  if (!db_tags) return { chapter_id: chapterId, people: [], places: [], ready: false };
+  try {
+    const rows = db_tags.prepare(`
+      SELECT ve.people, ve.places
+      FROM verse_entities ve
+      JOIN verses v ON v.id = ve.verse_id
+      WHERE v.chapter_id = ?
+    `).all(chapterId);
+    const peopleSet = new Set(), placesSet = new Set();
+    for (const r of rows) {
+      if (r.people) r.people.split('|').forEach(p => p.trim() && peopleSet.add(p.trim()));
+      if (r.places) r.places.split('|').forEach(p => p.trim() && placesSet.add(p.trim()));
+    }
+    return { chapter_id: chapterId, people: [...peopleSet].sort(), places: [...placesSet].sort(), ready: true };
+  } catch { return { chapter_id: chapterId, people: [], places: [], ready: false }; }
+});
+
 const start = async () => {
   try {
     const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;

@@ -433,6 +433,12 @@ const MobilePresenter = () => {
   const [relatedPage,    setRelatedPage]    = useState(0);
   const [relatedTotal,   setRelatedTotal]   = useState(0);
   const [relatedBatchPage, setRelatedBatchPage] = useState(0);
+  // NLP tags + chapter intelligence
+  const [verseTags,       setVerseTags]       = useState({ pov: null, labels: [], ready: false });
+  const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
+  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+  const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
+  const [entitySearch,    setEntitySearch]    = useState(null);
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
@@ -461,6 +467,16 @@ const MobilePresenter = () => {
     setCtxChapterIdx(0);
     setCtxScrolled(false);
     setCtxAtBottom(false);
+    setVerseTags({ pov: null, labels: [], ready: false });
+    setVerseEntities({ people: [], places: [] });
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setChapterEntities({ people: [], places: [], ready: false });
+    setEntitySearch(null);
+    // Fetch verse-level NLP tags
+    if (liveVerse?.verse_id) {
+      const tags = svc.getVerseTags(liveVerse.verse_id);
+      if (tags) setVerseTags(tags);
+    }
   }, [liveVerse?.verse_id]);
   // Persist setlist to localStorage
   useEffect(() => {
@@ -908,6 +924,11 @@ const MobilePresenter = () => {
         if (!chapterId) { setContextLoading(false); return; }
         const verses = svc.browse('verses', { chapterId }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
+        // Load chapter-level NLP data
+        const summary  = svc.getChapterSummary(chapterId);
+        const entities = svc.getChapterEntities(chapterId);
+        setChapterSummary(summary);
+        setChapterEntities(entities);
       } else if (tab === 'related' && !relatedVerses.length) {
         const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
         const allResults = results ?? [];
@@ -2115,6 +2136,15 @@ const MobilePresenter = () => {
                 )}
               </div>
             </div>
+            {/* POV + doctrine chips on staged verse */}
+            {(verseTags.pov || verseTags.labels.length > 0) && (
+              <div className="preview-entity-chips">
+                {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                {verseTags.labels.slice(0, 3).map(t => (
+                  <span key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview">{t.label}</span>
+                ))}
+              </div>
+            )}
             <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>Go Live</button>
           </section>
         )}
@@ -2411,6 +2441,14 @@ const MobilePresenter = () => {
                   </span>
                 )}
               </button>
+              <button className={`ctx-tab${contextTab === 'summary' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); }}>
+                Summary
+              </button>
+              <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); }}>
+                People &amp; Places
+              </button>
             </div>
             <div className="ctx-body-wrap">
               <div className="ctx-body"
@@ -2527,6 +2565,85 @@ const MobilePresenter = () => {
                   </>
                 )}
               </div>
+              {/* ── Summary tab ── */}
+              {contextTab === 'summary' && (
+                <div className="ctx-body" style={{ overflowY: 'auto' }}>
+                  <div className="ctx-summary-panel">
+                    {!chapterSummary.ready && <p className="ctx-empty">Loading summary…</p>}
+                    {chapterSummary.ready && (
+                      <>
+                        {chapterSummary.top_topics.length > 0 && (
+                          <div className="ctx-tag-row ctx-tag-row--topics">
+                            {chapterSummary.top_topics.map(t => (
+                              <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>{t.label}</span>
+                            ))}
+                          </div>
+                        )}
+                        {chapterSummary.summary_text && (
+                          <div className="ctx-summary-text">
+                            <span className="ctx-summary-method-badge">
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Key Verses'}
+                            </span>
+                            <p>{chapterSummary.summary_text}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* ── People & Places tab — chapter level ── */}
+              {contextTab === 'entities' && (
+                <div className="ctx-body" style={{ overflowY: 'auto' }}>
+                  <div className="ctx-entities-panel">
+                    {verseTags.pov && (
+                      <div className="ctx-tag-row">
+                        <span className="ctx-pov-badge">{verseTags.pov}</span>
+                        {verseTags.labels.slice(0, 4).map(t => (
+                          <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>{t.label}</span>
+                        ))}
+                      </div>
+                    )}
+                    {chapterEntities.people.length > 0 && (
+                      <div className="ctx-entity-group">
+                        <span className="ctx-entity-label">👤 People in this chapter</span>
+                        <div className="ctx-entity-chips">
+                          {chapterEntities.people.map(p => (
+                            <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
+                              onClick={() => setEntitySearch({ name: p, type: 'person', loading: false, results: [], total: 0 })}
+                            >{p}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {chapterEntities.places.length > 0 && (
+                      <div className="ctx-entity-group">
+                        <span className="ctx-entity-label">📍 Places in this chapter</span>
+                        <div className="ctx-entity-chips">
+                          {chapterEntities.places.map(p => (
+                            <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
+                              onClick={() => setEntitySearch({ name: p, type: 'place', loading: false, results: [], total: 0 })}
+                            >{p}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {entitySearch && (
+                      <div className="ctx-entity-results">
+                        <div className="ctx-entity-results-header">
+                          <span>"{entitySearch.name}"</span>
+                          <button className="ctx-close-mini" onClick={() => setEntitySearch(null)}>✕</button>
+                        </div>
+                        <p className="ctx-empty">Cross-verse entity search coming soon.</p>
+                      </div>
+                    )}
+                    {!chapterEntities.ready && <p className="ctx-empty">Loading people &amp; places…</p>}
+                    {chapterEntities.ready && chapterEntities.people.length === 0 && chapterEntities.places.length === 0 && (
+                      <p className="ctx-empty">No named people or places found in this chapter.</p>
+                    )}
+                  </div>
+                </div>
+              )}
               {/* Scroll fade hint */}
               {!ctxAtBottom && chapterVerses.length > 3 && contextTab === 'chapter' && (
                 <div className="ctx-scroll-fade" aria-hidden="true" />

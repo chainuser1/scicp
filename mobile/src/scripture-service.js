@@ -171,6 +171,57 @@ export function verseOfTheDay() {
   return getVerseOfTheDay(adapter);
 }
 
+// ── NLP / Tags ──────────────────────────────────────────────────────────────
+
+export function getVerseTags(verseId) {
+  const tagsDb = getDb('tags');
+  if (!tagsDb) return { pov: null, labels: [], ready: false };
+  try {
+    const rows = tagsDb.exec('SELECT pov, labels_json FROM verse_doctrine_tags WHERE verse_id = ?', [verseId]);
+    if (!rows.length || !rows[0].values.length) return { pov: null, labels: [], ready: false };
+    const [pov, labelsJson] = rows[0].values[0];
+    return { pov: pov || null, labels: JSON.parse(labelsJson || '[]'), ready: true };
+  } catch { return { pov: null, labels: [], ready: false }; }
+}
+
+export function getChapterSummary(chapterId) {
+  const tagsDb = getDb('tags');
+  if (!tagsDb) return { summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
+  try {
+    const rows = tagsDb.exec('SELECT summary_text, summary_method, key_verses_json, top_topics_json FROM chapter_summaries WHERE chapter_id = ?', [chapterId]);
+    if (!rows.length || !rows[0].values.length) return { summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
+    const [summary_text, summary_method, keyVersesJson, topTopicsJson] = rows[0].values[0];
+    return {
+      summary_text,
+      summary_method: summary_method || 'extractive',
+      key_verses: JSON.parse(keyVersesJson || '[]'),
+      top_topics: JSON.parse(topTopicsJson || '[]'),
+      ready: true,
+    };
+  } catch { return { summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false }; }
+}
+
+export function getChapterEntities(chapterId) {
+  const tagsDb = getDb('tags');
+  const enDb   = getDb('en');
+  if (!tagsDb || !enDb) return { people: [], places: [], ready: false };
+  try {
+    // Get all verse_ids for this chapter from the English scripture DB
+    const vRows = enDb.exec('SELECT id FROM verses WHERE chapter_id = ?', [chapterId]);
+    if (!vRows.length) return { people: [], places: [], ready: true };
+    const verseIds = vRows[0].values.map(r => r[0]);
+    const peopleSet = new Set(), placesSet = new Set();
+    for (const vid of verseIds) {
+      const eRows = tagsDb.exec('SELECT people, places FROM verse_entities WHERE verse_id = ?', [vid]);
+      if (!eRows.length || !eRows[0].values.length) continue;
+      const [people, places] = eRows[0].values[0];
+      if (people) people.split('|').forEach(p => p.trim() && peopleSet.add(p.trim()));
+      if (places) places.split('|').forEach(p => p.trim() && placesSet.add(p.trim()));
+    }
+    return { people: [...peopleSet].sort(), places: [...placesSet].sort(), ready: true };
+  } catch { return { people: [], places: [], ready: false }; }
+}
+
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
 export {
