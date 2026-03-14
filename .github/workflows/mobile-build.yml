@@ -42,8 +42,6 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: FTS tables pre-built in DBs (no-op)
-        run: npm run build-fts
 
       - name: Install mobile dependencies
         working-directory: mobile
@@ -115,8 +113,6 @@ jobs:
       - name: Rebuild better-sqlite3 for macOS Node
         run: npm rebuild better-sqlite3
 
-      - name: FTS tables pre-built in DBs (no-op)
-        run: npm run build-fts
 
       - name: Install mobile dependencies
         working-directory: mobile
