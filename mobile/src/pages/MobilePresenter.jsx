@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket, isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
-const { searchEntities, searchSermonTopics } = svc;
+const { searchEntities } = svc;
 import CastingControl from '../components/CastingControl';
 
 const themes = {
@@ -355,10 +355,7 @@ const MobilePresenter = () => {
   const [currentPage, setCurrentPage]       = useState(0);
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
-  const [searchMode,        setSearchMode]        = useState('verses'); // 'verses' | 'topics'
-  const [topicQuery,        setTopicQuery]         = useState('');
-  const [topicResults,      setTopicResults]       = useState([]);
-  const [topicSearching,    setTopicSearching]     = useState(false);
+
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
   const [connectionState, setConnectionState] = useState('connecting');
@@ -851,16 +848,6 @@ const MobilePresenter = () => {
 
   const handleSearchKeyDown = e => {
     if (e.key === 'Enter' && results.length > 0) goLiveDirectly(results[0]);
-  };
-
-  const handleTopicSearch = e => {
-    const q = e.target.value;
-    setTopicQuery(q);
-    if (!q.trim()) { setTopicResults([]); return; }
-    setTopicSearching(true);
-    const results = searchSermonTopics(q.trim());
-    setTopicResults(results);
-    setTopicSearching(false);
   };
 
   const selectVerse = verse => {
