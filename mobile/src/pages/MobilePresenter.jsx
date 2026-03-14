@@ -439,7 +439,7 @@ const MobilePresenter = () => {
   const [relatedTotal,   setRelatedTotal]   = useState(0);
   const [relatedBatchPage, setRelatedBatchPage] = useState(0);
   // NLP tags + chapter intelligence
-  const [verseTags,       setVerseTags]       = useState({ pov: null, labels: [], ready: false });
+  const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [], ready: false });
   const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
@@ -473,7 +473,7 @@ const MobilePresenter = () => {
     setCtxChapterIdx(0);
     setCtxScrolled(false);
     setCtxAtBottom(false);
-    setVerseTags({ pov: null, labels: [], ready: false });
+    setVerseTags({ pov: null, speaker: null, labels: [], ready: false });
     setVerseEntities({ people: [], places: [] });
     setEntitySearch(null);
     // Fetch verse-level NLP tags
@@ -2191,6 +2191,7 @@ const MobilePresenter = () => {
             {(verseTags.pov || verseTags.labels.length > 0) && (
               <div className="preview-entity-chips">
                 {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
                 {verseTags.labels.slice(0, 3).map(t => (
                   <span key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview">{t.label}</span>
                 ))}
@@ -2670,9 +2671,10 @@ const MobilePresenter = () => {
               {contextTab === 'entities' && (
                 <div className="ctx-body" style={{ overflowY: 'auto' }}>
                   <div className="ctx-entities-panel">
-                    {verseTags.pov && (
+                    {(verseTags.pov || verseTags.speaker) && (
                       <div className="ctx-tag-row">
-                        <span className="ctx-pov-badge">{verseTags.pov}</span>
+                        {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                        {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
                         {verseTags.labels.slice(0, 4).map(t => (
                           <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>{t.label}</span>
                         ))}

@@ -6771,6 +6771,7 @@ button, [role="button"] {
 .ctx-tag-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.07); }
 .ctx-tag-row--topics { border-bottom: none; padding-bottom: 0; }
 .ctx-pov-badge { font-size: 0.78rem; font-family: 'Cinzel', serif; letter-spacing: 0.12em; text-transform: uppercase; padding: 0.2rem 0.6rem; border-radius: 99px; background: rgba(180, 130, 50, 0.18); color: #e8c97a; border: 1px solid rgba(180,130,50,0.35); }
+.ctx-pov-badge--speaker { font-family: inherit; letter-spacing: 0.04em; text-transform: none; background: rgba(80, 140, 200, 0.15); color: #a0c8f0; border-color: rgba(80,140,200,0.3); }
 .ctx-doctrine-chip { font-size: 0.75rem; padding: 0.18rem 0.5rem; border-radius: 99px; background: rgba(100, 160, 255, 0.12); color: rgba(160, 200, 255, 0.9); border: 1px solid rgba(100,160,255,0.22); cursor: default; }
 .ctx-doctrine-chip--preview { font-size: 0.68rem; opacity: 0.85; }
 .ctx-entities-panel { display: flex; flex-direction: column; gap: 1rem; padding: 0.5rem 0; }
