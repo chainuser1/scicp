@@ -222,6 +222,57 @@ export function getChapterEntities(chapterId) {
   } catch { return { people: [], places: [], ready: false }; }
 }
 
+export function searchEntities(name, type = 'person') {
+  const tagsDb = getDb('tags');
+  const engAdapter = resolveAdapter('en');
+  if (!tagsDb || !engAdapter) return { results: [], total: 0, name, type };
+  try {
+    const col = type === 'place' ? 'places' : 'people';
+    const key = name.toLowerCase();
+    const rows = tagsDb.exec(
+      `SELECT verse_id FROM verse_entities WHERE lower(${col}) LIKE ?`,
+      [`%${key}%`]
+    );
+    if (!rows.length || !rows[0].values.length) return { results: [], total: 0, name, type };
+    const verseIds = rows[0].values.map(r => r[0]);
+    const total = verseIds.length;
+    const stmt = engAdapter.prepare(
+      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number FROM scriptures WHERE verse_id = ?'
+    );
+    const results = verseIds.slice(0, 20).map(vid => stmt.get(vid)).filter(Boolean);
+    return { results, total, name, type };
+  } catch { return { results: [], total: 0, name, type }; }
+}
+
+export function searchSermonTopics(query, limit = 15) {
+  const tagsDb = getDb('tags');
+  const engAdapter = resolveAdapter('en');
+  if (!tagsDb || !engAdapter) return [];
+  try {
+    const term = query.trim().toLowerCase();
+    const rows = tagsDb.exec(
+      `SELECT chapter_id, book_id, chapter_num, summary_text, top_topics_json
+       FROM chapter_summaries
+       WHERE lower(summary_text) LIKE ? OR lower(top_topics_json) LIKE ?
+       LIMIT ?`,
+      [`%${term}%`, `%${term}%`, limit]
+    );
+    if (!rows.length || !rows[0].values.length) return [];
+    const stmt = engAdapter.prepare('SELECT book_title FROM scriptures WHERE book_id = ? LIMIT 1');
+    return rows[0].values.map(([chapterId, bookId, chapterNum, summaryText, topTopicsJson]) => {
+      const meta = stmt.get(bookId);
+      return {
+        chapter_id:   chapterId,
+        book_id:      bookId,
+        chapter_num:  chapterNum,
+        book_title:   meta?.book_title || '',
+        summary_text: summaryText || '',
+        top_topics:   JSON.parse(topTopicsJson || '[]').slice(0, 5),
+      };
+    });
+  } catch { return []; }
+}
+
 // ── Re-exports ──────────────────────────────────────────────────────────────
 
 export {

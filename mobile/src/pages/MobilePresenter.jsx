@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket, isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
+const { searchEntities, searchSermonTopics } = svc;
 import CastingControl from '../components/CastingControl';
 
 const themes = {
@@ -354,6 +355,10 @@ const MobilePresenter = () => {
   const [currentPage, setCurrentPage]       = useState(0);
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
+  const [searchMode,        setSearchMode]        = useState('verses'); // 'verses' | 'topics'
+  const [topicQuery,        setTopicQuery]         = useState('');
+  const [topicResults,      setTopicResults]       = useState([]);
+  const [topicSearching,    setTopicSearching]     = useState(false);
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
   const [connectionState, setConnectionState] = useState('connecting');
@@ -831,6 +836,16 @@ const MobilePresenter = () => {
 
   const handleSearchKeyDown = e => {
     if (e.key === 'Enter' && results.length > 0) goLiveDirectly(results[0]);
+  };
+
+  const handleTopicSearch = e => {
+    const q = e.target.value;
+    setTopicQuery(q);
+    if (!q.trim()) { setTopicResults([]); return; }
+    setTopicSearching(true);
+    const results = searchSermonTopics(q.trim());
+    setTopicResults(results);
+    setTopicSearching(false);
   };
 
   const selectVerse = verse => {
@@ -1750,6 +1765,32 @@ const MobilePresenter = () => {
         <div className="drawer-body">
           {drawerTab === 'search' ? (
             <div className="drawer-search">
+              <div className="search-mode-toggle">
+                <button className={`search-mode-btn${searchMode === 'verses' ? ' active' : ''}`} onClick={() => setSearchMode('verses')}>Verses</button>
+                <button className={`search-mode-btn${searchMode === 'topics' ? ' active' : ''}`} onClick={() => { setSearchMode('topics'); setTopicResults([]); setTopicQuery(''); }}>📖 Topics</button>
+              </div>
+              {searchMode === 'topics' ? (
+                <div className="topic-search-panel">
+                  <input type="search" className="search-input"
+                    placeholder="Sermon topic (e.g. 'faith', 'repentance')…"
+                    value={topicQuery} onChange={handleTopicSearch}
+                    autoComplete="off" autoFocus={drawerOpen && searchMode === 'topics'} />
+                  <div className="results-list-wrap"><div className="results-list">
+                    {topicSearching && <p className="ctx-empty">Searching…</p>}
+                    {!topicSearching && topicQuery.length > 0 && topicResults.length === 0 && <p className="ctx-empty">No chapters found.</p>}
+                    {!topicQuery && <div className="empty-state">Search chapters by topic or theme…</div>}
+                    {topicResults.map(r => (
+                      <div key={r.chapter_id} className="topic-result-item">
+                        <div className="topic-result-header">
+                          <strong>{r.book_title} {r.chapter_num}</strong>
+                          <div className="topic-result-chips">{r.top_topics.slice(0,3).map(t => <span key={t} className="ctx-doctrine-chip">{t}</span>)}</div>
+                        </div>
+                        {r.summary_text && <p className="topic-result-summary">{r.summary_text.slice(0,150)}…</p>}
+                      </div>
+                    ))}
+                  </div></div>
+                </div>
+              ) : (<>
               {query.length > 0 && (
                 <div className="search-results-count">
                   {totalResults === 0 && results.length === 0
@@ -1771,7 +1812,7 @@ const MobilePresenter = () => {
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                autoFocus={drawerOpen && drawerTab === 'search'}
+                autoFocus={drawerOpen && drawerTab === 'search' && searchMode === 'verses'}
               />
               <div className="results-list-wrap">
                 <div className="results-list"
@@ -1809,6 +1850,7 @@ const MobilePresenter = () => {
                     aria-label="Back to top">↑</button>
                 )}
               </div>
+            </>)}
             </div>
           ) : drawerTab === 'history' ? (
             <div className="drawer-history">
@@ -2610,7 +2652,10 @@ const MobilePresenter = () => {
                         <div className="ctx-entity-chips">
                           {chapterEntities.people.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
-                              onClick={() => setEntitySearch({ name: p, type: 'person', loading: false, results: [], total: 0 })}
+                              onClick={() => {
+                            const res = searchEntities(p, 'person');
+                            setEntitySearch({ name: p, type: 'person', loading: false, results: res.results, total: res.total });
+                          }}
                             >{p}</button>
                           ))}
                         </div>
@@ -2622,7 +2667,10 @@ const MobilePresenter = () => {
                         <div className="ctx-entity-chips">
                           {chapterEntities.places.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
-                              onClick={() => setEntitySearch({ name: p, type: 'place', loading: false, results: [], total: 0 })}
+                              onClick={() => {
+                            const res = searchEntities(p, 'place');
+                            setEntitySearch({ name: p, type: 'place', loading: false, results: res.results, total: res.total });
+                          }}
                             >{p}</button>
                           ))}
                         </div>
@@ -2631,10 +2679,21 @@ const MobilePresenter = () => {
                     {entitySearch && (
                       <div className="ctx-entity-results">
                         <div className="ctx-entity-results-header">
-                          <span>"{entitySearch.name}"</span>
+                          <span>"{entitySearch.name}" appears in {entitySearch.total} verse{entitySearch.total !== 1 ? 's' : ''}</span>
                           <button className="ctx-close-mini" onClick={() => setEntitySearch(null)}>✕</button>
                         </div>
-                        <p className="ctx-empty">Cross-verse entity search coming soon.</p>
+                        {entitySearch.results.length === 0 && <p className="ctx-empty">No verses found.</p>}
+                        <ul className="ctx-items-list">
+                          {entitySearch.results.map(v => (
+                            <li key={v.verse_id} className="ctx-item">
+                              <span className="ctx-item-ref">{v.verse_title}</span>
+                              <span className="ctx-item-text">{v.scripture_text}</span>
+                              <div className="ctx-item-actions">
+                                <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                     {!chapterEntities.ready && <p className="ctx-empty">Loading people &amp; places…</p>}

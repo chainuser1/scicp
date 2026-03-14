@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 
+const POV_TINT = {
+  'prayer':              'rgba(120, 80, 200, 0.12)',
+  'divine instruction':  'rgba(200, 140, 40, 0.10)',
+  'prophetic':           'rgba(60, 100, 200, 0.10)',
+};
+
 // ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
@@ -99,6 +105,7 @@ function Client() {
   };
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
+  const [versePov, setVersePov] = useState(null);
 
   const [verse, setVerse] = useState({
     scripture_text: '',
@@ -499,6 +506,16 @@ function Client() {
       resetScreensaver();
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
+      // Fetch POV tags for backdrop tint
+      const verseId = data.verse?.verse_id;
+      if (verseId) {
+        fetch(`/verse/${verseId}/tags`)
+          .then(r => r.ok ? r.json() : null)
+          .then(t => { if (t?.pov) setVersePov(t.pov); else setVersePov(null); })
+          .catch(() => setVersePov(null));
+      } else {
+        setVersePov(null);
+      }
       // Step 1 — fade text out
       setTextVisible(false);
       setTimeout(() => {
@@ -908,6 +925,13 @@ function Client() {
     >
 
       <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
+      {versePov && versePov !== 'historical narrative' && (
+        <div
+          className="client-pov-tint"
+          style={{ '--pov-color': POV_TINT[versePov] || 'transparent' }}
+          aria-hidden="true"
+        />
+      )}
       {bgFading && prevBgUrl && (
         <div className="client-bg-prev" style={{ backgroundImage: prevBgUrl }} aria-hidden="true" />
       )}

@@ -1,4 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getVerseTags } from '../scripture-service';
+
+const POV_TINT = {
+  'prayer':              'rgba(120, 80, 200, 0.12)',
+  'divine instruction':  'rgba(200, 140, 40, 0.10)',
+  'prophetic':           'rgba(60, 100, 200, 0.10)',
+};
 
 // ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
@@ -69,6 +76,7 @@ export default function MobileClient() {
   };
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
+  const [versePov, setVersePov] = useState(null);
 
   const [verse, setVerse] = useState({
     scripture_text: '',
@@ -242,6 +250,15 @@ export default function MobileClient() {
       switch (type) {
         case 'update-verse':
           handleVerse(data);
+          {
+            const verseId = data.verse?.verse_id;
+            if (verseId) {
+              const tags = getVerseTags(verseId);
+              setVersePov(tags?.pov || null);
+            } else {
+              setVersePov(null);
+            }
+          }
           break;
         case 'update-theme':
           handleTheme(data);
@@ -442,6 +459,13 @@ export default function MobileClient() {
     }}>
 
       <div className="client-bg-current" style={{ backgroundImage: bgUrl }} aria-hidden="true" />
+      {versePov && versePov !== 'historical narrative' && (
+        <div
+          className="client-pov-tint"
+          style={{ '--pov-color': POV_TINT[versePov] || 'transparent' }}
+          aria-hidden="true"
+        />
+      )}
       {bgFading && prevBgUrl && (
         <div className="client-bg-prev" style={{ backgroundImage: prevBgUrl }} aria-hidden="true" />
       )}
