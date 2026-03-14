@@ -6796,3 +6796,69 @@ button, [role="button"] {
 .presenter-container--light .ctx-entity-chip--person { background: rgba(160,80,10,0.1); color: #7a3a10; border-color: rgba(160,80,10,0.2); }
 .presenter-container--light .ctx-entity-chip--place  { background: rgba(20,120,80,0.1); color: #0a5a3a; border-color: rgba(20,120,80,0.2); }
 .presenter-container--light .ctx-summary-text p { color: #2a2010; }
+
+/* ── POV tint overlay ────────────────────────────────────────────────────── */
+.client-pov-tint {
+  position: absolute;
+  inset: 0;
+  background: var(--pov-color, transparent);
+  pointer-events: none;
+  z-index: 1;
+  transition: background 1.2s ease;
+}
+
+/* ── Search mode toggle ──────────────────────────────────────────────────── */
+.search-mode-toggle {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  margin-bottom: 0.5rem;
+}
+.search-mode-btn {
+  flex: 1;
+  padding: 0.32rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: var(--text-dim, rgba(255,255,255,0.5));
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.search-mode-btn.active {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border-color: rgba(255,255,255,0.25);
+}
+
+/* ── Topic search panel ──────────────────────────────────────────────────── */
+.topic-search-panel { display: flex; flex-direction: column; height: 100%; }
+.topic-result-item {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.topic-result-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  color: #e8d8b0;
+}
+.topic-result-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.topic-result-summary {
+  font-size: 0.72rem;
+  color: var(--text-dim, rgba(255,255,255,0.55));
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Entity search results ───────────────────────────────────────────────── */
+.ctx-items-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.ctx-item { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.5rem; border-radius: 6px; background: rgba(255,255,255,0.04); }
+.ctx-item-ref { font-size: 0.62rem; font-family: 'Cinzel', serif; letter-spacing: 0.1em; color: #c0a060; text-transform: uppercase; }
+.ctx-item-text { font-size: 0.78rem; line-height: 1.5; color: rgba(255,255,255,0.82); }
+.ctx-item-actions { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
+.ctx-item-actions button { font-size: 0.68rem; padding: 0.2rem 0.55rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.07); color: #fff; cursor: pointer; }
