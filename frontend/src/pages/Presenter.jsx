@@ -320,7 +320,6 @@ const IconQr = () => (
   </svg>
 );
 
-// ─── QR Scanner Modal ─────────────────────────────────────────────────────────
 // Uses the device camera + jsQR (npm) to decode a QR code from the TV screen.
 // Falls back gracefully if camera permission is denied or jsQR is not installed.
 const QrScannerModal = ({ onCode, onClose }) => {
@@ -500,16 +499,13 @@ const Presenter = () => {
   const [scannerOpen, setScannerOpen]       = useState(false);
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
-  // Phase 1: viewer count from server so presenter knows how many TVs are live
   const [viewerCount, setViewerCount]       = useState(0);
-  // Phase 1: show alert when a second device tried to take the presenter role
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
   // show persistent banner when this device was evicted by a new presenter
   const [evictedAlert, setEvictedAlert]     = useState(false);
   // confirmation dialog before leaving — prevents accidental mid-sermon tap
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
-  // ── Session PIN gate ─────────────────────────────────────────────────────────
   const [sessionPinActive, setSessionPinActive]     = useState(false);
   // PIN entry modal — shown when joining a PIN-protected session
   const [pinEntryOpen, setPinEntryOpen]             = useState(false);
@@ -521,7 +517,6 @@ const Presenter = () => {
   const [pinManageInput, setPinManageInput]         = useState('');
   const [pinManageConfirm, setPinManageConfirm]     = useState('');
   const [pinManageError, setPinManageError]         = useState('');
-  // ── Context expansion modal ───────────────────────────────────────────────
   const [contextOpen,    setContextOpen]    = useState(false);
   const [contextTab,     setContextTab]     = useState('chapter');
   const [chapterVerses,  setChapterVerses]  = useState([]);
@@ -535,7 +530,6 @@ const Presenter = () => {
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
   // Floating word-explore chip: { word, x, y } | null
   const [ctxWordChip, setCtxWordChip] = useState(null);
-  // ── Entity (named person/place) state ────────────────────────────────────
   const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [] });
   const [entitySearch,    setEntitySearch]    = useState(null);
@@ -575,7 +569,6 @@ const Presenter = () => {
     return [];
   });
 
-  // ── F1 — Browse ─────────────────────────────────────────────────────────────
   const [browseLevel, setBrowseLevel]                     = useState('books');
   const [browseBooks, setBrowseBooks]                     = useState([]);
   const [browseChapters, setBrowseChapters]               = useState([]);
@@ -584,50 +577,41 @@ const Presenter = () => {
   const [browseSelectedChapter, setBrowseSelectedChapter] = useState(null);
   const [browseBooksLoaded, setBrowseBooksLoaded]         = useState(false);
 
-  // ── F2 / F12 — Announcement / Custom Text ────────────────────────────────────
   const [customText, setCustomText]       = useState('');
   const [customSubtext, setCustomSubtext] = useState('');
   const [isCustomLive, setIsCustomLive]   = useState(false);
 
-  // ── F3 — Saved Setlists ──────────────────────────────────────────────────────
   const [savedSetlists, setSavedSetlists]     = useState([]);
   const [setlistSaveOpen, setSetlistSaveOpen] = useState(false);
   const [setlistSaveName, setSetlistSaveName] = useState('');
   const [setlistLoadOpen, setSetlistLoadOpen] = useState(false);
   const [setlistsLoading, setSetlistsLoading] = useState(false);
 
-  // ── F4 — Translation Preview ─────────────────────────────────────────────────
   const [expandedTranslations, setExpandedTranslations] = useState(() => new Set());
   const [translationCache, setTranslationCache]         = useState({});
 
-  // ── F6 — Verse Notes (private, never sent to TV) ─────────────────────────────
   const [verseNotes, setVerseNotes] = useState(() => {
     try { return JSON.parse(localStorage.getItem('scicp.verse_notes_v1')) || {}; } catch { return {}; }
   });
   const [notesExpandedFor, setNotesExpandedFor] = useState(() => new Set());
 
-  // ── F8 — Secondary (dual) Language displayed on TV ───────────────────────────
   const [secondaryLanguage, setSecondaryLanguage] = useState(() => {
     try { return localStorage.getItem('scicp.secondary_language_v1') || ''; } catch { return ''; }
   });
 
-  // ── F12 — Runsheet text-item draft ───────────────────────────────────────────
   const [runsheetAddingText, setRunsheetAddingText]     = useState(false);
   const [runsheetTextDraft, setRunsheetTextDraft]       = useState('');
   const [runsheetSubtextDraft, setRunsheetSubtextDraft] = useState('');
 
-  // Persist setlist to localStorage
   useEffect(() => {
     try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
     catch { /* ignore */ }
   }, [setlist]);
 
-  // F6 — persist verse notes
   useEffect(() => {
     try { localStorage.setItem('scicp.verse_notes_v1', JSON.stringify(verseNotes)); } catch { /* ignore */ }
   }, [verseNotes]);
 
-  // F8 — persist secondary language choice
   useEffect(() => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
   }, [secondaryLanguage]);
@@ -684,10 +668,8 @@ const Presenter = () => {
     }
   }, [liveVerse?.chapter_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // F1 — reset book list when language changes
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
 
-  // F1 — fetch books when Browse tab is opened
   useEffect(() => {
     if (drawerTab === 'browse' && !browseBooksLoaded) {
       fetch(`${API_URL}/browse/books?language=${currentLanguage}`)
@@ -762,14 +744,12 @@ const Presenter = () => {
   const PAGE_SIZE = 8; // 8 results/batch on desktop — glide navigation
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
 
-  // ── Toast notification ───────────────────────────────────────────────────
   const showToast = (msg) => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
   };
 
-  // ── End Live — clear TV screen, return Client to QR idle ─────────────────
   const endLive = () => {
     emitWithSession('clear-screen');
     setLiveVerse(null);
@@ -779,13 +759,11 @@ const Presenter = () => {
     showToast('Screen cleared — TV showing QR code');
   };
 
-  // ── Clear highlight only ──────────────────────────────────────────────────
   const clearHighlight = () => {
     setHighlightedText('');
     emitWithSession('highlight-text', { text: '' });
   };
 
-  // ── Font size control ─────────────────────────────────────────────────────
   const adjustFontSize = (delta) => {
     setFontSizeRem(prev => {
       const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
@@ -799,7 +777,6 @@ const Presenter = () => {
     setUiFontSize(prev => Math.min(2.2, Math.max(0.75, parseFloat((prev + delta).toFixed(2)))));
   };
 
-  // ── Copy verse text to clipboard ─────────────────────────────────────────
   const copyVerseText = (verseObj, label = '') => {
     if (!verseObj) return;
     const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
@@ -839,7 +816,6 @@ const Presenter = () => {
       });
   }, []);
 
-  // ── The one and only way to connect: join the session the TV created ──────
   // Presenter types or scans the code shown on the TV/projector screen.
   const joinTvSession = (codeOverride, pin) => {
     const normalized = normalizeSessionId(codeOverride || tvSessionInput);
@@ -902,7 +878,6 @@ const Presenter = () => {
           window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
           window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
         } catch {
-          // ignore storage errors
         }
       } else {
         setSessionMessage(response?.message || 'Unable to leave session');
@@ -943,7 +918,6 @@ const Presenter = () => {
     try {
       window.localStorage.setItem(PRESENTER_TOUR_KEY, 'true');
     } catch {
-      // ignore storage errors
     }
   };
 
@@ -974,7 +948,6 @@ const Presenter = () => {
         window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
         window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
       } catch {
-        // ignore storage errors
       }
     };
     const handleConnect = () => {
@@ -1144,7 +1117,6 @@ const Presenter = () => {
   const selectVerse = verse => {
     const verseTheme = themeForVerse(currentTheme, verse);
     setStaged({ ...verse, theme: verseTheme });
-    // F11 — preload background into TV browser cache before go-live
     if (verseTheme?.background_url) {
       const match = String(verseTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
       if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
@@ -1293,7 +1265,6 @@ const Presenter = () => {
     }
   };
 
-  // ── Topic drill-down inside Related tab ──────────────────────────────────
   const loadTopicInModal = async (topicLabel, page = 0) => {
     if (!topicLabel) return;
     setContextLoading(true);
@@ -1371,7 +1342,6 @@ const Presenter = () => {
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
-  // ── Drill into a specific verse's related verses ──────────────────────────
   const drillIntoVerse = async (verse, page = 0) => {
     setContextLoading(true);
     setCtxWordChip(null);
@@ -1399,7 +1369,6 @@ const Presenter = () => {
     }
   };
 
-  // ── Word-selection explore chip ────────────────────────────────────────────
   const handleCtxTextMouseUp = (e) => {
     const sel = window.getSelection();
     const word = sel?.toString().trim().replace(/[^\w\s'-]/g, '').trim();
@@ -1583,7 +1552,6 @@ const Presenter = () => {
     );
   };
 
-  // ── F1 — Browse handlers ───────────────────────────────────────────────────
   const handleBrowseBook = async (book) => {
     setBrowseSelectedBook(book);
     const res = await fetch(`${API_URL}/browse/chapters?book_id=${book.book_id}&language=${currentLanguage}`).catch(() => null);
@@ -1597,7 +1565,6 @@ const Presenter = () => {
     setBrowseLevel('verses');
   };
 
-  // ── F2 — Send announcement to screen ──────────────────────────────────────
   const sendCustomToScreen = () => {
     if (!customText.trim()) return;
     emitWithSession('go-custom', { text: customText.trim(), subtext: customSubtext.trim(), theme: currentTheme });
@@ -1605,7 +1572,6 @@ const Presenter = () => {
     showToast('Announcement sent to screen');
   };
 
-  // ── F3 — Named setlist persistence ────────────────────────────────────────
   const fetchSavedSetlists = async () => {
     setSetlistsLoading(true);
     try {
@@ -1641,7 +1607,6 @@ const Presenter = () => {
     setSavedSetlists(prev => prev.filter(s => s.id !== id));
   };
 
-  // ── F4 — Translation preview in search results ────────────────────────────
   const toggleTranslation = async (verse_id) => {
     const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'en';
     const cacheKey = `${verse_id}_${targetLang}`;
@@ -1661,13 +1626,11 @@ const Presenter = () => {
     }
   };
 
-  // ── F6 — Verse notes ──────────────────────────────────────────────────────
   const updateVerseNote = (key, text) =>
     setVerseNotes(prev => ({ ...prev, [key]: text }));
   const toggleNotesExpanded = (key) =>
     setNotesExpandedFor(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
 
-  // ── F12 — Add text/announcement item to service order ────────────────────
   const addTextItem = () => {
     if (!runsheetTextDraft.trim()) return;
     setSetlist(prev => [...prev, {
