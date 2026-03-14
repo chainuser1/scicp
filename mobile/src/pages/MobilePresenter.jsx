@@ -928,7 +928,7 @@ const MobilePresenter = () => {
     setCtxScrolled(false);
     setCtxAtBottom(false);
     try {
-      if (tab === 'chapter' && !chapterVerses.length) {
+      if (tab === 'chapter') {
         let chapterId = liveVerse.chapter_id;
         let chapters  = bookChapters;
         if (!chapters.length && liveVerse.book_id) {
@@ -944,13 +944,19 @@ const MobilePresenter = () => {
           if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
-        const verses = svc.browse('verses', { chapterId }, currentLanguage);
-        setChapterVerses(Array.isArray(verses) ? verses : []);
-        // Load chapter-level NLP data
-        const summary  = svc.getChapterSummary(chapterId);
-        const entities = svc.getChapterEntities(chapterId);
-        setChapterSummary(summary);
-        setChapterEntities(entities);
+        // Fetch each piece independently so Summary/Entities tabs work even when chapter verses are already cached
+        if (!chapterVerses.length) {
+          const verses = svc.browse('verses', { chapterId }, currentLanguage);
+          setChapterVerses(Array.isArray(verses) ? verses : []);
+        }
+        if (!chapterSummary.ready) {
+          const summary = svc.getChapterSummary(chapterId);
+          setChapterSummary(summary);
+        }
+        if (!chapterEntities.ready) {
+          const entities = svc.getChapterEntities(chapterId);
+          setChapterEntities(entities);
+        }
       } else if (tab === 'related' && !relatedVerses.length) {
         const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
         const allResults = results ?? [];
@@ -2637,7 +2643,7 @@ const MobilePresenter = () => {
                         {chapterSummary.summary_text && (
                           <div className="ctx-summary-text">
                             <span className="ctx-summary-method-badge">
-                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Key Verses'}
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : chapterSummary.summary_method === 'contextual' ? '📖 Chapter Summary' : '📖 Key Verses'}
                             </span>
                             <p>{chapterSummary.summary_text}</p>
                           </div>
