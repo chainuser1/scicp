@@ -660,9 +660,9 @@ function Client() {
         const verseData = theme ? { ...verse, theme } : verse;
         handleVerse(verseData);
       } else {
-        // Fresh session — presenter hasn't gone live yet, show VOTD as placeholder.
-        setDisplayVerse(null);
-        setVotdAsDisplay();
+        // Fresh session — presenter hasn't gone live yet.
+        // Keep the last kiosk/displayed verse if one exists; only fall back to VOTD when display is empty.
+        setVotdAsDisplay(); // VOTD pending effect has a guard: skips if displayVerse already set
       }
     };
 
