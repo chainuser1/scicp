@@ -77,6 +77,7 @@ export default function MobileClient() {
   // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
   const [versePov, setVersePov] = useState(null);
+  const [nowReadingOn, setNowReadingOn] = useState(false); // presenter-controlled "Now Reading" label
 
   const [verse, setVerse] = useState({
     scripture_text: '',
@@ -274,6 +275,9 @@ export default function MobileClient() {
           break;
         case 'preload-background':
           handlePreloadBackground(data);
+          break;
+        case 'now-reading':
+          setNowReadingOn(!!data?.on);
           break;
         default:
           break;
@@ -511,6 +515,9 @@ export default function MobileClient() {
                   {verse.book_title}&ensp;{verse.chapter_number}:{verse.verse_number}
                   {(verse.version_citation || verse.volume_title) && (
                     <span className="verse-caption-volume">{verse.version_citation || verse.volume_title}</span>
+                  )}
+                  {nowReadingOn && (
+                    <span className="client-votd-label">✦ Now Reading</span>
                   )}
                 </div>
               )}
