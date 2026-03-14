@@ -159,6 +159,7 @@ function Client() {
   const [kioskRestart, setKioskRestart] = useState(0);  // incremented to retrigger kiosk after presenter leaves
   const kioskTimerRef       = useRef(null);
   const kioskCurVerseRef    = useRef(null); // verse_id of the verse currently on-screen in kiosk
+  const nowReadingOnRef     = useRef(false); // mirrors nowReadingOn state — readable in callbacks
   const presenterLeftTimer  = useRef(null); // "Presenter left" notice auto-hide (8 s)
   const joiningOverlayTimer = useRef(null); // "✓ connected" flash auto-hide (1.8 s)
   const presenterGraceTimerRef = useRef(null); // grace period before kiosk starts (15 min)
@@ -426,11 +427,12 @@ function Client() {
   // Reads from /verse/adjacent so the progression follows canonical book order.
   // Stable identity (empty deps) — all mutable values accessed via refs.
   const advanceKiosk = useCallback((fromVerseId) => {
-    if (presenterJoinedRef.current) return;
+    // Block cycling only when presenter is connected AND "Now Reading" is not active
+    if (presenterJoinedRef.current && !nowReadingOnRef.current) return;
     fetch(`/verse/adjacent?verse_id=${encodeURIComponent(fromVerseId)}&direction=next`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!data?.verse_id || presenterJoinedRef.current) return;
+        if (!data?.verse_id || (presenterJoinedRef.current && !nowReadingOnRef.current)) return;
         const nextVerse = {
           ...data,
           segments: [data.scripture_text],
@@ -441,7 +443,7 @@ function Client() {
         kioskCurVerseRef.current = data.verse_id;
         setTextVisible(false);
         setTimeout(() => {
-          if (presenterJoinedRef.current) return;
+          if (presenterJoinedRef.current && !nowReadingOnRef.current) return;
           setVerse(nextVerse);
           setDisplayVerse(nextVerse);
           setIsIdle(false);
@@ -454,16 +456,28 @@ function Client() {
       })
       .catch(() => {
         // Network hiccup — retry the same verse after 8 s
-        if (!presenterJoinedRef.current) {
+        if (!presenterJoinedRef.current || nowReadingOnRef.current) {
           kioskTimerRef.current = setTimeout(() => advanceKiosk(fromVerseId), 8000);
         }
       });
   }, []);
 
-  // ─── Kiosk: start from VOTD the moment it loads (no presenter yet) ────────
+  // ─── Kiosk: start/resume when kiosk is triggered ────────────────────────
+  // Prefers the last verse shown on screen (kioskCurVerseRef) over VOTD.
+  // Falls back to VOTD only if no verse has ever been shown.
   useEffect(() => {
-    if (!votd || presenterJoinedRef.current) return;
+    if (presenterJoinedRef.current) return;
     if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
+
+    const resumeId = kioskCurVerseRef.current;
+    if (resumeId) {
+      // A verse is already on screen — just schedule the next advance from it.
+      kioskTimerRef.current = setTimeout(() => advanceKiosk(resumeId), 5000);
+      return;
+    }
+
+    if (!votd) return;
+    // Very first run — no verse shown yet, start from VOTD
     const votdVerse = {
       ...votd,
       segments: [votd.scripture_text],
@@ -507,6 +521,8 @@ function Client() {
       resetScreensaver();
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
+      // Track for kiosk resume — if kiosk turns on later, it picks up from here
+      if (data.verse_id) kioskCurVerseRef.current = data.verse_id;
       // Fetch POV tags for backdrop tint
       const verseId = data.verse?.verse_id;
       if (verseId) {
@@ -628,6 +644,7 @@ function Client() {
       // Stop kiosk cycling unconditionally — no leftover timer should fire after join
       setIsKioskMode(false);
       setNowReadingOn(false); // auto-disable Now Reading when presenter connects
+      nowReadingOnRef.current = false;
       if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
       setShowQrOverlay(false); // hide QR regardless — a presenter is in the room
       if (presenterJoinedRef.current) return; // rest only runs on first join
@@ -701,7 +718,23 @@ function Client() {
       img.src = background_url;
     };
 
-    const handleNowReading = ({ on }) => setNowReadingOn(!!on);
+    const handleNowReading = ({ on, verse_id }) => {
+      nowReadingOnRef.current = !!on;
+      setNowReadingOn(!!on);
+      if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
+      if (on) {
+        // Start kiosk from the provided liveVerse, or fall back to last shown verse
+        const startFrom = verse_id || kioskCurVerseRef.current;
+        if (startFrom) {
+          kioskCurVerseRef.current = startFrom;
+          // Schedule first advance after current verse has been read (~5s)
+          kioskTimerRef.current = setTimeout(() => advanceKiosk(startFrom), 5000);
+        }
+      } else {
+        // Stop kiosk cycling entirely
+        setIsKioskMode(false);
+      }
+    };
 
     socket.on('update-verse',         handleVerse);
     socket.on('update-theme',         handleTheme);

@@ -3288,17 +3288,19 @@ const Presenter = () => {
                             ))}
                           </div>
                         )}
-                        {/* Summary prose / key verses */}
-                        {chapterSummary.summary_text && (
+                        {/* Summary prose — only for contextual/abstractive; extractive is just joined verses */}
+                        {chapterSummary.summary_text && chapterSummary.summary_method !== 'extractive' && (
                           <div className="ctx-summary-text">
                             <span className="ctx-summary-method-badge">
-                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : chapterSummary.summary_method === 'contextual' ? '📖 Chapter Summary' : '📖 Key Verses'}
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Chapter Summary'}
                             </span>
-                            <p>{chapterSummary.summary_text}</p>
+                            {chapterSummary.summary_text.split('\n\n').map((para, i) => (
+                              <p key={i}>{para}</p>
+                            ))}
                           </div>
                         )}
-                        {/* Key verses (extractive highlights) */}
-                        {chapterSummary.key_verses.length > 0 && chapterSummary.summary_method !== 'extractive' && (
+                        {/* Key verses — always shown; primary display when method is extractive */}
+                        {chapterSummary.key_verses.length > 0 && (
                           <div className="ctx-key-verses">
                             <span className="ctx-entity-label">📌 Key Verses</span>
                             <ul className="ctx-items-list">
