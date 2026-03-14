@@ -555,7 +555,6 @@ const Presenter = () => {
   const [entitySearch,    setEntitySearch]    = useState(null);
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
-  const [verseSummary,    setVerseSummary]    = useState({ summary: null, ready: false });
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
@@ -680,11 +679,6 @@ const Presenter = () => {
     setChapterVerses([]);
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
   }, [liveVerse?.chapter_id]);
-
-  // Reset verse summary when live verse changes (verse-specific data)
-  useEffect(() => {
-    setVerseSummary({ summary: null, ready: false });
-  }, [liveVerse?.verse_id]);
 
   // Re-fetch chapter modal data when chapter changes and modal is already open
   useEffect(() => {
@@ -1265,7 +1259,6 @@ const Presenter = () => {
         if (force || !chapterVerses.length)    fetches.push(fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`).then(r => r.ok ? r.json() : null).then(d => d && setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []))));
         if (force || !chapterSummary.ready)    fetches.push(fetch(`${API_URL}/chapter/${chapterId}/summary`).then(r => r.ok ? r.json() : null).then(d => d && setChapterSummary(d)));
         if (force || !chapterEntities.ready)   fetches.push(fetch(`${API_URL}/chapter/${chapterId}/entities`).then(r => r.ok ? r.json() : null).then(d => d && setChapterEntities(d)));
-        if (force || !verseSummary.ready)      fetches.push(fetch(`${API_URL}/verse/${liveVerse.verse_id}/summary`).then(r => r.ok ? r.json() : null).then(d => d && setVerseSummary(d)));
         if (fetches.length) await Promise.all(fetches);
       } else if (tab === 'related' && !relatedVerses.length) {
         const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?page=0&pageSize=${RELATED_PAGE_SIZE}&language=${currentLanguage}`);
@@ -3121,10 +3114,6 @@ const Presenter = () => {
                 onClick={() => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); }}>
                 Summary
               </button>
-              <button className={`ctx-tab${contextTab === 'verse' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('verse'); if (!verseSummary.ready) openContextModal('chapter'); }}>
-                Verse
-              </button>
               <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
                 onClick={() => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); }}>
                 People &amp; Places
@@ -3289,24 +3278,6 @@ const Presenter = () => {
                           </div>
                         )}
                       </>
-                    )}
-                  </div>
-                ) : contextTab === 'verse' ? (
-                  /* ── Verse Summary tab — AI-generated LDS context per verse ── */
-                  <div className="ctx-summary-panel">
-                    {!verseSummary.ready && <p className="ctx-empty">Loading verse summary…</p>}
-                    {verseSummary.ready && !verseSummary.summary && (
-                      <p className="ctx-empty">No summary available yet for this verse.</p>
-                    )}
-                    {verseSummary.ready && verseSummary.summary && (
-                      <div className="ctx-summary-text">
-                        <span className="ctx-summary-method-badge">✨ AI Verse Commentary</span>
-                        {verseSummary.summary.split('\n\n').map((para, i) => (
-                          <p key={i}>{para.split('\n').map((line, j) => (
-                            <span key={j}>{line}{j < para.split('\n').length - 1 && <br />}</span>
-                          ))}</p>
-                        ))}
-                      </div>
                     )}
                   </div>
                 ) : (

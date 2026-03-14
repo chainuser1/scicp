@@ -184,17 +184,6 @@ export function getVerseTags(verseId) {
   } catch { return { pov: null, labels: [], ready: false }; }
 }
 
-export function getVerseSummary(verseId) {
-  const tagsDb = getDb('tags');
-  if (!tagsDb) return { summary: null, ready: false };
-  try {
-    const rows = tagsDb.exec("SELECT verse_title, summary, engine FROM verse_summaries WHERE verse_id = ? AND status = 'ok'", [verseId]);
-    if (!rows.length || !rows[0].values.length) return { summary: null, ready: false };
-    const [verse_title, summary, engine] = rows[0].values[0];
-    return { verse_id: verseId, verse_title, summary, engine, ready: true };
-  } catch { return { summary: null, ready: false }; }
-}
-
 export function getChapterSummary(chapterId) {
   const tagsDb = getDb('tags');
   if (!tagsDb) return { summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
