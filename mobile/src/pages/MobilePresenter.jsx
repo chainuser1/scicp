@@ -309,22 +309,47 @@ function getCitation(language, volumeId, secondaryLanguage) {
 
 /* ─── Main component ─── */
 const MobilePresenter = () => {
-  const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
+  const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v2';
   const presenterTourSteps = [
     {
       target: 'search',
       title: 'Search Scriptures',
-      description: 'Use search to find references or keywords, then click a result to stage it.',
+      description: 'Search by reference (e.g. "Alma 32:21"), keyword, phrase, or topic. Results cover all five volumes of scripture.',
     },
     {
       target: 'golive',
-      title: 'Go Live',
-      description: 'Review the staged verse and send it to your connected clients.',
+      title: 'Stage & Go Live',
+      description: 'Tap a result to stage it for review, then press ● Go Live to send it to the display. Double-tap any result to go live instantly.',
     },
     {
       target: 'nav',
-      title: 'Navigate Fast',
-      description: 'Use preview controls for previous/next verse and segment navigation while live.',
+      title: 'Navigate While Live',
+      description: 'Use ‹ › for previous/next verse and ‹‹ ›› to step through long-verse segments without leaving the live view.',
+    },
+    {
+      target: 'search',
+      title: 'Setlists',
+      description: 'Open the Browse tab and tap + to add verses to your setlist. Save it by name and reload it any Sunday.',
+    },
+    {
+      target: 'search',
+      title: 'Dual Language',
+      description: 'Tap the language button (🌐) to pick a secondary language — both texts appear side-by-side on the cast display.',
+    },
+    {
+      target: 'search',
+      title: 'Cast to Display  📡',
+      description: 'Connect an HDMI cable or Miracast receiver and tap the cast button in the header to open the clean display view on your TV.',
+    },
+    {
+      target: 'search',
+      title: 'Chapter Context  ✨ New',
+      description: 'While a verse is live, tap 📖 Chapter to see the chapter summary, people & places, related verses by topic, and speaker attribution.',
+    },
+    {
+      target: 'search',
+      title: 'Chapter Summaries  ✨ New',
+      description: '882 chapters now have rich summaries from GospelDoctrine.com with doctrinal insights and quotes from Church leaders — all five volumes, fully offline.',
     },
   ];
   const [query, setQuery]                   = useState('');
