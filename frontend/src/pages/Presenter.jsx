@@ -1240,10 +1240,17 @@ const Presenter = () => {
         const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?page=0&pageSize=${RELATED_PAGE_SIZE}&language=${currentLanguage}`);
         if (res.ok) {
           const d = await res.json();
-          setRelatedVerses(d.results ?? []);
-          setRelatedConcept(d.matchedConcept ?? null);
+          const verses  = d.results ?? [];
+          const total   = d.total ?? verses.length;
+          const concept = d.matchedConcept ?? null;
+          const label   = `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`;
+          const entry   = { label, concept: concept ?? label, type: 'verse', payload: liveVerse.verse_id, verses, total, page: 0, pageSize: RELATED_PAGE_SIZE };
+          setCtxTopicHistory([entry]);
+          setCtxTopicHistoryIdx(0);
+          setRelatedVerses(verses);
+          setRelatedConcept(concept);
           setRelatedBatchPage(0);
-          setRelatedTotal(d.total ?? (d.results ?? []).length);
+          setRelatedTotal(total);
         }
       }
     } finally {
@@ -3267,7 +3274,7 @@ const Presenter = () => {
                     )}
 
                     {verseEntities.people.length === 0 && verseEntities.places.length === 0 && !verseTags.pov && (
-                      <p className="ctx-empty">{liveVerse?.verse_id ? 'No entity data yet — run scripts/compute-entities.js locally.' : 'No verse selected.'}</p>
+                      <p className="ctx-empty">{liveVerse?.verse_id ? 'No named entities found in this verse.' : 'No verse selected.'}</p>
                     )}
                   </div>
                 )}

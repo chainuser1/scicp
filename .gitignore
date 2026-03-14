@@ -39,6 +39,3 @@ vite
 
 # Scraper caches
 resources/db/*_cache.json
-
-# verse-tags.db — generated locally by scripts/compute-entities.js and scripts/compute-tags.js
-resources/db/verse-tags.db
