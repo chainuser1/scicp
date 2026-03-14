@@ -1844,8 +1844,8 @@ fastify.get('/chapter/:chapter_id/entities', async (request, reply) => {
     const rows = db_tags.prepare(`
       SELECT ve.people, ve.places
       FROM verse_entities ve
-      JOIN verses v ON v.id = ve.verse_id
-      WHERE v.chapter_id = ?
+      JOIN verse_doctrine_tags vdt ON vdt.verse_id = ve.verse_id
+      WHERE vdt.chapter_id = ?
     `).all(chapterId);
     const peopleSet = new Set(), placesSet = new Set();
     for (const r of rows) {
