@@ -456,12 +456,12 @@ const MobilePresenter = () => {
   const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
+  const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8;
 
-  // Reset context cache when live verse changes
+  // Reset verse-level and navigation context when live verse changes
   useEffect(() => {
-    setChapterVerses([]);
     setRelatedVerses([]);
     setRelatedConcept(null);
     setRelatedPage(0);
@@ -475,8 +475,6 @@ const MobilePresenter = () => {
     setCtxAtBottom(false);
     setVerseTags({ pov: null, labels: [], ready: false });
     setVerseEntities({ people: [], places: [] });
-    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
-    setChapterEntities({ people: [], places: [], ready: false });
     setEntitySearch(null);
     // Fetch verse-level NLP tags
     if (liveVerse?.verse_id) {
@@ -484,6 +482,22 @@ const MobilePresenter = () => {
       if (tags) setVerseTags(tags);
     }
   }, [liveVerse?.verse_id]);
+
+  // Reset chapter-level modal data only when the CHAPTER changes (not on every verse)
+  useEffect(() => {
+    setChapterVerses([]);
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setChapterEntities({ people: [], places: [], ready: false });
+    chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
+  }, [liveVerse?.chapter_id]);
+
+  // Re-fetch chapter modal data when chapter changes and modal is already open
+  useEffect(() => {
+    if (!liveVerse?.chapter_id || !contextOpen) return;
+    if (contextTab === 'chapter' || contextTab === 'summary' || contextTab === 'entities') {
+      openContextModal('chapter');
+    }
+  }, [liveVerse?.chapter_id]); // eslint-disable-line react-hooks/exhaustive-deps
   // Persist setlist to localStorage
   useEffect(() => {
     try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
@@ -944,16 +958,18 @@ const MobilePresenter = () => {
           if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
-        // Fetch each piece independently so Summary/Entities tabs work even when chapter verses are already cached
-        if (!chapterVerses.length) {
+        // force=true when chapter changed (ref was set by the chapter-change useEffect)
+        const force = chapterNeedsRefetchRef.current;
+        if (force) chapterNeedsRefetchRef.current = false;
+        if (force || !chapterVerses.length) {
           const verses = svc.browse('verses', { chapterId }, currentLanguage);
           setChapterVerses(Array.isArray(verses) ? verses : []);
         }
-        if (!chapterSummary.ready) {
+        if (force || !chapterSummary.ready) {
           const summary = svc.getChapterSummary(chapterId);
           setChapterSummary(summary);
         }
-        if (!chapterEntities.ready) {
+        if (force || !chapterEntities.ready) {
           const entities = svc.getChapterEntities(chapterId);
           setChapterEntities(entities);
         }
@@ -1084,13 +1100,20 @@ const MobilePresenter = () => {
       setCtxSlideDir(null);
       setCtxScrolled(false);
       setCtxAtBottom(false);
+      setContextLoading(true);
       try {
         const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
+        const summary = svc.getChapterSummary(ch.chapter_id);
+        setChapterSummary(summary);
+        const entities = svc.getChapterEntities(ch.chapter_id);
+        setChapterEntities(entities);
         setCtxChapterIdx(idx);
         if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
       } catch (err) {
         console.error('loadCtxChapterByIdx failed', err);
+      } finally {
+        setContextLoading(false);
       }
     }, 210);
   };

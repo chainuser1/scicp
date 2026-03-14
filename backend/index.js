@@ -1849,8 +1849,8 @@ fastify.get('/chapter/:chapter_id/entities', async (request, reply) => {
     `).all(chapterId);
     const peopleSet = new Set(), placesSet = new Set();
     for (const r of rows) {
-      if (r.people) r.people.split('|').forEach(p => p.trim() && peopleSet.add(p.trim()));
-      if (r.places) r.places.split('|').forEach(p => p.trim() && placesSet.add(p.trim()));
+      if (r.people) r.people.split('|').forEach(p => { const n = p.trim().replace(/[,;.!?]+$/, '').trim(); if (n) peopleSet.add(n); });
+      if (r.places) r.places.split('|').forEach(p => { const n = p.trim().replace(/[,;.!?]+$/, '').trim(); if (n) placesSet.add(n); });
     }
     return { chapter_id: chapterId, people: [...peopleSet].sort(), places: [...placesSet].sort(), ready: true };
   } catch { return { chapter_id: chapterId, people: [], places: [], ready: false }; }

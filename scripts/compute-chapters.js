@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * Pre-bake chapter summaries using extractive summarization (MiniLM centroid).
- * Fast — pure vector math, no model inference per chapter.
+ * Pre-bake chapter summaries.
+ * Default mode: contextual synthesis (official LDS chapter description + chapter signals).
+ * Optional mode: extractive centroid (fast, local) with --extractive.
  *
  * Stores per chapter:
- *  - summary_text    : top-3 key verses joined as prose (extractive)
+ *  - summary_text    : contextual prose summary
  *  - key_verses_json : top-3 most central verses with verse_id, verse_number, text
  *  - top_topics_json : top-5 doctrine topics aggregated from verse_doctrine_tags
  *
- * Optional: add --abstractive flag to also generate distilbart prose summaries
+ * Optional: add --abstractive flag to generate distilbart prose summaries
  *           (adds ~40h on CPU — only use with a GPU or don't bother).
  *
- * Run once locally:   node scripts/compute-chapters.js
+ * Run once locally (contextual): node scripts/compute-chapters.js
+ * Run extractive only:           node scripts/compute-chapters.js --extractive
  * Force full re-bake: node scripts/compute-chapters.js --reset
  * Resumes from where it left off otherwise.
  */
@@ -27,10 +29,12 @@ const db_tags = new Database(path.join(DB_DIR, 'verse-tags.db'));
 
 const RESET       = process.argv.includes('--reset');
 const ABSTRACTIVE = process.argv.includes('--abstractive');
+const EXTRACTIVE  = process.argv.includes('--extractive');
+const CONTEXTUAL  = !ABSTRACTIVE && !EXTRACTIVE;
 const RESUME      = process.argv.includes('--resume');
 
 if (RESUME && !ABSTRACTIVE) {
-  console.log('Resume mode: continuing from where extractive left off (skipping already-done chapters).');
+  console.log(`Resume mode: continuing from where ${CONTEXTUAL ? 'contextual' : 'extractive'} left off (skipping already-done chapters).`);
 }
 // RESUME only applies when upgrading extractive → abstractive
 const RESUME_ABSTRACTIVE = RESUME && ABSTRACTIVE;
@@ -45,7 +49,7 @@ db_tags.exec(`
     book_id         INTEGER,
     chapter_num     INTEGER,
     summary_text    TEXT,
-    summary_method  TEXT DEFAULT 'extractive',
+    summary_method  TEXT DEFAULT 'contextual',
     key_verses_json TEXT,
     top_topics_json TEXT
   );
@@ -114,6 +118,75 @@ function formatEta(ms) {
   return `${Math.floor(m / 60)}h${m % 60}m`;
 }
 
+function decodeHtmlEntities(s = '') {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ');
+}
+
+function clipWords(text, maxWords = 10) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  return words.slice(0, maxWords).join(' ');
+}
+
+function dominantPovLabel(povCounts) {
+  if (!povCounts.size) return 'historical narrative';
+  return [...povCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+async function fetchChapterDescription(volumeSlug, bookSlug, chapterNum) {
+  if (!volumeSlug || !bookSlug || !chapterNum) return null;
+  const url = `https://www.churchofjesuschrist.org/study/scriptures/${volumeSlug}/${bookSlug}/${chapterNum}?lang=eng`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m1 = html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i);
+    const m2 = html.match(/<meta[^>]+content="([^"]+)"[^>]+name="description"/i);
+    return decodeHtmlEntities((m1 || m2)?.[1] || '').trim() || null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildContextualSummary(chap, chapterDesc, keyVerses, topTopics, povCounts) {
+  const topicLabels = topTopics.map(t => t.label).slice(0, 3);
+  const topicsText = topicLabels.length ? topicLabels.join(', ') : 'core covenant themes';
+  const pov = dominantPovLabel(povCounts);
+  const heading = chapterDesc || `${chap.book_title} ${chap.chapter_num} presents teachings and events central to this part of scripture.`;
+  const kvRefs = keyVerses.length
+    ? keyVerses.map(k => `${chap.book_title} ${chap.chapter_num}:${k.verse_number}`).join(', ')
+    : `${chap.book_title} ${chap.chapter_num}`;
+  const kvSnippet = clipWords(keyVerses[0]?.text || '', 12);
+
+  const p1 = [
+    `${chap.book_title} ${chap.chapter_num} opens with this chapter focus: ${heading}.`,
+    `Across ${chap.verses.length} verses, the passage develops its message with a clear scriptural progression from opening statements to concluding emphasis.`,
+    `Major doctrinal threads in this chapter include ${topicsText}.`,
+    `The overall voice is best described as ${pov}, which shapes how the chapter teaches and testifies.`,
+    `Taken together, the chapter establishes a foundation for understanding the surrounding chapters and their covenant context.`
+  ].join(' ');
+
+  const p2 = [
+    `Key verses such as ${kvRefs} anchor the chapter's central teachings and narrative movement.`,
+    `${kvSnippet ? `One representative line begins, "${kvSnippet}..." and highlights the chapter's main direction.` : 'Its strongest verses repeatedly reinforce the chapter’s main direction and purpose.'}`,
+    `These verses connect doctrine to lived discipleship by pairing truth claims with action, obedience, and spiritual response.`,
+    `For modern readers, the chapter invites study, repentance, trust in the Lord, and practical faithfulness in daily life.`,
+    `Overall, this chapter contributes to the broader witness of Jesus Christ and the work of God's covenant people.`
+  ].join(' ');
+
+  return `${p1}\n\n${p2}`;
+}
+
 const ins = db_tags.prepare(`
   INSERT OR REPLACE INTO chapter_summaries
     (chapter_id, book_id, chapter_num, summary_text, summary_method, key_verses_json, top_topics_json)
@@ -133,7 +206,9 @@ async function main() {
     summarizer = await pipeline('summarization', 'Xenova/distilbart-cnn-6-6');
     console.log('Summarizer ready.');
   } else {
-    console.log('Extractive mode (fast). Use --abstractive for prose summaries.');
+    console.log(CONTEXTUAL
+      ? 'Contextual mode (web chapter descriptions + chapter signals). Use --extractive for local-only summaries.'
+      : 'Extractive mode (fast, local). Use --abstractive for model prose summaries.');
   }
 
   // Load verse embeddings
@@ -146,10 +221,13 @@ async function main() {
 
   // Load all chapters with their verses
   const chapRows = db.prepare(`
-    SELECT c.id AS chapter_id, c.book_id, c.chapter_number AS chapter_num,
-           b.book_title,
+      SELECT c.id AS chapter_id, c.book_id, c.chapter_number AS chapter_num,
+           b.book_title, b.book_lds_url AS book_slug, vol.volume_lds_url AS volume_slug,
            v.id AS verse_id, v.verse_number, v.scripture_text
     FROM chapters c
+    JOIN volumes vol ON vol.id = (
+      SELECT b2.volume_id FROM books b2 WHERE b2.id = c.book_id
+    )
     JOIN books b ON b.id = c.book_id
     JOIN verses v ON v.chapter_id = c.id
     ORDER BY c.id, v.verse_number
@@ -158,7 +236,15 @@ async function main() {
   const chapMap = new Map();
   for (const row of chapRows) {
     if (!chapMap.has(row.chapter_id)) {
-      chapMap.set(row.chapter_id, { chapter_id: row.chapter_id, book_id: row.book_id, chapter_num: row.chapter_num, book_title: row.book_title, verses: [] });
+      chapMap.set(row.chapter_id, {
+        chapter_id: row.chapter_id,
+        book_id: row.book_id,
+        chapter_num: row.chapter_num,
+        book_title: row.book_title,
+        book_slug: row.book_slug,
+        volume_slug: row.volume_slug,
+        verses: []
+      });
     }
     chapMap.get(row.chapter_id).verses.push({ verse_id: row.verse_id, verse_number: row.verse_number, scripture_text: row.scripture_text });
   }
@@ -168,8 +254,8 @@ async function main() {
   // Load pre-baked doctrine tags for top-topics aggregation
   const tagsMap = new Map();
   try {
-    for (const r of db_tags.prepare('SELECT verse_id, labels_json FROM verse_doctrine_tags').all()) {
-      tagsMap.set(r.verse_id, JSON.parse(r.labels_json || '[]'));
+    for (const r of db_tags.prepare('SELECT verse_id, pov, labels_json FROM verse_doctrine_tags').all()) {
+      tagsMap.set(r.verse_id, { labels: JSON.parse(r.labels_json || '[]'), pov: r.pov || null });
     }
     console.log(`  ${tagsMap.size} doctrine tag rows loaded.`);
   } catch (_) {
@@ -207,14 +293,16 @@ async function main() {
 
     // ── Top topics from doctrine tags ─────────────────────────────────────
     const topicScores = new Map();
+    const povCounts   = new Map();
     for (const v of chap.verses) {
-      for (const t of (tagsMap.get(v.verse_id) || [])) {
+      const tag = tagsMap.get(v.verse_id);
+      for (const t of (tag?.labels || [])) {
         topicScores.set(t.label, (topicScores.get(t.label) || 0) + t.score);
       }
+      if (tag?.pov) povCounts.set(tag.pov, (povCounts.get(tag.pov) || 0) + 1);
     }
-    const topTopicsJson = JSON.stringify(
-      [...topicScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, score]) => ({ label, score: +score.toFixed(3) }))
-    );
+    const topTopics = [...topicScores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, score]) => ({ label, score: +score.toFixed(3) }));
+    const topTopicsJson = JSON.stringify(topTopics);
 
     // ── Summary text ──────────────────────────────────────────────────────
     let summaryText;
@@ -230,11 +318,24 @@ async function main() {
         summaryText = (await summarizer(chunkText(combined, 900)[0], { max_new_tokens: 60, min_length: 20 }))[0].summary_text.trim();
       }
     } else {
-      // Extractive: join top-3 central verses as the summary
-      summaryText = keyVerses.map(k => k.text).join(' ');
+      if (CONTEXTUAL) {
+        const chapterDesc = await fetchChapterDescription(chap.volume_slug, chap.book_slug, chap.chapter_num);
+        summaryText = buildContextualSummary(chap, chapterDesc, keyVerses, topTopics, povCounts);
+      } else {
+        // Extractive: join top-3 central verses as the summary
+        summaryText = keyVerses.map(k => k.text).join(' ');
+      }
     }
 
-    dbBuf.push({ chapter_id: chap.chapter_id, book_id: chap.book_id, chapter_num: chap.chapter_num, summary_text: summaryText, summary_method: summarizer ? 'abstractive' : 'extractive', key_verses_json: keyVersesJson, top_topics_json: topTopicsJson });
+    dbBuf.push({
+      chapter_id: chap.chapter_id,
+      book_id: chap.book_id,
+      chapter_num: chap.chapter_num,
+      summary_text: summaryText,
+      summary_method: summarizer ? 'abstractive' : (CONTEXTUAL ? 'contextual' : 'extractive'),
+      key_verses_json: keyVersesJson,
+      top_topics_json: topTopicsJson
+    });
     done++;
 
     if (dbBuf.length >= DB_BATCH) batchInsert(dbBuf.splice(0, DB_BATCH));
