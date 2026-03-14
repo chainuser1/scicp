@@ -81,6 +81,11 @@ export async function initAllDatabases() {
       const tg = await loadDatabase('topical-guide.db');
       if (tg) databases.set('tg', tg);
     } catch (_) {}
+    // Also load verse-tags.db (pre-baked NLP — optional, graceful if absent)
+    try {
+      const tags = await loadDatabase('verse-tags.db');
+      if (tags) databases.set('tags', tags);
+    } catch (_) {}
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length}/${entries.length} databases`);
     return databases;
