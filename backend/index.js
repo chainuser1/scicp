@@ -13,9 +13,7 @@ const IS_ELECTRON_PKG = !!process.versions?.electron;
 const DB_OPTS = { fileMustExist: true };
 // In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
 const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
-// english scriptures database (LDS standard works)
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
-// additional language databases (optional)
 const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'),  DB_OPTS);
 const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'),  DB_OPTS);
 const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'),  DB_OPTS);
@@ -83,7 +81,6 @@ if (!db_tags) {
   }
 }
 
-// ── Wrapped adapters for the shared scripture engine ─────────────────────────
 const dba          = new BetterSqliteAdapter(db);
 const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
 const dba_cebuano  = new BetterSqliteAdapter(db_cebuano);
@@ -111,20 +108,17 @@ function resolveDbAdapter(language) {
 
 const fastifyStatic = require('@fastify/static');
 
-// ── Utility ───────────────────────────────────────────────────────────────────
 const hashPin = (pin) => crypto.createHash('sha256').update(String(pin)).digest('hex');
 
 fastify.register(require('@fastify/cors'), {
   origin: "*",
 });
 
-// Register static file serving for frontend distribution
 fastify.register(fastifyStatic, {
   root: FRONTEND_DIST_DIR,
   prefix: '/',
 });
 
-// Handle client-side routing fallback for React Router
 fastify.setNotFoundHandler((request, reply) => {
   reply.sendFile('index.html');
 });
@@ -144,7 +138,6 @@ fastify.get('/config', async (request) => {
   return { publicOrigin };
 });
 
-// theme management endpoints
 fastify.get('/themes', async (request, reply) => {
   const rows = db.prepare('SELECT id, name, data FROM themes').all();
   return rows.map(r => ({ id: r.id, name: r.name, data: JSON.parse(r.data) }));
@@ -198,7 +191,6 @@ fastify.delete('/themes/:id', async (request, reply) => {
   }
 });
 
-// ── setlist management endpoints (F3) ─────────────────────────────────────────
 fastify.get('/setlists', async (request, reply) => {
   const rows = db.prepare('SELECT id, name, items, created_at FROM setlists ORDER BY created_at DESC').all();
   return rows.map(r => ({ id: r.id, name: r.name, items: JSON.parse(r.items), created_at: r.created_at }));
@@ -245,7 +237,6 @@ fastify.delete('/setlists/:id', async (request, reply) => {
   }
 });
 
-// ── scripture browser endpoints (F1) ──────────────────────────────────────────
 fastify.get('/browse/books', async (request, reply) => {
   const { language } = request.query;
   const targetDb = resolveDbAdapter(language);
@@ -326,7 +317,6 @@ const io = new Server(fastify.server, {
   pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
 });
 
-// ensure themes table exists
 try {
   db.exec(`
     CREATE TABLE IF NOT EXISTS themes (
@@ -339,7 +329,6 @@ try {
   fastify.log.error('failed to ensure themes table', err);
 }
 
-// ensure setlists table exists
 try {
   db.exec(`
     CREATE TABLE IF NOT EXISTS setlists (
@@ -360,7 +349,6 @@ const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureRef
         getVersionCitation, getVerseOfTheDay, VOTD_POOL, phraseSearch,
         BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES } = engine;
 
-// ── Semantic embedding infrastructure ────────────────────────────────────────
 const REBUILD_EMBEDDINGS = process.env.REBUILD_EMBEDDINGS === 'true';
 const EMBED_BATCH_SIZE   = 50;
 
@@ -495,7 +483,6 @@ async function initEmbeddings() {
   }
 }
 
-// ── Entity (Compromise.js) infrastructure ─────────────────────────────────
 const entityPersonIndex = new Map(); // normalized-name → Set<verse_id>
 const entityPlaceIndex  = new Map(); // normalized-name → Set<verse_id>
 const verseEntityCache  = new Map(); // verse_id → { people: string[], places: string[] }
@@ -536,7 +523,6 @@ buildVerseMetaCache();
 buildTopicalGuideCache();
 buildEntityCache();
 
-// ── TG topic search helper ────────────────────────────────────────────────────
 // Finds a topic by name/slug match, returns all verses in that topic cluster
 // ranked by how many topics they share with the query topic.
 function topicSearch(query, page = 0, pageSize = 10) {
@@ -553,7 +539,6 @@ function topicSearch(query, page = 0, pageSize = 10) {
   const [topicSlug, topicName] = matched;
   const queryTopics = new Set([topicSlug]);
 
-  // Get all verse_ids for this topic
   const topicVerseIds = db_tg.prepare(`
     SELECT g.verse_id FROM topical_guide g
     JOIN topics t ON t.id = g.topic_id
@@ -562,7 +547,6 @@ function topicSearch(query, page = 0, pageSize = 10) {
 
   if (!topicVerseIds.length) return { results: [], total: 0, matchedTopic: topicName };
 
-  // Score by shared topic count
   const scored = topicVerseIds.map(vid => {
     const vTopics = verseTopicCache.get(vid) ?? new Set();
     let overlap = 0;
@@ -580,7 +564,6 @@ function topicSearch(query, page = 0, pageSize = 10) {
   return { results, total, matchedTopic: topicName };
 }
 
-// ── HTTP route: topic search (TG-first, FTS fallback, paginated) ─────────────
 fastify.get('/topic-search', async (request, reply) => {
   const { q, language = 'en' } = request.query;
   const page     = Math.max(0, parseInt(request.query.page     ?? 0,  10) || 0);
@@ -591,7 +574,6 @@ fastify.get('/topic-search', async (request, reply) => {
   const lang = language.toLowerCase();
   const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : null;
 
-  // Helpers for language translation
   const stmtCoords = targetDb
     ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
     : null;
@@ -609,7 +591,6 @@ fastify.get('/topic-search', async (request, reply) => {
     });
   };
 
-  // ── 1. TG topic lookup ────────────────────────────────────────────────────
   const tgResult = topicSearch(q.trim(), page, pageSize);
   if (tgResult) {
     return {
@@ -622,7 +603,6 @@ fastify.get('/topic-search', async (request, reply) => {
     };
   }
 
-  // ── 2. FTS fallback ───────────────────────────────────────────────────────
   const db = lang !== 'en' && targetDb ? targetDb : dba;
   const { results: ftsResults, total: ftsTotal } =
     phraseSearch(q.trim(), page, pageSize, dba, fastify.log);
@@ -636,7 +616,6 @@ fastify.get('/topic-search', async (request, reply) => {
   };
 });
 
-// ── HTTP route: adjacent verse ───────────────────────────────────────────────
 fastify.get('/verse/adjacent', async (request, reply) => {
     const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
     if (!verse_id || !direction) {
@@ -661,7 +640,6 @@ fastify.get('/verse/adjacent', async (request, reply) => {
     return { ...result, version_citation: getVersionCitation(language || 'en', result.volume_id) };
 });
 
-// ── HTTP route: semantically related verses ───────────────────────────────────
 fastify.get('/verse/:verse_id/related', async (request, reply) => {
   const verseId  = parseInt(request.params.verse_id, 10);
   if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
@@ -710,7 +688,6 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     return row;
   };
 
-  // ── TG-based scoring (always available once TG is loaded) ────────────────
   // Build overlap map: verse_id → count of shared topics
   const tgScores = new Map(); // verse_id → overlap count
   if (liveTopics.size > 0) {
@@ -726,7 +703,6 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     }
   }
 
-  // ── If embeddings ready, blend cosine similarity + TG boost ─────────────
   if (embeddingsReady) {
     const liveVec = embeddingCache.get(verseId);
     if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
@@ -753,7 +729,6 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     return { results, total: scores.length, matchedConcept, page, pageSize };
   }
 
-  // ── Fallback: TG-only (embeddings still computing) ───────────────────────
   if (tgScores.size > 0) {
     const allSorted = [...tgScores.entries()].sort((a, b) => b[1] - a[1]);
     const paged = allSorted.slice(offset, offset + pageSize);
@@ -768,7 +743,6 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
     return { results, total: allSorted.length, matchedConcept, page, pageSize, fallback: true };
   }
 
-  // ── Last resort: FTS phrase on verse text ────────────────────────────────
   const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
   const { results: ftsResults, total: ftsTotal } = phraseSearch(phrase, page, pageSize, dba, fastify.log);
   const filtered = ftsResults.filter(r => r.verse_id !== verseId);
@@ -784,7 +758,6 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   return { results: filtered, total: ftsTotal ?? filtered.length, page, pageSize, fallback: true };
 });
 
-// ── verse translation endpoint (F4) ───────────────────────────────────────────
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
@@ -809,7 +782,6 @@ fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   }
 });
 
-// ── Verse of the Day ────────────────────────────────────────────────────────
 fastify.get('/verse/of-the-day', async (request, reply) => {
   try {
     const result = getVerseOfTheDay(dba);
@@ -832,7 +804,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const PRESENTER_LEFT_DEBOUNCE_MS = Number(process.env.PRESENTER_LEFT_DEBOUNCE_MS || SERVICE_CONFIG.PRESENTER_LEFT_DEBOUNCE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
-  // Track viewer counts per session so the Presenter can see "N displays connected"
   const sessionViewerCounts = new Map();
 
   function normalizeSessionId(value) {
@@ -916,7 +887,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     return require('crypto').randomBytes(16).toString('hex');
   }
 
-  // ── Viewer count tracking ────────────────────────────────────────────────
   function incrementViewerCount(sessionId) {
     const n = (sessionViewerCounts.get(sessionId) || 0) + 1;
     sessionViewerCounts.set(sessionId, n);
@@ -1007,7 +977,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     if (state && state.presenterSocketId === socketId) {
       state.presenterSocketId = null;
       if (voluntary) {
-        // Room is now completely open — any presenter can walk in.
         state.presenterToken            = null;
         state.presenterLastActivityAt   = null;
         state.presenterDisconnectedAt   = null;
@@ -1037,7 +1006,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   function ensurePresenterAccess(sessionId, socket) {
     const state = getSessionState(sessionId);
     clearStalePresenterLock(state);
-    // Track last-activity timestamp so idle-eviction logic stays current.
     if (state.presenterSocketId === socket.id) {
       state.presenterLastActivityAt = Date.now();
     }
@@ -1050,7 +1018,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     return true;
   }
 
-  // ── Idle session sweep ────────────────────────────────────────────────────────
   // Safety-net garbage collector: every 5 minutes, delete any session whose room
   // is empty AND whose cleanup timer has already fired or was never scheduled.
   // This catches sessions that slipped through the normal cleanup path (e.g. the
@@ -1085,14 +1052,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
         const incomingToken = String(presenterToken || '').trim();
 
-        // ── Step 1: Lockout check ─────────────────────────────────────────────
         // A token that was evicted stays barred until the current presenter
         // voluntarily leaves.
         if (incomingToken && state.lockedOutTokens.has(incomingToken)) {
           return { error: 'presenter-locked-out' };
         }
 
-        // ── Step 2: Same presenter reconnecting ───────────────────────────────
         // The token matches — this is the original device/tab returning after
         // a network blip or page refresh.  Clear the disconnect timer now that
         // they're back, then fall through to the grant section.
@@ -1100,17 +1065,14 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           state.presenterDisconnectedAt = null; // they're back — stop the eviction clock
         }
 
-        // ── Step 3: No current presenter ─────────────────────────────────────
         else if (!state.presenterToken) {
           // Slot is vacant.  Assign the incoming token (or generate a fresh one
           // if the client didn't supply one, as is the case on first join).
           state.presenterToken = incomingToken || generateToken();
         }
 
-        // ── Steps 4 & 5: Different token — check connected vs disconnected ────
         else {
           if (hasConnectedSocket(state.presenterSocketId)) {
-            // ── Step 4: current holder's socket is still alive ─────────────
             // The preacher's device is online — protect them unconditionally.
             // Being "idle" (not touching the screen) is normal during a sermon.
             io.to(state.presenterSocketId).emit('presenter-takeover-attempt', {
@@ -1118,7 +1080,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             });
             return { error: 'Another presenter is active in this session' };
           } else {
-            // ── Step 5: holder's socket is gone (disconnected) ─────────────
             // Presenter lock is permanent until they explicitly hit "Leave Session".
             // A disconnected device (sleeping phone, WiFi blip, mid-sermon) does
             // not open the slot — the preacher's place is always held for them.
@@ -1126,7 +1087,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           }
         }
 
-        // ── PIN gate (runs after token checks so locked-out is caught first) ──
+        // PIN gate (runs after token checks so locked-out is caught first)
         if (state.pinHash) {
           const provided = String(pin || '').trim();
           if (!provided) return { requiresPin: true };
@@ -1138,7 +1099,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (activeRole === 'presenter') {
           releasePresenterLock(previousSessionId, socket.id, true /* voluntary — switching sessions */);
         } else {
-          // Viewer leaving previous session
           decrementViewerCount(previousSessionId);
         }
         scheduleCleanup(previousSessionId);
@@ -1244,7 +1204,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken });
     });
 
-    // ── TV/Client-initiated sessions ──────────────────────────────────────────
     // The Client display (e.g. a TV) calls this to create a named session that
     // the Presenter then joins by scanning the QR code or typing the short code.
     //
@@ -1276,7 +1235,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           fastify.log.info(`Secondary viewer joining client session ${sessionId}`);
         }
       } else {
-        // Create a fresh session room.
         sessionId = generateSessionId();
         if (!sessionId) {
           const error = { message: 'Server session limit reached' };
@@ -1287,7 +1245,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         isMainClient = true;
       }
 
-      // Leave any previous session cleanly.
       if (activeSessionId && activeSessionId !== DEFAULT_SESSION_ID && activeSessionId !== sessionId) {
         socket.leave(activeSessionId);
         decrementViewerCount(activeSessionId);
@@ -1377,7 +1334,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       if (typeof callback === 'function') callback({ ok: true, sessionId: left.sessionId });
     });
 
-    // ── Session PIN management (presenter-only) ────────────────────────────────
     socket.on('set-session-pin', (payload, callback) => {
       if (!ensurePresenterAccess(activeSessionId, socket)) {
         if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' });
@@ -1417,7 +1373,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
         fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize} lang=${language}`);
 
-        // ── Search pipeline ────────────────────────────────────────────────
         // 1. Exact scripture ref  → handled inside searchScripture/searchScriptureInDb
         // 2. Phrase (≥4 words)    → FTS BM25 for best word-combination match
         // 3. TG topic (1-3 words) → authoritative topic cluster, ranked by overlap
@@ -1481,7 +1436,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       emitToSession(sessionId, 'highlight-text', state.highlightedText);
     });
 
-    // ── clear-screen ─────────────────────────────────────────────────────────
     // Presenter hits "End Live" → blank the TV, return Client to QR idle state.
     // Session stays alive — QR code is unchanged — presenter can go live again.
     socket.on('clear-screen', (payload, callback) => {

@@ -384,7 +384,6 @@ const MobilePresenter = () => {
     return [];
   });
 
-  // ── F1 — Browse ─────────────────────────────────────────────────────────────
   const [browseLevel, setBrowseLevel]                     = useState('books');
   const [browseBooks, setBrowseBooks]                     = useState([]);
   const [browseChapters, setBrowseChapters]               = useState([]);
@@ -393,39 +392,32 @@ const MobilePresenter = () => {
   const [browseSelectedChapter, setBrowseSelectedChapter] = useState(null);
   const [browseBooksLoaded, setBrowseBooksLoaded]         = useState(false);
 
-  // ── F2 / F12 — Announcement / Custom Text ────────────────────────────────────
   const [customText, setCustomText]       = useState('');
   const [customSubtext, setCustomSubtext] = useState('');
   const [isCustomLive, setIsCustomLive]   = useState(false);
 
-  // ── F3 — Saved Setlists (local-only on mobile) ────────────────────────────────
   const [savedSetlists, setSavedSetlists]     = useState([]);
   const [setlistSaveOpen, setSetlistSaveOpen] = useState(false);
   const [setlistSaveName, setSetlistSaveName] = useState('');
   const [setlistLoadOpen, setSetlistLoadOpen] = useState(false);
   const [setlistsLoading, setSetlistsLoading] = useState(false);
 
-  // ── F4 — Translation Preview ─────────────────────────────────────────────────
   const [expandedTranslations, setExpandedTranslations] = useState(() => new Set());
   const [translationCache, setTranslationCache]         = useState({});
 
-  // ── F6 — Verse Notes (private, never sent to TV) ─────────────────────────────
   const [verseNotes, setVerseNotes] = useState(() => {
     try { return JSON.parse(localStorage.getItem('scicp.verse_notes_v1')) || {}; } catch { return {}; }
   });
   const [notesExpandedFor, setNotesExpandedFor] = useState(() => new Set());
 
-  // ── F8 — Secondary (dual) Language displayed on TV ───────────────────────────
   const [secondaryLanguage, setSecondaryLanguage] = useState(() => {
     try { return localStorage.getItem('scicp.secondary_language_v1') || ''; } catch { return ''; }
   });
 
-  // ── F12 — Runsheet text-item draft ───────────────────────────────────────────
   const [runsheetAddingText, setRunsheetAddingText]     = useState(false);
   const [runsheetTextDraft, setRunsheetTextDraft]       = useState('');
   const [runsheetSubtextDraft, setRunsheetSubtextDraft] = useState('');
 
-  // ── Context Modal (Chapter / Related) ────────────────────────────────────────
   const [contextOpen,    setContextOpen]    = useState(false);
   const [contextTab,     setContextTab]     = useState('chapter');
   const [contextLoading, setContextLoading] = useState(false);
@@ -435,7 +427,6 @@ const MobilePresenter = () => {
   const [relatedPage,    setRelatedPage]    = useState(0);
   const [relatedTotal,   setRelatedTotal]   = useState(0);
   const [relatedBatchPage, setRelatedBatchPage] = useState(0);
-  // NLP tags + chapter intelligence
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [], ready: false });
   const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
@@ -495,18 +486,15 @@ const MobilePresenter = () => {
       openContextModal('chapter');
     }
   }, [liveVerse?.chapter_id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Persist setlist to localStorage
   useEffect(() => {
     try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
     catch { /* ignore */ }
   }, [setlist]);
 
-  // F6 — persist verse notes
   useEffect(() => {
     try { localStorage.setItem('scicp.verse_notes_v1', JSON.stringify(verseNotes)); } catch { /* ignore */ }
   }, [verseNotes]);
 
-  // F8 — persist secondary language choice
   useEffect(() => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
   }, [secondaryLanguage]);
@@ -528,10 +516,8 @@ const MobilePresenter = () => {
     return () => media.removeEventListener('change', onOsThemeChange);
   }, []);
 
-  // F1 — reset book list when language changes
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
 
-  // F1 — fetch books when Browse tab is opened (uses local svc)
   useEffect(() => {
     if (drawerTab === 'browse' && !browseBooksLoaded) {
       try {
@@ -608,14 +594,12 @@ const MobilePresenter = () => {
   const PAGE_SIZE = 4; // 4 results/batch on mobile — thumb-friendly glide navigation
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId: 'LOCAL' });
 
-  // ── Toast notification ───────────────────────────────────────────────────
   const showToast = (msg) => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
   };
 
-  // ── End Live — clear TV screen ─────────────────────────────────────────
   const endLive = () => {
     emitWithSession('clear-screen');
     setLiveVerse(null);
@@ -625,13 +609,11 @@ const MobilePresenter = () => {
     showToast('Screen cleared');
   };
 
-  // ── Clear highlight only ──────────────────────────────────────────────────
   const clearHighlight = () => {
     setHighlightedText('');
     emitWithSession('highlight-text', { text: '' });
   };
 
-  // ── Font size control ─────────────────────────────────────────────────────
   const adjustFontSize = (delta) => {
     setFontSizeRem(prev => {
       const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
@@ -732,7 +714,6 @@ const MobilePresenter = () => {
     }
   }, [connectionState]);
 
-  // ── Verse of the Day (local) ─────────────────────────────────────────────
   useEffect(() => {
     try {
       const data = svc.verseOfTheDay();
@@ -749,7 +730,6 @@ const MobilePresenter = () => {
     try {
       window.localStorage.setItem(PRESENTER_TOUR_KEY, 'true');
     } catch {
-      // ignore storage errors
     }
   };
 
@@ -783,7 +763,6 @@ const MobilePresenter = () => {
     socket.on('update-verse',   handleUpdateVerse);
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
-    // Initialize the local socket (loads DBs and fires 'connect')
     socket.init().catch(err => {
       console.error('[MobilePresenter] socket.init failed:', err);
       setConnectionState('error');
@@ -853,7 +832,6 @@ const MobilePresenter = () => {
   const selectVerse = verse => {
     const verseTheme = themeForVerse(currentTheme, verse);
     setStaged({ ...verse, theme: verseTheme });
-    // F11 — preload background into TV browser cache before go-live
     if (verseTheme?.background_url) {
       const match = String(verseTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
       if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
@@ -979,7 +957,6 @@ const MobilePresenter = () => {
     }
   };
 
-  // ── Topic drill-down inside Related tab (mobile/offline) ─────────────────
   // Mobile uses frontend pagination: load all results, slice by batch page
   const _mobileSetBatchFromAllVerses = (allVerses, label, concept, batchPage = 0) => {
     const pageSlice = allVerses.slice(batchPage * RELATED_PAGE_SIZE, (batchPage + 1) * RELATED_PAGE_SIZE);
@@ -1036,7 +1013,6 @@ const MobilePresenter = () => {
     _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
   };
 
-  // ── Drill into a specific verse's related verses (mobile/offline) ─────────
   const drillIntoVerse = (verse, batchPage = 0) => {
     setContextLoading(true);
     setCtxWordChip(null);
@@ -1058,7 +1034,6 @@ const MobilePresenter = () => {
     }
   };
 
-  // ── Word-selection explore chip ────────────────────────────────────────────
   const handleCtxTextMouseUp = (e) => {
     const sel = window.getSelection();
     const word = sel?.toString().trim().replace(/[^\w\s'-]/g, '').trim();
@@ -1215,7 +1190,6 @@ const MobilePresenter = () => {
     );
   };
 
-  // ── F1 — Browse handlers (local svc calls) ───────────────────────────────
   const handleBrowseBook = (book) => {
     setBrowseSelectedBook(book);
     try {
@@ -1233,7 +1207,6 @@ const MobilePresenter = () => {
     setBrowseLevel('verses');
   };
 
-  // ── F2 — Send announcement to screen ──────────────────────────────────────
   const sendCustomToScreen = () => {
     if (!customText.trim()) return;
     emitWithSession('go-custom', { text: customText.trim(), subtext: customSubtext.trim(), theme: currentTheme });
@@ -1241,7 +1214,6 @@ const MobilePresenter = () => {
     showToast('Announcement sent to screen');
   };
 
-  // ── F3 — Named setlist persistence (local-only on mobile) ────────────────
   const fetchSavedSetlists = () => {
     setSetlistsLoading(true);
     // Setlists are not persisted on mobile for now — use local state only
@@ -1251,7 +1223,6 @@ const MobilePresenter = () => {
   const saveSetlist = () => {
     const name = setlistSaveName.trim();
     if (!name) return;
-    // Keep in local state only (no server persistence on mobile)
     setSavedSetlists(prev => [...prev, { id: `local_${Date.now()}`, name, items: [...setlist] }]);
     setSetlistSaveOpen(false);
     setSetlistSaveName('');
@@ -1267,7 +1238,6 @@ const MobilePresenter = () => {
     setSavedSetlists(prev => prev.filter(s => s.id !== id));
   };
 
-  // ── F4 — Translation preview in search results ────────────────────────────
   const toggleTranslation = (verse_id) => {
     const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'en';
     const cacheKey = `${verse_id}_${targetLang}`;
@@ -1286,13 +1256,11 @@ const MobilePresenter = () => {
     }
   };
 
-  // ── F6 — Verse notes ──────────────────────────────────────────────────────
   const updateVerseNote = (key, text) =>
     setVerseNotes(prev => ({ ...prev, [key]: text }));
   const toggleNotesExpanded = (key) =>
     setNotesExpandedFor(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
 
-  // ── F12 — Add text/announcement item to service order ────────────────────
   const addTextItem = () => {
     if (!runsheetTextDraft.trim()) return;
     setSetlist(prev => [...prev, {

@@ -12,7 +12,6 @@
 import * as svc from './scripture-service';
 import { ExternalDisplay } from '../plugins/capacitor-external-display/src/index.js';
 
-// ── Simple event emitter ────────────────────────────────────────────────────
 const listeners = new Map();
 
 function on(event, fn) {
@@ -31,7 +30,6 @@ function fire(event, data) {
   if (set) set.forEach(fn => { try { fn(data); } catch (e) { console.error(`socket-local [${event}]:`, e); } });
 }
 
-// ── External display bridge ─────────────────────────────────────────────────
 // Uses the capacitor-external-display plugin when available, falling back
 // to a local CustomEvent (for dev/browser testing).
 let _presentationActive = false;
@@ -84,7 +82,6 @@ export function isCasting() {
   return _presentationActive;
 }
 
-// ── Emit handler — routes socket events to local service calls ──────────────
 function emit(event, payload, ackCallback) {
   // Handle ack-style calls where the last arg is a callback
   if (typeof payload === 'function') {
@@ -115,7 +112,6 @@ function emit(event, payload, ackCallback) {
       let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
       let bookTitle = verse.book_title;
 
-      // Fetch from the correct language DB
       const targetLang = language || 'en';
       const row = svc.getVerse(verse, targetLang);
       if (row) {
@@ -149,7 +145,6 @@ function emit(event, payload, ackCallback) {
         volume_short_title: row?.volume_short_title || verse.volume_short_title || '',
       };
 
-      // Dual language
       if (secondaryLanguage && secondaryLanguage !== targetLang) {
         const secRow = svc.getVerse(verse, secondaryLanguage);
         if (secRow) {
@@ -159,7 +154,6 @@ function emit(event, payload, ackCallback) {
         }
       }
 
-      // Update local state and send to external display
       fire('update-verse', verseWithSegments);
       sendToDisplay({ type: 'update-verse', data: verseWithSegments });
       break;
@@ -217,7 +211,6 @@ function emit(event, payload, ackCallback) {
       break;
     }
 
-    // ── Session events (no-op on mobile — single local session) ───────────
     case 'join-session': {
       if (typeof ackCallback === 'function') {
         ackCallback({ ok: true, sessionId: 'LOCAL', presenterToken: 'mobile-local' });
@@ -243,14 +236,12 @@ function emit(event, payload, ackCallback) {
   }
 }
 
-// ── Public API (mimics socket.io-client) ────────────────────────────────────
 export const socket = {
   connected: true,
   id: 'mobile-local',
   emit,
   on,
   off,
-  // Fire a synthetic 'connect' event once the service is initialized
   async init() {
     await svc.init();
     fire('connect');
