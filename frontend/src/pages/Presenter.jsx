@@ -1247,7 +1247,7 @@ const Presenter = () => {
     setCtxScrolled(false);
     setCtxAtBottom(false);
     try {
-      if (tab === 'chapter' && !chapterVerses.length) {
+      if (tab === 'chapter') {
         // Resolve chapter_id — may be missing on verses from VOTD/history/setlist
         let chapterId = liveVerse.chapter_id;
         let chapters  = bookChapters;
@@ -1267,23 +1267,12 @@ const Presenter = () => {
           if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
-        const [versesRes, summaryRes, entitiesRes] = await Promise.all([
-          fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`),
-          fetch(`${API_URL}/chapter/${chapterId}/summary`),
-          fetch(`${API_URL}/chapter/${chapterId}/entities`),
-        ]);
-        if (versesRes.ok) {
-          const d = await versesRes.json();
-          setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
-        }
-        if (summaryRes.ok) {
-          const d = await summaryRes.json();
-          setChapterSummary(d);
-        }
-        if (entitiesRes.ok) {
-          const d = await entitiesRes.json();
-          setChapterEntities(d);
-        }
+        // Fetch each piece independently so Summary/Entities tabs work even when chapter verses are already cached
+        const fetches = [];
+        if (!chapterVerses.length)    fetches.push(fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`).then(r => r.ok ? r.json() : null).then(d => d && setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []))));
+        if (!chapterSummary.ready)    fetches.push(fetch(`${API_URL}/chapter/${chapterId}/summary`).then(r => r.ok ? r.json() : null).then(d => d && setChapterSummary(d)));
+        if (!chapterEntities.ready)   fetches.push(fetch(`${API_URL}/chapter/${chapterId}/entities`).then(r => r.ok ? r.json() : null).then(d => d && setChapterEntities(d)));
+        if (fetches.length) await Promise.all(fetches);
       } else if (tab === 'related' && !relatedVerses.length) {
         const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?page=0&pageSize=${RELATED_PAGE_SIZE}&language=${currentLanguage}`);
         if (res.ok) {
@@ -3303,7 +3292,7 @@ const Presenter = () => {
                         {chapterSummary.summary_text && (
                           <div className="ctx-summary-text">
                             <span className="ctx-summary-method-badge">
-                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Key Verses'}
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : chapterSummary.summary_method === 'contextual' ? '📖 Chapter Summary' : '📖 Key Verses'}
                             </span>
                             <p>{chapterSummary.summary_text}</p>
                           </div>
