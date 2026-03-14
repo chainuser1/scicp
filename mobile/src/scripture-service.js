@@ -215,8 +215,8 @@ export function getChapterEntities(chapterId) {
       const eRows = tagsDb.exec('SELECT people, places FROM verse_entities WHERE verse_id = ?', [vid]);
       if (!eRows.length || !eRows[0].values.length) continue;
       const [people, places] = eRows[0].values[0];
-      if (people) people.split('|').forEach(p => p.trim() && peopleSet.add(p.trim()));
-      if (places) places.split('|').forEach(p => p.trim() && placesSet.add(p.trim()));
+      if (people) people.split('|').forEach(p => { const n = p.trim().replace(/[,;.!?]+$/, '').trim(); if (n) peopleSet.add(n); });
+      if (places) places.split('|').forEach(p => { const n = p.trim().replace(/[,;.!?]+$/, '').trim(); if (n) placesSet.add(n); });
     }
     return { people: [...peopleSet].sort(), places: [...placesSet].sort(), ready: true };
   } catch { return { people: [], places: [], ready: false }; }

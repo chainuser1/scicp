@@ -551,6 +551,7 @@ const Presenter = () => {
   const [nowReading,     setNowReading]     = useState(false); // "Now Reading" TV label toggle
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
+  const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8; // server page size
   const [verseOfDay, setVerseOfDay]         = useState(null);
@@ -651,18 +652,13 @@ const Presenter = () => {
     return () => media.removeEventListener('change', onOsThemeChange);
   }, []);
 
-  // Fetch entities and doctrine tags for the live verse; reset chapter-level state on chapter change
+  // Fetch entities and doctrine tags for the live verse
   useEffect(() => {
     if (!liveVerse?.verse_id) {
       setVerseEntities({ people: [], places: [] });
       setVerseTags({ pov: null, labels: [] });
-      setChapterEntities({ people: [], places: [], ready: false });
-      setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
       return;
     }
-    // Reset chapter-level data when chapter changes
-    setChapterEntities({ people: [], places: [], ready: false });
-    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
     let cancelled = false;
     Promise.all([
       fetch(`${API_URL}/verse/${liveVerse.verse_id}/entities`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -674,6 +670,22 @@ const Presenter = () => {
     });
     return () => { cancelled = true; };
   }, [liveVerse?.verse_id]);
+
+  // Reset chapter-level modal data only when the CHAPTER changes (not on every verse)
+  useEffect(() => {
+    setChapterEntities({ people: [], places: [], ready: false });
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setChapterVerses([]);
+    chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
+  }, [liveVerse?.chapter_id]);
+
+  // Re-fetch chapter modal data when chapter changes and modal is already open
+  useEffect(() => {
+    if (!liveVerse?.chapter_id || !contextOpen) return;
+    if (contextTab === 'chapter' || contextTab === 'summary' || contextTab === 'entities') {
+      openContextModal('chapter');
+    }
+  }, [liveVerse?.chapter_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // F1 — reset book list when language changes
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
@@ -1267,11 +1279,14 @@ const Presenter = () => {
           if (idx >= 0) setCtxChapterIdx(idx);
         }
         if (!chapterId) { setContextLoading(false); return; }
+        // force=true when chapter changed (ref was set by the chapter-change useEffect)
+        const force = chapterNeedsRefetchRef.current;
+        if (force) chapterNeedsRefetchRef.current = false;
         // Fetch each piece independently so Summary/Entities tabs work even when chapter verses are already cached
         const fetches = [];
-        if (!chapterVerses.length)    fetches.push(fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`).then(r => r.ok ? r.json() : null).then(d => d && setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []))));
-        if (!chapterSummary.ready)    fetches.push(fetch(`${API_URL}/chapter/${chapterId}/summary`).then(r => r.ok ? r.json() : null).then(d => d && setChapterSummary(d)));
-        if (!chapterEntities.ready)   fetches.push(fetch(`${API_URL}/chapter/${chapterId}/entities`).then(r => r.ok ? r.json() : null).then(d => d && setChapterEntities(d)));
+        if (force || !chapterVerses.length)    fetches.push(fetch(`${API_URL}/browse/verses?chapter_id=${chapterId}&language=${currentLanguage}`).then(r => r.ok ? r.json() : null).then(d => d && setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []))));
+        if (force || !chapterSummary.ready)    fetches.push(fetch(`${API_URL}/chapter/${chapterId}/summary`).then(r => r.ok ? r.json() : null).then(d => d && setChapterSummary(d)));
+        if (force || !chapterEntities.ready)   fetches.push(fetch(`${API_URL}/chapter/${chapterId}/entities`).then(r => r.ok ? r.json() : null).then(d => d && setChapterEntities(d)));
         if (fetches.length) await Promise.all(fetches);
       } else if (tab === 'related' && !relatedVerses.length) {
         const res = await fetch(`${API_URL}/verse/${liveVerse.verse_id}/related?page=0&pageSize=${RELATED_PAGE_SIZE}&language=${currentLanguage}`);
@@ -1429,15 +1444,24 @@ const Presenter = () => {
     setCtxSlideDir(null);
     setCtxScrolled(false);
     setCtxAtBottom(false);
+    setContextLoading(true);
     try {
-      const res = await fetch(`${API_URL}/browse/verses?chapter_id=${ch.chapter_id}&language=${currentLanguage}`);
-      if (res.ok) {
-        const d = await res.json();
+      const [versesRes, summaryRes, entitiesRes] = await Promise.all([
+        fetch(`${API_URL}/browse/verses?chapter_id=${ch.chapter_id}&language=${currentLanguage}`),
+        fetch(`${API_URL}/chapter/${ch.chapter_id}/summary`),
+        fetch(`${API_URL}/chapter/${ch.chapter_id}/entities`),
+      ]);
+      if (versesRes.ok) {
+        const d = await versesRes.json();
         setChapterVerses(Array.isArray(d) ? d : (d.verses ?? []));
-        setCtxChapterIdx(idx);
-        if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
       }
-    } catch { /* ignore */ }
+      if (summaryRes.ok) setChapterSummary(await summaryRes.json());
+      if (entitiesRes.ok) setChapterEntities(await entitiesRes.json());
+      setCtxChapterIdx(idx);
+      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+    } catch { /* ignore */ } finally {
+      setContextLoading(false);
+    }
   };
 
   const handleCtxBodyScroll = (e) => {
