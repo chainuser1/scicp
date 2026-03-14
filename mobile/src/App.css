@@ -6862,3 +6862,22 @@ button, [role="button"] {
 .ctx-item-text { font-size: 0.78rem; line-height: 1.5; color: rgba(255,255,255,0.82); }
 .ctx-item-actions { display: flex; gap: 0.4rem; margin-top: 0.2rem; }
 .ctx-item-actions button { font-size: 0.68rem; padding: 0.2rem 0.55rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.07); color: #fff; cursor: pointer; }
+
+/* ── Now Reading toggle button ───────────────────────────────────────────── */
+.now-reading-btn {
+  padding: 0.25rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.35rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.now-reading-btn--on {
+  background: rgba(120, 80, 200, 0.18);
+  border-color: rgba(150, 100, 230, 0.5);
+  color: #c0a0ff;
+}
+.now-reading-btn:hover { background: rgba(120, 80, 200, 0.12); border-color: rgba(150,100,230,0.35); }

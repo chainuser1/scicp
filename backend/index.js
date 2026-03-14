@@ -1521,6 +1521,14 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       emitToSession(sessionId, 'preload-background', { background_url: payload.background_url });
     });
 
+    // ── now-reading ─────────────────────────────────────────────────────────
+    // Presenter toggles the "Now Reading" label on TV/client screens.
+    socket.on('now-reading', (payload) => {
+      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
+      if (!ensurePresenterAccess(sessionId, socket)) return;
+      emitToSession(sessionId, 'now-reading', { on: !!payload?.on, verse_id: payload?.verse_id || null });
+    });
+
     // ── update-language ──────────────────────────────────────────────────────
     // Presenter switches language while a verse is already live.
     // Fetch the same verse from the correct database and re-broadcast it

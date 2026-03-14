@@ -1498,6 +1498,30 @@ button,
   border-color: rgba(201, 168, 76, 0.5);
 }
 
+/* "Now Reading" toggle button in live preview card */
+.now-reading-btn {
+  padding: 0.25rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.35rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.now-reading-btn--on {
+  background: rgba(120, 80, 200, 0.18);
+  border-color: rgba(150, 100, 230, 0.5);
+  color: #c0a0ff;
+}
+.now-reading-btn:hover {
+  background: rgba(120, 80, 200, 0.12);
+  border-color: rgba(150, 100, 230, 0.35);
+}
+.presenter-container--light .now-reading-btn { background: rgba(0,0,0,0.05); border-color: rgba(139,58,26,0.2); }
+.presenter-container--light .now-reading-btn--on { background: rgba(100,60,180,0.1); border-color: rgba(120,70,200,0.4); color: #6040c0; }
+
 .clear-highlight-btn {
   padding: 0.22rem 0.5rem;
   background: rgba(201, 168, 76, 0.1);

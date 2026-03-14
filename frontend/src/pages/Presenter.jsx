@@ -548,6 +548,7 @@ const Presenter = () => {
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
   const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
+  const [nowReading,     setNowReading]     = useState(false); // "Now Reading" TV label toggle
   const ctxBodyRef     = useRef(null);
   const ctxTouchStartX = useRef(null);
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
@@ -1171,8 +1172,15 @@ const Presenter = () => {
     emitWithSession('go-live', { verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(staged);
     setCurrentSegment(0);
+    setNowReading(false); // reset Now Reading on new go-live
     setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
     setStaged(null);
+  };
+
+  const toggleNowReading = () => {
+    const next = !nowReading;
+    setNowReading(next);
+    emitWithSession('now-reading', { on: next, verse_id: liveVerse?.verse_id || null });
   };
 
   const navigateSegment = direction => {
@@ -1235,7 +1243,6 @@ const Presenter = () => {
   const openContextModal = async (tab = 'chapter') => {
     if (!liveVerse) return;
     setContextOpen(true);
-    setContextTab(tab);
     setContextLoading(true);
     setCtxScrolled(false);
     setCtxAtBottom(false);
@@ -2797,9 +2804,15 @@ const Presenter = () => {
                 )}
                 <span className="card-hint">select text to highlight</span>
                 <button className="context-expand-btn"
-                  onClick={() => openContextModal('chapter')}
+                  onClick={() => { setContextTab('chapter'); openContextModal('chapter'); }}
                   title="Chapter & related scriptures">
                   ☰ Context
+                </button>
+                <button
+                  className={`now-reading-btn${nowReading ? ' now-reading-btn--on' : ''}`}
+                  onClick={toggleNowReading}
+                  title="Toggle 'Now Reading' label on the TV screen">
+                  📖{nowReading ? ' On' : ' Off'}
                 </button>
                 <button className="end-live-btn" onClick={endLive} title="End live — clears TV screen (E)">
                   ◼ End Live
