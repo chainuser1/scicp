@@ -2640,12 +2640,29 @@ const MobilePresenter = () => {
                             ))}
                           </div>
                         )}
-                        {chapterSummary.summary_text && (
+                        {/* Summary prose — only for contextual/abstractive */}
+                        {chapterSummary.summary_text && chapterSummary.summary_method !== 'extractive' && (
                           <div className="ctx-summary-text">
                             <span className="ctx-summary-method-badge">
-                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : chapterSummary.summary_method === 'contextual' ? '📖 Chapter Summary' : '📖 Key Verses'}
+                              {chapterSummary.summary_method === 'abstractive' ? '✨ AI Summary' : '📖 Chapter Summary'}
                             </span>
-                            <p>{chapterSummary.summary_text}</p>
+                            {chapterSummary.summary_text.split('\n\n').map((para, i) => (
+                              <p key={i}>{para}</p>
+                            ))}
+                          </div>
+                        )}
+                        {/* Key verses — always shown; primary display when method is extractive */}
+                        {chapterSummary.key_verses.length > 0 && (
+                          <div className="ctx-key-verses">
+                            <span className="ctx-entity-label">📌 Key Verses</span>
+                            <ul className="ctx-items-list">
+                              {chapterSummary.key_verses.map(v => (
+                                <li key={v.verse_id} className="ctx-item">
+                                  <span className="ctx-item-ref">v.{v.verse_number}</span>
+                                  <span className="ctx-item-text">{v.text}</span>
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         )}
                       </>
