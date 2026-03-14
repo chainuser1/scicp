@@ -7,7 +7,6 @@ const POV_TINT = {
   'prophetic':           'rgba(60, 100, 200, 0.10)',
 };
 
-// ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
   return Promise.all([
@@ -16,7 +15,6 @@ const waitForFonts = () => {
   ]).catch(() => {});
 };
 
-// ─── QR generation — uses npm `qrcode`, zero CDN dependency ──────────────────
 // Falls back to a raw-URL text display if the package is not installed.
 const generateQrDataUrl = async (text) => {
   try {
@@ -33,10 +31,8 @@ const generateQrDataUrl = async (text) => {
   }
 };
 
-// ─── sessionStorage key — keeps QR code stable across browser restarts ───────
 const TV_SESSION_KEY = 'siv.tv_session_id';
 
-// ─── Module-level display constants ───────────────────────────────────────────
 const DEFAULT_BG =
   "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
 
@@ -66,7 +62,6 @@ const kioskDisplayMs = (text, multiplier = 1) => {
 function Client() {
   const isElectronApp = !!window.electronAPI?.isElectron;
 
-  // ─── Utilities ───────────────────────────────────────────────────────────────
   const extractImageUrl = (value) => {
     const match = String(value || '').match(/url\((['"]?)(.*?)\1\)/i);
     return match ? match[2] : '';
@@ -103,7 +98,6 @@ function Client() {
     const idx = order.indexOf(mode);
     return order[Math.min(order.length - 1, (idx === -1 ? 1 : idx) + steps)];
   };
-  // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
   const [versePov, setVersePov] = useState(null);
   const [nowReadingOn, setNowReadingOn] = useState(false); // presenter-controlled "Now Reading" label
@@ -139,7 +133,6 @@ function Client() {
   const [autoHighlight, setAutoHighlight] = useState(null);
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
-  // ─── QR / TV session state ────────────────────────────────────────────────
   // The TV always creates its own session and shows QR.
   // presenterJoined flips to true when the server broadcasts presenter-joined.
   const [clientSessionId, setClientSessionId]   = useState('');
@@ -154,7 +147,6 @@ function Client() {
   const [presenterLeft, setPresenterLeft]       = useState(false); // shows subtle notice on idle screen
   const [votd, setVotd]                         = useState(null);  // verse of the day — shown while presenter is live but idle
 
-  // ─── Kiosk mode — cycles verses while no presenter is connected ──────────
   const [isKioskMode, setIsKioskMode] = useState(true); // true until first presenter join
   const [kioskRestart, setKioskRestart] = useState(0);  // incremented to retrigger kiosk after presenter leaves
   const kioskTimerRef       = useRef(null);
@@ -164,7 +156,6 @@ function Client() {
   const joiningOverlayTimer = useRef(null); // "✓ connected" flash auto-hide (1.8 s)
   const presenterGraceTimerRef = useRef(null); // grace period before kiosk starts (15 min)
 
-  // Refs — keep values accessible inside socket handler closures
   const clientSessionIdRef = useRef('');
   const presenterJoinedRef = useRef(false);
   const joinedSessionRef   = useRef('');
@@ -172,7 +163,6 @@ function Client() {
   useEffect(() => { clientSessionIdRef.current = clientSessionId; }, [clientSessionId]);
   useEffect(() => { presenterJoinedRef.current = presenterJoined; }, [presenterJoined]);
 
-  // ─── sessionStorage helpers ───────────────────────────────────────────────
   const getStoredTvSession = () => {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
   };
@@ -183,7 +173,6 @@ function Client() {
     try { sessionStorage.removeItem(TV_SESSION_KEY); } catch { /* storage unavailable */ }
   };
 
-  // ─── Fetch canonical public origin from /config ───────────────────────────
   useEffect(() => {
     fetch('/config')
       .then(r => r.ok ? r.json() : null)
@@ -191,7 +180,7 @@ function Client() {
       .catch(() => {});
   }, []);
 
-  // ─── Fetch Verse of the Day — displayed on TV while presenter is connected
+  // Fetch Verse of the Day — displayed on TV while presenter is connected
   //     but hasn't sent a verse yet (the "connected-idle" state).
   useEffect(() => {
     fetch('/verse/of-the-day')
@@ -200,7 +189,6 @@ function Client() {
       .catch(() => {});
   }, []);
 
-  // ─── Font loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const deadline = setTimeout(() => { if (!cancelled) setFontsReady(true); }, 2500);
@@ -211,7 +199,6 @@ function Client() {
     return () => { cancelled = true; clearTimeout(deadline); };
   }, []);
 
-  // ─── QR code generation ───────────────────────────────────────────────────
   // Two codes share the same session ID but serve different audiences:
   //   presenterQR → /presenter?session= — shown while waiting, for the operator
   //   clientQR    → /client?session=    — shown while live, for audience devices
@@ -234,7 +221,6 @@ function Client() {
     return () => { cancelled = true; };
   }, [clientSessionId, publicOrigin]);
 
-  // ─── Create / rejoin TV session ───────────────────────────────────────────
   // Called on mount and on every reconnect.
   // Sends the stored session ID so the QR code stays stable across reloads.
   const createClientSession = useCallback(() => {
@@ -249,7 +235,6 @@ function Client() {
     });
   }, []);
 
-  // Eager call on mount so QR appears immediately
   useEffect(() => {
     // Electron desktop mode: primary display — claim the fixed LOCAL session.
     // Set refs SYNCHRONOUSLY before the emit so that Effect B's handleConnect
@@ -274,7 +259,6 @@ function Client() {
     const urlParams = new URLSearchParams(window.location.search);
     const sessionParam = urlParams.get('session');
     if (sessionParam) {
-      // F13 — Secondary screen: join an existing session directly
       const sid = sessionParam.toUpperCase();
       setClientSessionId(sid);
       clientSessionIdRef.current = sid;
@@ -289,7 +273,6 @@ function Client() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Viewport listeners ───────────────────────────────────────────────────
   const getVp = () => {
     const vv = window.visualViewport;
     return {
@@ -318,7 +301,6 @@ function Client() {
     };
   }, []);
 
-  // ─── Reduced-motion ───────────────────────────────────────────────────────
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
@@ -333,7 +315,6 @@ function Client() {
     return () => media.removeEventListener('change', sync);
   }, []);
 
-  // ─── Document meta ────────────────────────────────────────────────────────
   useEffect(() => {
     document.title = 'Client Display | Scriptures in View';
     const m = document.querySelector('meta[name="robots"]');
@@ -342,7 +323,6 @@ function Client() {
     document.querySelector('link[rel="canonical"]')?.remove();
   }, []);
 
-  // ─── PWA service worker registration ─────────────────────────────────────
   // Caches the Client shell + static assets for offline display continuity.
   // The last received verse stays on screen via React state — no SW work needed.
   useEffect(() => {
@@ -351,7 +331,6 @@ function Client() {
     }
   }, []);
 
-  // ─── Background crossfade ─────────────────────────────────────────────────
   const crossfadeBackground = useCallback((newUrl) => {
     const currentBg = bgUrlRef.current;
     if (!newUrl || newUrl === currentBg) return;
@@ -374,7 +353,7 @@ function Client() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── Show VOTD on the TV display while presenter is connected but idle ──────
+  // Show VOTD on the TV display while presenter is connected but idle —
   // This is called the moment the presenter joins, so the TV never shows a blank
   // background. The verse fades in with the same animation as a real live verse.
   // It will be overwritten seamlessly the moment the presenter hits Go Live.
@@ -384,19 +363,16 @@ function Client() {
     setVotdPending(true);
   }, []);
 
-  // ─── When votd arrives (or when pending flag is set), push it to the display ─
+  // When votd arrives (or when pending flag is set), push it to the display
   const [votdPending, setVotdPending] = useState(false);
 
-  // F2 — Custom text / announcement mode
   const [customData, setCustomData] = useState(null);
 
-  // F13 — Secondary screen (URL ?session= param)
   const [isSecondaryScreen, setIsSecondaryScreen] = useState(false);
 
   // QR overlay — shown when the room is vacant so the next presenter can scan
   const [showQrOverlay, setShowQrOverlay] = useState(false);
 
-  // F14 — Idle screensaver
   const screensaverTimerRef = useRef(null);
   const [isScreensaver, setIsScreensaver] = useState(false);
   const SCREENSAVER_DELAY = 10 * 60 * 1000; // 10 min
@@ -423,7 +399,6 @@ function Client() {
     }, 400);
   }, [votd, votdPending, displayVerse]);
 
-  // ─── Kiosk: advance to the next sequential verse ──────────────────────────
   // Reads from /verse/adjacent so the progression follows canonical book order.
   // Stable identity (empty deps) — all mutable values accessed via refs.
   const advanceKiosk = useCallback((fromVerseId) => {
@@ -462,7 +437,6 @@ function Client() {
       });
   }, []);
 
-  // ─── Kiosk: start/resume when kiosk is triggered ────────────────────────
   // Prefers the last verse shown on screen (kioskCurVerseRef) over VOTD.
   // Falls back to VOTD only if no verse has ever been shown.
   useEffect(() => {
@@ -502,7 +476,6 @@ function Client() {
     return () => clearTimeout(initTimer);
   }, [votd, advanceKiosk, kioskRestart]); // kioskRestart reruns this when presenter leaves
 
-  // ─── Socket handlers ──────────────────────────────────────────────────────
   useEffect(() => {
     // TRANSITION STRATEGY:
     // The backdrop box never disappears. Only the text layer inside it
@@ -614,12 +587,9 @@ function Client() {
         }, 15 * 60 * 1000);
         return;
       }
-      // Voluntary leave — presenter explicitly ended the session.  Open the slot.
       setPresenterSessionLocked(false);
-      // Reset so the next presenter join is treated as fresh
       setPresenterJoined(false);
       presenterJoinedRef.current = false;
-      // Switch QR back to presenter-join URL and show the "presenter left" notice
       setShowQrOverlay(true);
       setPresenterLeft(true);
       setHighlightedText('');
@@ -696,7 +666,6 @@ function Client() {
     const handleReconnect    = () => setConnectionState('reconnecting');
     const handleConnectError = () => setConnectionState('error');
 
-    // F2 — custom-text: announcement / free-text mode
     const handleCustomText = (data) => {
       if (data.theme) crossfadeBackground(data.theme.background_url || bgUrl);
       setShowQrOverlay(false);
@@ -710,7 +679,6 @@ function Client() {
       }, TEXT_FADE_MS);
     };
 
-    // F11 — preload-background: warm up the image cache before go-live
     const handlePreloadBackground = ({ background_url }) => {
       if (!background_url) return;
       const img = new Image();
@@ -780,7 +748,6 @@ function Client() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground, createClientSession, resetScreensaver]);
 
-  // ─── Auto readability ─────────────────────────────────────────────────────
   // When announcement mode is active, calibrate against the announcement text
   // so it gets the same font-fitting treatment as scripture.
   const displayText = customData
@@ -829,7 +796,6 @@ function Client() {
     return () => { active = false; };
   }, [verse?.theme?.background_url, verse?.theme?.highlight_color, displayText, viewport.w, prefersReducedMotion]);
 
-  // ─── Derived display props ────────────────────────────────────────────────
   // True when currently displaying the VOTD (no real verse has been sent yet)
   const isShowingVotd   = votd && displayVerse && displayVerse.verse_id === votd.verse_id && !votdPending;
   const hasMoreSegments = !customData && verse.segments && verse.currentSegment < verse.segments.length - 1;
@@ -841,7 +807,6 @@ function Client() {
   const noMotion        = autoReducedMotion && !forceAnimations;
   const joinedSession   = joinedSessionRef.current;
 
-  // ─── Highlight render ─────────────────────────────────────────────────────
   const renderHighlightedText = () => {
     if (!highlightedText) return displayText;
     const escaped = highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -853,7 +818,6 @@ function Client() {
     );
   };
 
-  // ─── Zoom-correct font sizing ─────────────────────────────────────────────
   const { w: vw, h: vh, rem: PX_PER_REM } = viewport;
   const hasCjkPrimary = containsCjk(displayText);
   const hasCjkSecondary = containsCjk(secondaryText);
@@ -920,7 +884,6 @@ function Client() {
   const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
-  // F9 — Canon volume accent classes
   const VOLUME_CLASS_MAP = {
     'Old Testament':          'volume-ot',
     'New Testament':          'volume-nt',
@@ -930,7 +893,6 @@ function Client() {
   };
   const volumeClass = VOLUME_CLASS_MAP[verse?.volume_title] || '';
 
-  // ─── CSS class composition ────────────────────────────────────────────────
   const viewClass = [
     'client-view',
     tone,
@@ -946,7 +908,6 @@ function Client() {
     isScreensaver  ? 'client-screensaver'   : '',
   ].filter(Boolean).join(' ');
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className={viewClass} style={{
       fontSize: computedFontSize,
