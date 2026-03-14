@@ -877,8 +877,7 @@ const Presenter = () => {
         try {
           window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
           window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
-        } catch {
-        }
+        } catch { /* ignore */ }
       } else {
         setSessionMessage(response?.message || 'Unable to leave session');
       }
@@ -917,8 +916,7 @@ const Presenter = () => {
     setTourOpen(false);
     try {
       window.localStorage.setItem(PRESENTER_TOUR_KEY, 'true');
-    } catch {
-    }
+    } catch { /* ignore */ }
   };
 
   const openTour = () => {
@@ -947,8 +945,7 @@ const Presenter = () => {
       try {
         window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
         window.sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
-      } catch {
-      }
+      } catch { /* ignore */ }
     };
     const handleConnect = () => {
       setConnectionState('connected');

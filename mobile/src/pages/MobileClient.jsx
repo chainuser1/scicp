@@ -7,7 +7,6 @@ const POV_TINT = {
   'prophetic':           'rgba(60, 100, 200, 0.10)',
 };
 
-// ─── Font loading sentinel ────────────────────────────────────────────────────
 const waitForFonts = () => {
   if (!document.fonts || !document.fonts.load) return Promise.resolve();
   return Promise.all([
@@ -16,7 +15,6 @@ const waitForFonts = () => {
   ]).catch(() => {});
 };
 
-// ─── Module-level display constants ───────────────────────────────────────────
 const DEFAULT_BG =
   "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
 
@@ -37,7 +35,6 @@ const weightedLength = (text) => {
 };
 
 export default function MobileClient() {
-  // ─── Utilities ───────────────────────────────────────────────────────────────
   const extractImageUrl = (value) => {
     const match = String(value || '').match(/url\((['"]?)(.*?)\1\)/i);
     return match ? match[2] : '';
@@ -74,7 +71,6 @@ export default function MobileClient() {
     const idx = order.indexOf(mode);
     return order[Math.min(order.length - 1, (idx === -1 ? 1 : idx) + steps)];
   };
-  // ─── Core state ───────────────────────────────────────────────────────────
   const [isIdle, setIsIdle] = useState(true);
   const [versePov, setVersePov] = useState(null);
   const [nowReadingOn, setNowReadingOn] = useState(false); // presenter-controlled "Now Reading" label
@@ -108,10 +104,8 @@ export default function MobileClient() {
   const [autoHighlight, setAutoHighlight] = useState(null);
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
 
-  // F2 — Custom text / announcement mode
   const [customData, setCustomData] = useState(null);
 
-  // ─── Viewport listeners ───────────────────────────────────────────────────
   const getVp = () => {
     const vv = window.visualViewport;
     return {
@@ -140,7 +134,6 @@ export default function MobileClient() {
     };
   }, []);
 
-  // ─── Reduced-motion ───────────────────────────────────────────────────────
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
@@ -154,14 +147,12 @@ export default function MobileClient() {
     return () => media.removeEventListener('change', sync);
   }, []);
 
-  // ─── Document meta ────────────────────────────────────────────────────────
   useEffect(() => {
     document.title = 'Client Display | Scriptures in View';
     const m = document.querySelector('meta[name="robots"]');
     if (m) m.setAttribute('content', 'noindex,nofollow');
   }, []);
 
-  // ─── Font loading ─────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     const deadline = setTimeout(() => { if (!cancelled) setFontsReady(true); }, 2500);
@@ -172,7 +163,6 @@ export default function MobileClient() {
     return () => { cancelled = true; clearTimeout(deadline); };
   }, []);
 
-  // ─── Background crossfade ─────────────────────────────────────────────────
   const crossfadeBackground = useCallback((newUrl) => {
     if (!newUrl || newUrl === bgUrl) return;
     clearTimeout(bgFadeTimer.current);
@@ -185,7 +175,6 @@ export default function MobileClient() {
     }, 1400);
   }, [bgUrl]);
 
-  // ─── Bridge message handlers ──────────────────────────────────────────────
   // Instead of Socket.IO, listen for CustomEvents dispatched by the native bridge.
   // Event shape: { detail: { type: string, data: any } }
   useEffect(() => {
@@ -293,7 +282,6 @@ export default function MobileClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontsReady, crossfadeBackground]);
 
-  // ─── Auto readability ─────────────────────────────────────────────────────
   // When announcement mode is active, calibrate against the announcement text
   // so it gets the same font-fitting treatment as scripture.
   const displayText = customData
@@ -342,13 +330,11 @@ export default function MobileClient() {
     return () => { active = false; };
   }, [verse?.theme?.background_url, displayText, viewport.w, prefersReducedMotion]);
 
-  // ─── Derived display props ────────────────────────────────────────────────
   const hasMoreSegments = !customData && verse.segments && verse.currentSegment < verse.segments.length - 1;
   const layout          = verse.theme?.layout || 'centered';
   const tone            = verse.theme?.tone === 'light' ? 'client-theme-light' : 'client-theme-dark';
   const noMotion        = autoReducedMotion;
 
-  // ─── Highlight render ─────────────────────────────────────────────────────
   const renderHighlightedText = () => {
     if (!highlightedText) return displayText;
     const escaped = highlightedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -360,7 +346,6 @@ export default function MobileClient() {
     );
   };
 
-  // ─── Zoom-correct font sizing ─────────────────────────────────────────────
   const { w: vw, h: vh, rem: PX_PER_REM } = viewport;
   const hasCjkPrimary = containsCjk(displayText);
   const hasCjkSecondary = containsCjk(secondaryText);
@@ -427,7 +412,6 @@ export default function MobileClient() {
   const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
-  // F9 — Canon volume accent classes
   const VOLUME_CLASS_MAP = {
     'Old Testament':          'volume-ot',
     'New Testament':          'volume-nt',
@@ -437,7 +421,6 @@ export default function MobileClient() {
   };
   const volumeClass = VOLUME_CLASS_MAP[verse?.volume_title] || '';
 
-  // ─── CSS class composition ────────────────────────────────────────────────
   const viewClass = [
     'client-view',
     tone,
@@ -449,7 +432,6 @@ export default function MobileClient() {
     isIdle         ? 'client-idle'          : '',
   ].filter(Boolean).join(' ');
 
-  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className={viewClass} style={{
       fontSize: computedFontSize,
