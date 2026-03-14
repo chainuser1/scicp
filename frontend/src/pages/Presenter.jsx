@@ -534,6 +534,10 @@ const Presenter = () => {
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
   // Floating word-explore chip: { word, x, y } | null
   const [ctxWordChip, setCtxWordChip] = useState(null);
+  // ── Entity (named person/place) state ────────────────────────────────────
+  const [verseEntities, setVerseEntities]   = useState({ people: [], places: [] });
+  const [verseTags,     setVerseTags]       = useState({ pov: null, labels: [] });
+  const [entitySearch,  setEntitySearch]    = useState(null); // { name, type, results, total }
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
@@ -639,6 +643,21 @@ const Presenter = () => {
     media.addEventListener('change', onOsThemeChange);
     return () => media.removeEventListener('change', onOsThemeChange);
   }, []);
+
+  // Fetch entities and doctrine tags for the live verse
+  useEffect(() => {
+    if (!liveVerse?.verse_id) { setVerseEntities({ people: [], places: [] }); setVerseTags({ pov: null, labels: [] }); return; }
+    let cancelled = false;
+    Promise.all([
+      fetch(`${API_URL}/verse/${liveVerse.verse_id}/entities`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`${API_URL}/verse/${liveVerse.verse_id}/tags`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([ent, tags]) => {
+      if (cancelled) return;
+      if (ent)  setVerseEntities({ people: ent.people || [], places: ent.places || [] });
+      if (tags) setVerseTags({ pov: tags.pov || null, labels: tags.labels || [] });
+    });
+    return () => { cancelled = true; };
+  }, [liveVerse?.verse_id]);
 
   // F1 — reset book list when language changes
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
@@ -2671,6 +2690,18 @@ const Presenter = () => {
                 )}
               </div>
             </div>
+            {/* Entity chips on staged verse */}
+            {(verseEntities.people.length > 0 || verseEntities.places.length > 0) && (
+              <div className="preview-entity-chips">
+                {verseEntities.people.slice(0, 4).map(p => (
+                  <span key={p} className="ctx-entity-chip ctx-entity-chip--person">{p}</span>
+                ))}
+                {verseEntities.places.slice(0, 3).map(p => (
+                  <span key={p} className="ctx-entity-chip ctx-entity-chip--place">{p}</span>
+                ))}
+                {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+              </div>
+            )}
             <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
           </section>
         )}
@@ -3038,6 +3069,10 @@ const Presenter = () => {
                   </span>
                 )}
               </button>
+              <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
+                onClick={() => { setContextTab('entities'); setEntitySearch(null); }}>
+                People &amp; Places
+              </button>
             </div>
 
             <div className="ctx-body-wrap">
@@ -3082,7 +3117,7 @@ const Presenter = () => {
                       ))}
                     </ul>
                   </>
-                ) : (
+                ) : contextTab === 'related' ? (
                   <>
                     {(() => {
                       const totalServerPages = relatedTotal > 0 ? Math.ceil(relatedTotal / RELATED_PAGE_SIZE) : 1;
@@ -3153,6 +3188,88 @@ const Presenter = () => {
                       );
                     })()}
                   </>
+                ) : (
+                  /* ── People & Places tab ── */
+                  <div className="ctx-entities-panel">
+                    {/* POV + Doctrine badges */}
+                    {verseTags.pov && (
+                      <div className="ctx-tag-row">
+                        <span className="ctx-pov-badge">{verseTags.pov}</span>
+                        {verseTags.labels.slice(0, 4).map(t => (
+                          <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>
+                            {t.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Named people */}
+                    {verseEntities.people.length > 0 && (
+                      <div className="ctx-entity-group">
+                        <span className="ctx-entity-label">👤 People</span>
+                        <div className="ctx-entity-chips">
+                          {verseEntities.people.map(p => (
+                            <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
+                              onClick={() => {
+                                setEntitySearch({ name: p, type: 'person', loading: true, results: [], total: 0 });
+                                fetch(`${API_URL}/entity/search?name=${encodeURIComponent(p)}&type=person&language=${currentLanguage}`)
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(d => d && setEntitySearch({ name: p, type: 'person', loading: false, results: d.results, total: d.total }))
+                                  .catch(() => setEntitySearch(s => ({ ...s, loading: false })));
+                              }}
+                            >{p}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Named places */}
+                    {verseEntities.places.length > 0 && (
+                      <div className="ctx-entity-group">
+                        <span className="ctx-entity-label">📍 Places</span>
+                        <div className="ctx-entity-chips">
+                          {verseEntities.places.map(p => (
+                            <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
+                              onClick={() => {
+                                setEntitySearch({ name: p, type: 'place', loading: true, results: [], total: 0 });
+                                fetch(`${API_URL}/entity/search?name=${encodeURIComponent(p)}&type=place&language=${currentLanguage}`)
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(d => d && setEntitySearch({ name: p, type: 'place', loading: false, results: d.results, total: d.total }))
+                                  .catch(() => setEntitySearch(s => ({ ...s, loading: false })));
+                              }}
+                            >{p}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Entity search results */}
+                    {entitySearch && (
+                      <div className="ctx-entity-results">
+                        <div className="ctx-entity-results-header">
+                          <span>"{entitySearch.name}" appears in {entitySearch.loading ? '…' : entitySearch.total} verse{entitySearch.total !== 1 ? 's' : ''}</span>
+                          <button className="ctx-close-mini" onClick={() => setEntitySearch(null)}>✕</button>
+                        </div>
+                        {entitySearch.loading && <p className="ctx-empty">Searching…</p>}
+                        {!entitySearch.loading && entitySearch.results.length === 0 && <p className="ctx-empty">No verses found.</p>}
+                        <ul className="ctx-items-list">
+                          {entitySearch.results.map(v => (
+                            <li key={v.verse_id} className="ctx-item">
+                              <span className="ctx-item-ref">{v.verse_title}</span>
+                              <span className="ctx-item-text">{v.scripture_text}</span>
+                              <div className="ctx-item-actions">
+                                <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {verseEntities.people.length === 0 && verseEntities.places.length === 0 && !verseTags.pov && (
+                      <p className="ctx-empty">{liveVerse?.verse_id ? 'No entity data yet — run scripts/compute-entities.js locally.' : 'No verse selected.'}</p>
+                    )}
+                  </div>
                 )}
               </div>
               {/* Scroll fade hint — only when not at bottom */}

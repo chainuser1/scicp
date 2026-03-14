@@ -54,6 +54,35 @@ try {
   fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
 }
 
+// Verse Tags DB — entity, POV, and doctrine tags (pre-baked)
+let db_tags = null;
+try {
+  db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'), { readonly: true, fileMustExist: true });
+} catch (_) {}
+// If not found (dev mode), create writable
+if (!db_tags) {
+  try {
+    db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'));
+    db_tags.exec(`
+      CREATE TABLE IF NOT EXISTS verse_entities (
+        verse_id    INTEGER PRIMARY KEY,
+        people      TEXT,
+        places      TEXT,
+        entities_json TEXT
+      );
+      CREATE TABLE IF NOT EXISTS verse_doctrine_tags (
+        verse_id    INTEGER PRIMARY KEY,
+        pov         TEXT,
+        labels_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_entity_people ON verse_entities(people);
+      CREATE INDEX IF NOT EXISTS idx_entity_places ON verse_entities(places);
+    `);
+  } catch (err) {
+    fastify.log.warn('[Tags] Could not open verse-tags.db:', err.message);
+  }
+}
+
 // ── Wrapped adapters for the shared scripture engine ─────────────────────────
 const dba          = new BetterSqliteAdapter(db);
 const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
@@ -466,9 +495,46 @@ async function initEmbeddings() {
   }
 }
 
+// ── Entity (Compromise.js) infrastructure ─────────────────────────────────
+const entityPersonIndex = new Map(); // normalized-name → Set<verse_id>
+const entityPlaceIndex  = new Map(); // normalized-name → Set<verse_id>
+const verseEntityCache  = new Map(); // verse_id → { people: string[], places: string[] }
+let entitiesReady = false;
+
+function normalizeEntityName(name) {
+  return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+}
+
+function buildEntityCache() {
+  if (!db_tags) return;
+  try {
+    const rows = db_tags.prepare('SELECT verse_id, people, places FROM verse_entities').all();
+    for (const r of rows) {
+      const people = r.people ? r.people.split('|').filter(Boolean) : [];
+      const places = r.places ? r.places.split('|').filter(Boolean) : [];
+      verseEntityCache.set(r.verse_id, { people, places });
+      for (const p of people) {
+        const key = normalizeEntityName(p);
+        if (!entityPersonIndex.has(key)) entityPersonIndex.set(key, new Set());
+        entityPersonIndex.get(key).add(r.verse_id);
+      }
+      for (const p of places) {
+        const key = normalizeEntityName(p);
+        if (!entityPlaceIndex.has(key)) entityPlaceIndex.set(key, new Set());
+        entityPlaceIndex.get(key).add(r.verse_id);
+      }
+    }
+    entitiesReady = rows.length > 0;
+    fastify.log.info(`[Entities] Cache built: ${verseEntityCache.size} verses, ${entityPersonIndex.size} people, ${entityPlaceIndex.size} places`);
+  } catch (err) {
+    fastify.log.warn('[Entities] Cache build failed:', err.message);
+  }
+}
+
 // Build verse meta + concept cache synchronously before any requests are served
 buildVerseMetaCache();
 buildTopicalGuideCache();
+buildEntityCache();
 
 // ── TG topic search helper ────────────────────────────────────────────────────
 // Finds a topic by name/slug match, returns all verses in that topic cluster
@@ -1684,6 +1750,63 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 if (require.main === module) {
   registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray });
 }
+
+// ── HTTP route: get entities for a verse ─────────────────────────────────────
+fastify.get('/verse/:verse_id/entities', async (request, reply) => {
+  const verseId = parseInt(request.params.verse_id, 10);
+  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
+  const cached = verseEntityCache.get(verseId);
+  if (cached) return { verse_id: verseId, ...cached, ready: true };
+  return { verse_id: verseId, people: [], places: [], ready: entitiesReady };
+});
+
+// ── HTTP route: entity search — find all verses mentioning a person or place ──
+fastify.get('/entity/search', async (request, reply) => {
+  const { name, type = 'person', language = 'en', page: pg = '0', pageSize: ps = '10' } = request.query;
+  if (!name || !name.trim()) { reply.code(400); return { error: 'name is required' }; }
+  const page     = Math.max(0, parseInt(pg,  10) || 0);
+  const pageSize = Math.min(30, Math.max(1, parseInt(ps, 10) || 10));
+  const key      = normalizeEntityName(name.trim());
+  const index    = type === 'place' ? entityPlaceIndex : entityPersonIndex;
+  // Also search by prefix to handle "Peter" matching "Simon Peter" etc
+  const matchedIds = new Set();
+  for (const [k, ids] of index) {
+    if (k === key || k.includes(key) || key.includes(k)) {
+      for (const id of ids) matchedIds.add(id);
+    }
+  }
+  if (!matchedIds.size) return { results: [], total: 0, name, type };
+  const ids   = [...matchedIds];
+  const total = ids.length;
+  const paged = ids.slice(page * pageSize, page * pageSize + pageSize);
+  const lang  = language.toLowerCase();
+  const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : null;
+  const stmtMeta = dba.prepare('SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number FROM scriptures WHERE verse_id = ?');
+  const stmtCoords = targetDb ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1') : null;
+  const stmtTrans  = targetDb ? targetDb.prepare('SELECT scripture_text FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1') : null;
+  const results = paged.map(id => {
+    const row = stmtMeta.get(id);
+    if (!row) return null;
+    if (stmtCoords && stmtTrans) {
+      const c = stmtCoords.get(id);
+      if (c) { const t = stmtTrans.get(c.book_id, c.chapter_number, c.verse_number); if (t) row.scripture_text = t.scripture_text; }
+    }
+    return row;
+  }).filter(Boolean);
+  return { results, total, name, type, page, pageSize };
+});
+
+// ── HTTP route: get doctrine tags for a verse ─────────────────────────────────
+fastify.get('/verse/:verse_id/tags', async (request, reply) => {
+  const verseId = parseInt(request.params.verse_id, 10);
+  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
+  if (!db_tags) return { verse_id: verseId, pov: null, labels: [], ready: false };
+  try {
+    const row = db_tags.prepare('SELECT pov, labels_json FROM verse_doctrine_tags WHERE verse_id = ?').get(verseId);
+    if (!row) return { verse_id: verseId, pov: null, labels: [], ready: false };
+    return { verse_id: verseId, pov: row.pov, labels: JSON.parse(row.labels_json || '[]'), ready: true };
+  } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; }
+});
 
 const start = async () => {
   try {
