@@ -455,7 +455,6 @@ const MobilePresenter = () => {
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [], ready: false });
   const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
-  const [verseSummary,    setVerseSummary]    = useState({ summary: null, ready: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [entitySearch,    setEntitySearch]    = useState(null);
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
@@ -504,11 +503,6 @@ const MobilePresenter = () => {
     setChapterEntities({ people: [], places: [], ready: false });
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
   }, [liveVerse?.chapter_id]);
-
-  // Reset verse summary when live verse changes
-  useEffect(() => {
-    setVerseSummary({ summary: null, ready: false });
-  }, [liveVerse?.verse_id]);
 
   // Re-fetch chapter modal data when chapter changes and modal is already open
   useEffect(() => {
@@ -968,10 +962,6 @@ const MobilePresenter = () => {
         if (force || !chapterEntities.ready) {
           const entities = svc.getChapterEntities(chapterId);
           setChapterEntities(entities);
-        }
-        if (force || !verseSummary.ready) {
-          const vs = svc.getVerseSummary(liveVerse.verse_id);
-          setVerseSummary(vs);
         }
       } else if (tab === 'related' && !relatedVerses.length) {
         const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
@@ -2493,10 +2483,6 @@ const MobilePresenter = () => {
                 onClick={() => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); }}>
                 Summary
               </button>
-              <button className={`ctx-tab${contextTab === 'verse' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('verse'); if (!verseSummary.ready) openContextModal('chapter'); }}>
-                Verse
-              </button>
               <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
                 onClick={() => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); }}>
                 People &amp; Places
@@ -2657,27 +2643,6 @@ const MobilePresenter = () => {
                           </div>
                         )}
                       </>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* ── Verse Summary tab ── */}
-              {contextTab === 'verse' && (
-                <div className="ctx-body" style={{ overflowY: 'auto' }}>
-                  <div className="ctx-summary-panel">
-                    {!verseSummary.ready && <p className="ctx-empty">Loading verse summary…</p>}
-                    {verseSummary.ready && !verseSummary.summary && (
-                      <p className="ctx-empty">No summary available yet for this verse.</p>
-                    )}
-                    {verseSummary.ready && verseSummary.summary && (
-                      <div className="ctx-summary-text">
-                        <span className="ctx-summary-method-badge">✨ AI Verse Commentary</span>
-                        {verseSummary.summary.split('\n\n').map((para, i) => (
-                          <p key={i}>{para.split('\n').map((line, j) => (
-                            <span key={j}>{line}{j < para.split('\n').length - 1 && <br />}</span>
-                          ))}</p>
-                        ))}
-                      </div>
                     )}
                   </div>
                 </div>
