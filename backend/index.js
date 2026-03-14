@@ -1770,6 +1770,18 @@ fastify.get('/verse/:verse_id/tags', async (request, reply) => {
   } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; }
 });
 
+// ── HTTP route: get verse summary (AI-generated LDS context) ──────────────────
+fastify.get('/verse/:verse_id/summary', async (request, reply) => {
+  const verseId = parseInt(request.params.verse_id, 10);
+  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
+  if (!db_tags) return { verse_id: verseId, summary: null, ready: false };
+  try {
+    const row = db_tags.prepare("SELECT verse_title, summary, engine FROM verse_summaries WHERE verse_id = ? AND status = 'ok'").get(verseId);
+    if (!row) return { verse_id: verseId, summary: null, ready: false };
+    return { verse_id: verseId, verse_title: row.verse_title, summary: row.summary, engine: row.engine, ready: true };
+  } catch { return { verse_id: verseId, summary: null, ready: false }; }
+});
+
 // ── HTTP route: get chapter summary + key verses + top topics ─────────────────
 fastify.get('/chapter/:chapter_id/summary', async (request, reply) => {
   const chapterId = parseInt(request.params.chapter_id, 10);
