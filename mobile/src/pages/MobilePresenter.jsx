@@ -444,6 +444,7 @@ const MobilePresenter = () => {
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [entitySearch,    setEntitySearch]    = useState(null);
+  const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
@@ -872,8 +873,15 @@ const MobilePresenter = () => {
     emitGoLiveWithRetry({ verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(staged);
     setCurrentSegment(0);
+    setNowReading(false); // reset Now Reading on new go-live
     setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
     setStaged(null);
+  };
+
+  const toggleNowReading = () => {
+    const next = !nowReading;
+    setNowReading(next);
+    emitWithSession('now-reading', { on: next, verse_id: liveVerse?.verse_id || null });
   };
 
   const navigateSegment = direction => {
@@ -916,7 +924,6 @@ const MobilePresenter = () => {
   const openContextModal = (tab = 'chapter') => {
     if (!liveVerse) return;
     setContextOpen(true);
-    setContextTab(tab);
     setContextLoading(true);
     setCtxScrolled(false);
     setCtxAtBottom(false);
@@ -2204,9 +2211,15 @@ const MobilePresenter = () => {
                 )}
                 <span className="card-hint">select text to highlight</span>
                 <button className="context-expand-btn"
-                  onClick={() => openContextModal('chapter')}
+                  onClick={() => { setContextTab('chapter'); openContextModal('chapter'); }}
                   title="Chapter & related scriptures">
                   ☰ Context
+                </button>
+                <button
+                  className={`now-reading-btn${nowReading ? ' now-reading-btn--on' : ''}`}
+                  onClick={toggleNowReading}
+                  title="Toggle 'Now Reading' label on the display screen">
+                  📖{nowReading ? ' On' : ' Off'}
                 </button>
                 <button className="end-live-btn" onClick={endLive} title="End live -- clears screen (E)">
                   End Live
