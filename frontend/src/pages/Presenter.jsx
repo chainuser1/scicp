@@ -432,7 +432,7 @@ const Presenter = () => {
   // True when running inside the Electron desktop app; false in the web app.
   const isElectronApp = !!window.electronAPI?.isElectron;
 
-  const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v1';
+  const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v2';
   const PRESENTER_LAST_SESSION_KEY = 'scicp.presenter_last_session_v1';
   const PRESENTER_TOKEN_KEY        = 'scicp.presenter_token_v1';
   const normalizeSessionId = value => String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
@@ -444,22 +444,42 @@ const Presenter = () => {
     ...(!isElectronApp ? [{
       target: 'session',
       title: 'Connect to TV',
-      description: 'Scan the QR code on the TV screen, or type the code shown below it.',
+      description: 'Scan the QR code on the TV screen, or type the session code shown below it. Multiple devices can join the same session.',
     }] : []),
     {
       target: 'search',
       title: 'Search Scriptures',
-      description: 'Use search to find references or keywords, then click a result to stage it.',
+      description: 'Search by reference (e.g. "John 3:16"), keyword, phrase, or topic. Results cover all five volumes — Old Testament, New Testament, Book of Mormon, D&C, and Pearl of Great Price.',
     },
     {
       target: 'golive',
-      title: 'Go Live',
-      description: 'Review the staged verse and send it to your connected clients.',
+      title: 'Stage & Go Live',
+      description: 'Click a result to stage it for review, then press ● Go Live to send it to the display. Double-click any result to go live instantly.',
     },
     {
       target: 'nav',
-      title: 'Navigate Fast',
-      description: 'Use preview controls for previous/next verse and segment navigation while live.',
+      title: 'Navigate While Live',
+      description: 'Use ‹ › for previous/next verse and ‹‹ ›› to step through long-verse segments — without leaving the live view.',
+    },
+    {
+      target: 'search',
+      title: 'Setlists',
+      description: 'Open the Browse tab and tap + to add verses to your setlist. Save it by name and reload it any Sunday. Reorder or remove entries anytime.',
+    },
+    {
+      target: 'search',
+      title: 'Dual Language',
+      description: 'Tap the language button (🌐) to pick a secondary language. Both texts appear side-by-side on the display — great for multilingual congregations.',
+    },
+    {
+      target: 'search',
+      title: 'Chapter Context  ✨ New',
+      description: 'While a verse is live, tap 📖 Chapter to open context — chapter summary, people & places mentioned, related verses by topic, and speaker attribution.',
+    },
+    {
+      target: 'search',
+      title: 'Chapter Summaries  ✨ New',
+      description: '882 chapters now have rich summaries from GospelDoctrine.com with doctrinal insights and quotes from Church leaders — covering all five volumes of scripture.',
     },
   ];
   const [query, setQuery]                   = useState('');
