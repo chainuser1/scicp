@@ -1810,9 +1810,9 @@ fastify.get('/verse/:verse_id/tags', async (request, reply) => {
   if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
   if (!db_tags) return { verse_id: verseId, pov: null, labels: [], ready: false };
   try {
-    const row = db_tags.prepare('SELECT pov, labels_json FROM verse_doctrine_tags WHERE verse_id = ?').get(verseId);
-    if (!row) return { verse_id: verseId, pov: null, labels: [], ready: false };
-    return { verse_id: verseId, pov: row.pov, labels: JSON.parse(row.labels_json || '[]'), ready: true };
+    const row = db_tags.prepare('SELECT pov, labels_json, speaker FROM verse_doctrine_tags WHERE verse_id = ?').get(verseId);
+    if (!row) return { verse_id: verseId, pov: null, labels: [], speaker: null, ready: false };
+    return { verse_id: verseId, pov: row.pov, labels: JSON.parse(row.labels_json || '[]'), speaker: row.speaker || null, ready: true };
   } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; }
 });
 

@@ -177,10 +177,10 @@ export function getVerseTags(verseId) {
   const tagsDb = getDb('tags');
   if (!tagsDb) return { pov: null, labels: [], ready: false };
   try {
-    const rows = tagsDb.exec('SELECT pov, labels_json FROM verse_doctrine_tags WHERE verse_id = ?', [verseId]);
-    if (!rows.length || !rows[0].values.length) return { pov: null, labels: [], ready: false };
-    const [pov, labelsJson] = rows[0].values[0];
-    return { pov: pov || null, labels: JSON.parse(labelsJson || '[]'), ready: true };
+    const rows = tagsDb.exec('SELECT pov, labels_json, speaker FROM verse_doctrine_tags WHERE verse_id = ?', [verseId]);
+    if (!rows.length || !rows[0].values.length) return { pov: null, labels: [], speaker: null, ready: false };
+    const [pov, labelsJson, speaker] = rows[0].values[0];
+    return { pov: pov || null, labels: JSON.parse(labelsJson || '[]'), speaker: speaker || null, ready: true };
   } catch { return { pov: null, labels: [], ready: false }; }
 }
 
