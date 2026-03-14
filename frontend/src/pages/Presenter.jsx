@@ -540,7 +540,7 @@ const Presenter = () => {
   const [ctxWordChip, setCtxWordChip] = useState(null);
   // ── Entity (named person/place) state ────────────────────────────────────
   const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
-  const [verseTags,       setVerseTags]       = useState({ pov: null, labels: [] });
+  const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [] });
   const [entitySearch,    setEntitySearch]    = useState(null);
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
@@ -656,7 +656,7 @@ const Presenter = () => {
   useEffect(() => {
     if (!liveVerse?.verse_id) {
       setVerseEntities({ people: [], places: [] });
-      setVerseTags({ pov: null, labels: [] });
+      setVerseTags({ pov: null, speaker: null, labels: [] });
       return;
     }
     let cancelled = false;
@@ -666,7 +666,7 @@ const Presenter = () => {
     ]).then(([ent, tags]) => {
       if (cancelled) return;
       if (ent)  setVerseEntities({ people: ent.people || [], places: ent.places || [] });
-      if (tags) setVerseTags({ pov: tags.pov || null, labels: tags.labels || [] });
+      if (tags) setVerseTags({ pov: tags.pov || null, speaker: tags.speaker || null, labels: tags.labels || [] });
     });
     return () => { cancelled = true; };
   }, [liveVerse?.verse_id]);
@@ -2762,6 +2762,7 @@ const Presenter = () => {
             {(verseEntities.people.length > 0 || verseEntities.places.length > 0 || verseTags.pov) && (
               <div className="preview-entity-chips">
                 {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
                 {verseTags.labels.slice(0, 3).map(t => (
                   <span key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview">{t.label}</span>
                 ))}
@@ -3319,10 +3320,11 @@ const Presenter = () => {
                 ) : (
                   /* ── People & Places tab — chapter level ── */
                   <div className="ctx-entities-panel">
-                    {/* POV + Doctrine badges from live verse */}
-                    {verseTags.pov && (
+                    {/* POV + Speaker + Doctrine badges from live verse */}
+                    {(verseTags.pov || verseTags.speaker) && (
                       <div className="ctx-tag-row">
-                        <span className="ctx-pov-badge">{verseTags.pov}</span>
+                        {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                        {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
                         {verseTags.labels.slice(0, 4).map(t => (
                           <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>
                             {t.label}
