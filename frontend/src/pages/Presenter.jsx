@@ -491,10 +491,7 @@ const Presenter = () => {
   const [currentPage, setCurrentPage]       = useState(0);
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
-  const [searchMode,        setSearchMode]        = useState('verses'); // 'verses' | 'topics'
-  const [topicQuery,        setTopicQuery]         = useState('');
-  const [topicResults,      setTopicResults]       = useState([]);
-  const [topicSearching,    setTopicSearching]     = useState(false);
+
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
   const [sessionPopover, setSessionPopover] = useState(false);
@@ -1142,20 +1139,6 @@ const Presenter = () => {
 
   const handleSearchKeyDown = e => {
     if (e.key === 'Enter' && results.length > 0) goLiveDirectly(results[0]);
-  };
-
-  const handleTopicSearch = e => {
-    const q = e.target.value;
-    setTopicQuery(q);
-    clearTimeout(searchDebounce.current);
-    if (!q.trim()) { setTopicResults([]); return; }
-    searchDebounce.current = setTimeout(() => {
-      setTopicSearching(true);
-      fetch(`${API_URL}/sermon-search?q=${encodeURIComponent(q.trim())}&limit=15`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d) setTopicResults(d.results); setTopicSearching(false); })
-        .catch(() => setTopicSearching(false));
-    }, 350);
   };
 
   const selectVerse = verse => {
