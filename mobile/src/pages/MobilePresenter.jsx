@@ -2635,8 +2635,10 @@ const MobilePresenter = () => {
             <button className="mobile-mini-btn" onClick={() => openDrawer('setlist')}>Setlist</button>
             {liveVerse && (
               <>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">A-</button>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger text"  aria-label="Increase font size">A+</button>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller display text" aria-label="Decrease display font size">A−</button>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger display text"  aria-label="Increase display font size">A+</button>
+                <button className="mobile-font-btn mobile-font-btn--reading" onClick={() => adjustUiFontSize(-0.1)} title="Smaller reading text" aria-label="Decrease reading size">a−</button>
+                <button className="mobile-font-btn mobile-font-btn--reading" onClick={() => adjustUiFontSize( 0.1)} title="Larger reading text"  aria-label="Increase reading size">a+</button>
                 <button className="mobile-endlive-btn" onClick={endLive} title="End live">End</button>
               </>
             )}
