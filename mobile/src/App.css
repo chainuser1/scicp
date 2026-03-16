@@ -1432,9 +1432,10 @@ button,
     min-height: 40px;
   }
 
-  /* Preview box — allow more room than the default 160px so long verses are readable */
+  /* Preview box — auto-calibrate height to content, no clipping */
   .preview-box {
-    max-height: 200px;
+    max-height: none;
+    height: auto;
   }
 
   /* Idle grid already stacks to 1 column — give it tighter gap */
@@ -2013,6 +2014,13 @@ button,
   letter-spacing: 0.02em;
 }
 .mobile-font-btn:hover { background: rgba(201,168,76,0.18); }
+.mobile-font-btn--reading {
+  background: rgba(160, 140, 200, 0.08);
+  border-color: rgba(160, 140, 200, 0.25);
+  color: #b0a0d0;
+  font-size: 0.62rem;
+}
+.mobile-font-btn--reading:hover { background: rgba(160, 140, 200, 0.18); }
 
 /* ══════════════════════════════════════════════════════════════
    CLIENT — VOTD "Today's Verse" watermark
