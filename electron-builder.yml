@@ -28,6 +28,14 @@ files:
     to: "electron/node_modules"
     filter:
       - "**/*"
+  - from: "node_modules/@xenova"
+    to: "node_modules/@xenova"
+    filter:
+      - "**/*"
+  - from: "node_modules/onnxruntime-node"
+    to: "node_modules/onnxruntime-node"
+    filter:
+      - "**/*"
   - "!node_modules/better-sqlite3/**"
   - "!backend/.env"
   - "!backend/logs"

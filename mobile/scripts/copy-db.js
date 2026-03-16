@@ -12,15 +12,23 @@ const DEST = resolve(__dirname, '../public/assets/db');
 
 mkdirSync(DEST, { recursive: true });
 
-const dbFiles = readdirSync(SRC).filter(f => f.endsWith('.db'));
+const EXCLUDE = new Set([
+  'verse-embeddings.db',   // replaced by search-graph.db (kNN + clusters)
+  'verse-graph.db',        // backend-only (source for search-graph.db prebake)
+  'concept-embeddings.db', // backend-only (semantic concept expansion)
+  'scriptures-en.db',      // empty placeholder
+  'scriptures.db',         // empty placeholder
+]);
+
+const dbFiles = readdirSync(SRC).filter(f => f.endsWith('.db') && !EXCLUDE.has(f));
 for (const file of dbFiles) {
   copyFileSync(join(SRC, file), join(DEST, file));
   console.log(`  copied ${file}`);
 }
 console.log(`${dbFiles.length} DB files copied to public/assets/db/`);
 
-// Copy sql-wasm.wasm for offline use (no CDN dependency at runtime)
-const WASM_SRC = resolve(__dirname, '../node_modules/sql.js/dist/sql-wasm.wasm');
+// Copy sql-wasm.wasm for offline use (FTS5-enabled build from fts5-sql-bundle)
+const WASM_SRC = resolve(__dirname, '../node_modules/fts5-sql-bundle/dist/sql-wasm.wasm');
 const WASM_DEST = resolve(__dirname, '../public/sql-wasm.wasm');
 copyFileSync(WASM_SRC, WASM_DEST);
-console.log('  copied sql-wasm.wasm');
+console.log('  copied sql-wasm.wasm (FTS5-enabled)');
