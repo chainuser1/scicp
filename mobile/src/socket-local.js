@@ -33,14 +33,28 @@ function fire(event, data) {
 // Uses the capacitor-external-display plugin when available, falling back
 // to a local CustomEvent (for dev/browser testing).
 let _presentationActive = false;
+let _castMode = null; // 'native' | 'web' | null
+let _webConnection = null;
+
+function supportsWebPresentation() {
+  return typeof window !== 'undefined' && typeof window.PresentationRequest === 'function';
+}
 
 async function sendToDisplay(message) {
   if (_presentationActive) {
-    try {
-      await ExternalDisplay.sendToDisplay({ message });
-    } catch {
-      // Fallback: dispatch locally (browser dev mode / popup)
-      window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
+    if (_castMode === 'native') {
+      try {
+        await ExternalDisplay.sendToDisplay({ message });
+      } catch {
+        // Fallback: dispatch locally (browser dev mode / popup)
+        window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
+      }
+    } else if (_castMode === 'web' && _webConnection) {
+      try {
+        _webConnection.postMessage(message);
+      } catch {
+        window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
+      }
     }
   }
   // Always fire locally too (for in-app preview if needed)
@@ -52,26 +66,69 @@ export async function startCasting(clientUrl) {
   try {
     await ExternalDisplay.startPresentation({ url: clientUrl });
     _presentationActive = true;
+    _castMode = 'native';
     return true;
   } catch (err) {
     console.warn('startCasting failed:', err);
+  }
+
+  if (!supportsWebPresentation()) return false;
+
+  try {
+    const request = new window.PresentationRequest([clientUrl]);
+    const connection = await request.start();
+    connection.onclose = () => {
+      _presentationActive = false;
+      _castMode = null;
+      _webConnection = null;
+    };
+    connection.onterminate = () => {
+      _presentationActive = false;
+      _castMode = null;
+      _webConnection = null;
+    };
+    _webConnection = connection;
+    _presentationActive = true;
+    _castMode = 'web';
+    return true;
+  } catch (err) {
+    console.warn('web startCasting failed:', err);
     return false;
   }
 }
 
 /** Stop the external display presentation. */
 export async function stopCasting() {
-  try {
-    await ExternalDisplay.stopPresentation();
-  } catch { /* ignore */ }
+  if (_castMode === 'native') {
+    try {
+      await ExternalDisplay.stopPresentation();
+    } catch { /* ignore */ }
+  } else if (_castMode === 'web' && _webConnection) {
+    try {
+      await _webConnection.terminate();
+    } catch {
+      try { await _webConnection.close(); } catch { /* ignore */ }
+    }
+    _webConnection = null;
+  }
   _presentationActive = false;
+  _castMode = null;
 }
 
 /** Check if an external display is connected. */
-export async function isDisplayAvailable() {
+export async function isDisplayAvailable(clientUrl = null) {
   try {
     const { available } = await ExternalDisplay.isAvailable();
-    return available;
+    if (available) return true;
+  } catch {
+    // ignore and try web fallback
+  }
+
+  if (!supportsWebPresentation() || !clientUrl) return false;
+  try {
+    const request = new window.PresentationRequest([clientUrl]);
+    const availability = await request.getAvailability();
+    return !!availability?.value;
   } catch {
     return false;
   }

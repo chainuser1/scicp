@@ -274,9 +274,39 @@ export default function MobileClient() {
     };
 
     window.addEventListener('bridge-message', onBridgeMessage);
+    let presentationConnectionList = null;
+    let handlePresentationMessage = null;
+    let handleConnectionAvailable = null;
+
+    if (navigator?.presentation?.receiver?.connectionList) {
+      navigator.presentation.receiver.connectionList.then((list) => {
+        presentationConnectionList = list;
+        handlePresentationMessage = (event) => {
+          if (event?.data && typeof event.data === 'object') {
+            window.dispatchEvent(new CustomEvent('bridge-message', { detail: event.data }));
+          }
+        };
+        handleConnectionAvailable = (event) => {
+          event?.connection?.addEventListener?.('message', handlePresentationMessage);
+        };
+
+        list.connections.forEach((connection) => {
+          connection.addEventListener?.('message', handlePresentationMessage);
+        });
+        list.addEventListener?.('connectionavailable', handleConnectionAvailable);
+      }).catch(() => {});
+    }
 
     return () => {
       window.removeEventListener('bridge-message', onBridgeMessage);
+      if (presentationConnectionList && handleConnectionAvailable) {
+        presentationConnectionList.removeEventListener?.('connectionavailable', handleConnectionAvailable);
+      }
+      if (presentationConnectionList && handlePresentationMessage) {
+        presentationConnectionList.connections.forEach((connection) => {
+          connection.removeEventListener?.('message', handlePresentationMessage);
+        });
+      }
       if (bgFadeTimer.current) clearTimeout(bgFadeTimer.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

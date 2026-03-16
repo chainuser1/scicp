@@ -1617,8 +1617,8 @@ const MobilePresenter = () => {
             <IconInfo />
           </HdrBtn>
 
-          {/* Cast placeholder (Milestone 3) */}
-          <CastingControl />
+          {/* Cast to external display */}
+          <CastingControl compact={false} />
 
           {/* F8 — Language & secondary language popover */}
           <div className="hdr-lang-wrap">
@@ -1756,7 +1756,7 @@ const MobilePresenter = () => {
               <IconSearch />
             </HdrBtn>
           </div>
-          <CastingControl />
+          <CastingControl compact />
           {/* Compact live dot */}
           {liveVerse && (
             <div className="live-badge live-badge--compact">
@@ -1776,11 +1776,11 @@ const MobilePresenter = () => {
           {/* Mobile dropdown panel */}
           {mobileMenuOpen && (
             <div className="hdr-mobile-menu">
-              {/* Cast placeholder */}
+              {/* Cast to display */}
               <div className="mobile-menu-section">
                 <div className="mobile-menu-label">Display</div>
                 <div className="mobile-menu-row">
-                  <CastingControl />
+                  <CastingControl compact={false} />
                 </div>
               </div>
 
@@ -2668,32 +2668,39 @@ const MobilePresenter = () => {
               </span>
               <button className="ctx-close" onClick={() => setContextOpen(false)}>✕</button>
             </div>
-            <div className="ctx-tabs">
-              <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
-                onClick={() => switchCtxTab(contextTab, 'chapter', () => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); })}>
-                Chapter {liveVerse.chapter_number}
-              </button>
-              <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
-                onClick={() => switchCtxTab(contextTab, 'related', () => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); })}>
-                Related
-                {relatedConcept && (
-                  <span className="ctx-concept-tag">
-                    {relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')}
-                  </span>
-                )}
-              </button>
-              <button className={`ctx-tab${contextTab === 'summary' ? ' ctx-tab--active' : ''}`}
-                onClick={() => switchCtxTab(contextTab, 'summary', () => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); })}>
-                Chapter Summary
-              </button>
-              <button className={`ctx-tab${contextTab === 'verse-context' ? ' ctx-tab--active' : ''}`}
-                onClick={() => switchCtxTab(contextTab, 'verse-context', () => { setContextTab('verse-context'); openContextModal('verse-context'); })}>
-                Verse Context
-              </button>
-              <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
-                onClick={() => switchCtxTab(contextTab, 'entities', () => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); })}>
-                People &amp; Places
-              </button>
+            <div className="ctx-tabs-wrap">
+              <div className="ctx-tabs" ref={el => {
+                if (el) {
+                  const active = el.querySelector('.ctx-tab--active');
+                  if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+              }}>
+                <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
+                  onClick={() => switchCtxTab(contextTab, 'chapter', () => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); })}>
+                  <span className="ctx-tab-icon">📖</span> Ch. {liveVerse.chapter_number}
+                </button>
+                <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
+                  onClick={() => switchCtxTab(contextTab, 'related', () => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); })}>
+                  <span className="ctx-tab-icon">🔗</span> Related
+                  {relatedConcept && (
+                    <span className="ctx-concept-tag">
+                      {relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')}
+                    </span>
+                  )}
+                </button>
+                <button className={`ctx-tab${contextTab === 'summary' ? ' ctx-tab--active' : ''}`}
+                  onClick={() => switchCtxTab(contextTab, 'summary', () => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); })}>
+                  <span className="ctx-tab-icon">📝</span> Summary
+                </button>
+                <button className={`ctx-tab${contextTab === 'verse-context' ? ' ctx-tab--active' : ''}`}
+                  onClick={() => switchCtxTab(contextTab, 'verse-context', () => { setContextTab('verse-context'); openContextModal('verse-context'); })}>
+                  <span className="ctx-tab-icon">💬</span> Context
+                </button>
+                <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
+                  onClick={() => switchCtxTab(contextTab, 'entities', () => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); })}>
+                  <span className="ctx-tab-icon">👤</span> Entities
+                </button>
+              </div>
             </div>
             <div className="ctx-body-wrap">
               <div className="ctx-body"

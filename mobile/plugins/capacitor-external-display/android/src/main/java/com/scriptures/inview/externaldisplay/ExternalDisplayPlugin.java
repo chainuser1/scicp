@@ -6,6 +6,7 @@ import android.hardware.display.DisplayManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Display;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
@@ -29,12 +30,14 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "ExternalDisplay")
 public class ExternalDisplayPlugin extends Plugin {
 
+    private static final String TAG = "ExternalDisplay";
     private DisplayManager displayManager;
     private ExternalPresentation presentation;
     private DisplayManager.DisplayListener displayListener;
 
     @Override
     public void load() {
+        Log.d(TAG, "Plugin loaded");
         displayManager = (DisplayManager) getContext().getSystemService(Context.DISPLAY_SERVICE);
         registerDisplayListener();
     }
@@ -43,14 +46,17 @@ public class ExternalDisplayPlugin extends Plugin {
 
     @PluginMethod
     public void isAvailable(PluginCall call) {
+        Display d = findPresentationDisplay();
+        Log.d(TAG, "isAvailable called, display=" + (d != null ? d.getName() + " id=" + d.getDisplayId() : "null"));
         JSObject result = new JSObject();
-        result.put("available", findPresentationDisplay() != null);
+        result.put("available", d != null);
         call.resolve(result);
     }
 
     @PluginMethod
     public void startPresentation(PluginCall call) {
         String url = call.getString("url");
+        Log.d(TAG, "startPresentation url=" + url);
         if (url == null || url.isEmpty()) {
             call.reject("Missing required parameter: url");
             return;
@@ -58,10 +64,12 @@ public class ExternalDisplayPlugin extends Plugin {
 
         Display display = findPresentationDisplay();
         if (display == null) {
+            Log.w(TAG, "startPresentation: no external display found");
             call.reject("No external display available");
             return;
         }
 
+        Log.d(TAG, "startPresentation on display: " + display.getName() + " id=" + display.getDisplayId());
         getActivity().runOnUiThread(() -> {
             try {
                 if (presentation != null) {
@@ -116,7 +124,31 @@ public class ExternalDisplayPlugin extends Plugin {
     private Display findPresentationDisplay() {
         if (displayManager == null) return null;
         Display[] displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
-        return (displays != null && displays.length > 0) ? displays[0] : null;
+        Log.d(TAG, "PRESENTATION displays: " + (displays != null ? displays.length : 0));
+        if (displays != null) {
+            for (Display display : displays) {
+                Log.d(TAG, "  PRES display: id=" + display.getDisplayId() + " name=" + display.getName() + " state=" + display.getState());
+                if (isUsableExternalDisplay(display)) return display;
+            }
+        }
+
+        // Fallback: some devices report cast/virtual outputs outside
+        // DISPLAY_CATEGORY_PRESENTATION but still as non-default active displays.
+        Display[] allDisplays = displayManager.getDisplays();
+        Log.d(TAG, "ALL displays: " + (allDisplays != null ? allDisplays.length : 0));
+        if (allDisplays != null) {
+            for (Display display : allDisplays) {
+                Log.d(TAG, "  ALL display: id=" + display.getDisplayId() + " name=" + display.getName() + " state=" + display.getState() + " default=" + (display.getDisplayId() == Display.DEFAULT_DISPLAY));
+                if (isUsableExternalDisplay(display)) return display;
+            }
+        }
+        return null;
+    }
+
+    private boolean isUsableExternalDisplay(Display display) {
+        if (display == null) return false;
+        if (display.getDisplayId() == Display.DEFAULT_DISPLAY) return false;
+        return display.getState() != Display.STATE_OFF;
     }
 
     private void registerDisplayListener() {
