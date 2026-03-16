@@ -46,9 +46,11 @@ const isDev = !app.isPackaged;
 if (isDev) {
   process.env.DB_DIR             = path.resolve(__dirname, '../resources/db');
   process.env.FRONTEND_DIST_DIR  = path.resolve(__dirname, '../frontend/dist');
+  process.env.USER_DATA_DIR      = path.resolve(__dirname, '../resources/db');
 } else {
   process.env.DB_DIR             = path.join(process.resourcesPath, 'db');
   process.env.FRONTEND_DIST_DIR  = path.join(process.resourcesPath, 'frontend-dist');
+  process.env.USER_DATA_DIR      = app.getPath('userData');
 }
 process.env.PORT = process.env.PORT || '3000';
 

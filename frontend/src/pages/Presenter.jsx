@@ -536,6 +536,8 @@ const Presenter = () => {
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
+  const ctxTopicHistoryIdxRef = useRef(-1);
+  useEffect(() => { ctxTopicHistoryIdxRef.current = ctxTopicHistoryIdx; }, [ctxTopicHistoryIdx]);
   // Floating word-explore chip: { word, x, y } | null
   const [ctxWordChip, setCtxWordChip] = useState(null);
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [] });
@@ -1339,7 +1341,8 @@ const Presenter = () => {
 
   // Navigate to a different server page within the current history entry
   const loadHistoryPage = async (page) => {
-    const entry = ctxTopicHistory[ctxTopicHistoryIdx];
+    const idx = ctxTopicHistoryIdxRef.current;
+    const entry = ctxTopicHistory[idx];
     if (!entry) return;
     setContextLoading(true);
     try {
@@ -1353,17 +1356,17 @@ const Presenter = () => {
       const d = await res.json();
       const verses = d.results ?? [];
       const total  = d.total ?? verses.length;
-      // Append new verses to existing list
-      const merged = [...relatedVerses, ...verses];
-      const updated = { ...entry, verses: merged, total, page };
-      setCtxTopicHistory(prev => prev.map((e, i) => i === ctxTopicHistoryIdx ? updated : e));
-      setRelatedVerses(merged);
+      // Append using functional updater so we always merge with latest list
+      setRelatedVerses(prev => [...prev, ...verses]);
+      setCtxTopicHistory(prev => prev.map((e, i) => i === idx ? { ...e, verses: [...(e.verses || []), ...verses], total, page } : e));
       setRelatedBatchPage(page);
       setRelatedTotal(total);
     } finally {
       setContextLoading(false);
     }
   };
+  const loadHistoryPageRef = useRef(null);
+  loadHistoryPageRef.current = loadHistoryPage;
 
   const ctxTopicBack = () => {
     const newIdx = ctxTopicHistoryIdx - 1;
@@ -1387,6 +1390,17 @@ const Presenter = () => {
     setRelatedBatchPage(entry.page ?? 0);
     setRelatedTotal(entry.total ?? entry.verses.length);
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+  };
+
+  const openEntitySearchInModal = (name, type) => {
+    setContextTab('entities');
+    setContextOpen(true);
+    setEntitySearch({ name, type, loading: true, results: [], total: 0, page: 0, pageSize: 10, groups: [], qualifier: null, siblings: [] });
+    const vid = liveVerse?.verse_id ? `&verse_id=${liveVerse.verse_id}` : '';
+    fetch(`${API_URL}/entity/search?name=${encodeURIComponent(name)}&type=${type}&language=${currentLanguage}&page=0&pageSize=10${vid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d && setEntitySearch({ name, type, loading: false, results: d.results, total: d.total, page: 0, pageSize: 10, groups: d.groups || [], entity_id: d.entity_id || null, qualifier: d.qualifier || null, siblings: d.siblings || [] }))
+      .catch(() => setEntitySearch(s => s ? ({ ...s, loading: false }) : s));
   };
 
   const drillIntoVerse = async (verse, page = 0) => {
@@ -1510,7 +1524,7 @@ const Presenter = () => {
           if (relatedBatchPageVal.current < totalPages - 1 && !contextLoadingVal.current) {
             infiniteLoadingRef.current = true;
             setCtxBatchLoading(true);
-            loadHistoryPage(relatedBatchPageVal.current + 1).finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
+            loadHistoryPageRef.current(relatedBatchPageVal.current + 1).finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
           }
         } else if (id === 'entity') {
           const es = entitySearchVal.current;
@@ -1563,7 +1577,7 @@ const Presenter = () => {
     });
     return () => observer.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextOpen]);
+  }, [contextOpen, contextTab]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -2887,21 +2901,13 @@ const Presenter = () => {
                 ))}
                 {chapterEntities.people.slice(0, 3).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--person ctx-doctrine-chip--clickable"
-                    onClick={() => {
-                      setContextTab('related');
-                      setContextOpen(true);
-                      loadTopicInModal(p);
-                    }}>
+                    onClick={() => openEntitySearchInModal(p, 'person')}>
                     {p}
                   </button>
                 ))}
                 {chapterEntities.places.slice(0, 2).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--place ctx-doctrine-chip--clickable"
-                    onClick={() => {
-                      setContextTab('related');
-                      setContextOpen(true);
-                      loadTopicInModal(p);
-                    }}>
+                    onClick={() => openEntitySearchInModal(p, 'place')}>
                     {p}
                   </button>
                 ))}
@@ -3013,13 +3019,13 @@ const Presenter = () => {
                 ))}
                 {chapterEntities.people.slice(0, 3).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--person ctx-doctrine-chip--clickable"
-                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    onClick={() => openEntitySearchInModal(p, 'person')}>
                     {p}
                   </button>
                 ))}
                 {chapterEntities.places.slice(0, 2).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--place ctx-doctrine-chip--clickable"
-                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    onClick={() => openEntitySearchInModal(p, 'place')}>
                     {p}
                   </button>
                 ))}

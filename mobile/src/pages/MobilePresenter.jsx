@@ -463,6 +463,8 @@ const MobilePresenter = () => {
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
+  const ctxTopicHistoryIdxRef = useRef(-1);
+  useEffect(() => { ctxTopicHistoryIdxRef.current = ctxTopicHistoryIdx; }, [ctxTopicHistoryIdx]);
   // Floating word-explore chip: { word, top, left } | null
   const [ctxWordChip, setCtxWordChip] = useState(null);
   const [bookChapters,   setBookChapters]   = useState([]);
@@ -1059,11 +1061,11 @@ const MobilePresenter = () => {
 
   // Navigate to a different batch within the current history entry (mobile frontend-paginated)
   const loadHistoryPage = (batchPage) => {
-    const entry = ctxTopicHistory[ctxTopicHistoryIdx];
+    const idx = ctxTopicHistoryIdxRef.current;
+    const entry = ctxTopicHistory[idx];
     if (!entry) return;
     const allVerses = entry.verses;
-    const updated = { ...entry, page: batchPage };
-    setCtxTopicHistory(prev => prev.map((e, i) => i === ctxTopicHistoryIdx ? updated : e));
+    setCtxTopicHistory(prev => prev.map((e, i) => i === idx ? { ...e, page: batchPage } : e));
     // Append: show all verses from page 0 through batchPage
     const endIdx = (batchPage + 1) * RELATED_PAGE_SIZE;
     const expanded = allVerses.slice(0, endIdx);
@@ -1072,6 +1074,8 @@ const MobilePresenter = () => {
     setRelatedBatchPage(batchPage);
     setRelatedTotal(allVerses.length);
   };
+  const loadHistoryPageRef = useRef(null);
+  loadHistoryPageRef.current = loadHistoryPage;
 
   const ctxTopicBack = () => {
     const newIdx = ctxTopicHistoryIdx - 1;
@@ -1087,6 +1091,15 @@ const MobilePresenter = () => {
     const entry = ctxTopicHistory[newIdx];
     setCtxTopicHistoryIdx(newIdx);
     _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
+  };
+
+  const openEntitySearchInModal = (name, type) => {
+    setContextTab('entities');
+    setContextOpen(true);
+    const res = svc.searchEntityDisambiguated(name, type, liveVerse?.verse_id || null, null, 0, 10);
+    const results = res.results || [];
+    const groups = groupByVolume(results);
+    setEntitySearch({ name, type, loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
   };
 
   const drillIntoVerse = (verse, batchPage = 0) => {
@@ -1200,7 +1213,7 @@ const MobilePresenter = () => {
           if (relatedBatchPageVal.current < totalPages - 1) {
             infiniteLoadingRef.current = true;
             setCtxBatchLoading(true);
-            loadHistoryPage(relatedBatchPageVal.current + 1);
+            loadHistoryPageRef.current(relatedBatchPageVal.current + 1);
             infiniteLoadingRef.current = false;
             setCtxBatchLoading(false);
           }
@@ -1243,7 +1256,7 @@ const MobilePresenter = () => {
     });
     return () => observer.disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextOpen]);
+  }, [contextOpen, contextTab]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -2430,13 +2443,13 @@ const MobilePresenter = () => {
                 ))}
                 {chapterEntities.people.slice(0, 3).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--person ctx-doctrine-chip--clickable"
-                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    onClick={() => openEntitySearchInModal(p, 'person')}>
                     {p}
                   </button>
                 ))}
                 {chapterEntities.places.slice(0, 2).map(p => (
                   <button key={p} className="ctx-entity-chip ctx-entity-chip--place ctx-doctrine-chip--clickable"
-                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    onClick={() => openEntitySearchInModal(p, 'place')}>
                     {p}
                   </button>
                 ))}
