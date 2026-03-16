@@ -7,10 +7,13 @@ const engine = require('../shared/scripture-engine');
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
-// Inside Electron the DBs live in the read-only ASAR archive — open them
-// without journal/WAL writes so SQLite never attempts filesystem mutations.
+const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
+// Inside Electron the DBs live in the read-only extraResources — open them
+// as readonly so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
-const DB_OPTS = { fileMustExist: true };
+const DB_OPTS = IS_ELECTRON_PKG
+  ? { fileMustExist: true, readonly: true }
+  : { fileMustExist: true };
 // In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
 const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
@@ -181,61 +184,8 @@ fastify.get('/config', async (request) => {
   return { publicOrigin };
 });
 
-fastify.get('/themes', async (request, reply) => {
-  const rows = db.prepare('SELECT id, name, data FROM themes').all();
-  return rows.map(r => ({ id: r.id, name: r.name, data: JSON.parse(r.data) }));
-});
-
-fastify.post('/themes', async (request, reply) => {
-  const { name, data } = request.body;
-  if (!name || !data) {
-    reply.code(400);
-    return { error: 'name and data are required' };
-  }
-  try {
-    const stmt = db.prepare('INSERT INTO themes (name, data) VALUES (?, ?)');
-    const info = stmt.run(name, JSON.stringify(data));
-    return { id: info.lastInsertRowid, name, data };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not create theme' };
-  }
-});
-
-fastify.put('/themes/:id', async (request, reply) => {
-  const { id } = request.params;
-  const { name, data } = request.body;
-  if (!name || !data) {
-    reply.code(400);
-    return { error: 'name and data are required' };
-  }
-  try {
-    const stmt = db.prepare('UPDATE themes SET name = ?, data = ? WHERE id = ?');
-    stmt.run(name, JSON.stringify(data), id);
-    return { id: Number(id), name, data };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not update theme' };
-  }
-});
-
-fastify.delete('/themes/:id', async (request, reply) => {
-  const { id } = request.params;
-  try {
-    const stmt = db.prepare('DELETE FROM themes WHERE id = ?');
-    stmt.run(id);
-    return { success: true };
-  } catch (err) {
-    fastify.log.error(err);
-    reply.code(500);
-    return { error: 'could not delete theme' };
-  }
-});
-
 fastify.get('/setlists', async (request, reply) => {
-  const rows = db.prepare('SELECT id, name, items, created_at FROM setlists ORDER BY created_at DESC').all();
+  const rows = db_user.prepare('SELECT id, name, items, created_at FROM setlists ORDER BY created_at DESC').all();
   return rows.map(r => ({ id: r.id, name: r.name, items: JSON.parse(r.items), created_at: r.created_at }));
 });
 
@@ -243,7 +193,7 @@ fastify.post('/setlists', async (request, reply) => {
   const { name, items } = request.body;
   if (!name) { reply.code(400); return { error: 'name is required' }; }
   try {
-    const stmt = db.prepare('INSERT INTO setlists (name, items) VALUES (?, ?)');
+    const stmt = db_user.prepare('INSERT INTO setlists (name, items) VALUES (?, ?)');
     const info = stmt.run(name, JSON.stringify(items || []));
     return { id: info.lastInsertRowid, name, items: items || [] };
   } catch (err) {
@@ -258,7 +208,7 @@ fastify.put('/setlists/:id', async (request, reply) => {
   const { name, items } = request.body;
   if (!name) { reply.code(400); return { error: 'name is required' }; }
   try {
-    db.prepare('UPDATE setlists SET name = ?, items = ? WHERE id = ?')
+    db_user.prepare('UPDATE setlists SET name = ?, items = ? WHERE id = ?')
       .run(name, JSON.stringify(items || []), id);
     return { id: Number(id), name, items: items || [] };
   } catch (err) {
@@ -271,7 +221,7 @@ fastify.put('/setlists/:id', async (request, reply) => {
 fastify.delete('/setlists/:id', async (request, reply) => {
   const { id } = request.params;
   try {
-    db.prepare('DELETE FROM setlists WHERE id = ?').run(id);
+    db_user.prepare('DELETE FROM setlists WHERE id = ?').run(id);
     return { success: true };
   } catch (err) {
     fastify.log.error(err);
@@ -360,30 +310,16 @@ const io = new Server(fastify.server, {
   pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
 });
 
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS themes (
-      id INTEGER PRIMARY KEY,
-      name TEXT UNIQUE,
-      data TEXT NOT NULL
-    );
-  `);
-} catch (err) {
-  fastify.log.error('failed to ensure themes table', err);
-}
-
-try {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS setlists (
-      id         INTEGER PRIMARY KEY,
-      name       TEXT    NOT NULL UNIQUE,
-      items      TEXT    NOT NULL DEFAULT '[]',
-      created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
-    );
-  `);
-} catch (err) {
-  fastify.log.error('failed to ensure setlists table', err);
-}
+// Writable user-data DB for setlists (lives outside read-only resources)
+const db_user = require('better-sqlite3')(path.join(USER_DATA_DIR, 'user-data.db'));
+db_user.exec(`
+  CREATE TABLE IF NOT EXISTS setlists (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT    NOT NULL UNIQUE,
+    items      TEXT    NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+  );
+`);
 
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 // Uses the shared engine's initializeFts via adapters.
