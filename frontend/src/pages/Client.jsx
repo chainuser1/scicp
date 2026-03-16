@@ -2,9 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 
 const POV_TINT = {
-  'prayer':              'rgba(120, 80, 200, 0.12)',
-  'divine instruction':  'rgba(200, 140, 40, 0.10)',
-  'prophetic':           'rgba(60, 100, 200, 0.10)',
+  'prayer or praise':      'rgba(120, 80, 200, 0.12)',
+  'spoken by God':         'rgba(200, 140, 40, 0.10)',
+  'spoken by a prophet':   'rgba(60, 100, 200, 0.10)',
+  'poetic/wisdom':         'rgba(100, 160, 80, 0.10)',
+  'epistle':               'rgba(80, 130, 180, 0.10)',
 };
 
 const waitForFonts = () => {

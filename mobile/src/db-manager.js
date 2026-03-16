@@ -6,8 +6,8 @@
  *   const db = await getDb('en');        // English (LDS)
  *   const db = await getDb('tl');        // Tagalog
  */
-import initSqlJs from 'sql.js';
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
+import initSqlJs from 'fts5-sql-bundle/dist/sql-wasm.js';
+import sqlWasmUrl from 'fts5-sql-bundle/dist/sql-wasm.wasm?url';
 
 // Map language codes to DB filenames (matches resources/db/)
 const DB_FILES = {
@@ -85,6 +85,26 @@ export async function initAllDatabases() {
     try {
       const tags = await loadDatabase('verse-tags.db');
       if (tags) databases.set('tags', tags);
+    } catch (_) {}
+    // Load chapter-summaries-fts.db (chapter summaries + FTS index)
+    try {
+      const chsum = await loadDatabase('chapter-summaries-fts.db');
+      if (chsum) databases.set('chsummary', chsum);
+    } catch (_) {}
+    // Load verse-summaries.db (AI verse summaries)
+    try {
+      const vs = await loadDatabase('verse-summaries.db');
+      if (vs) databases.set('vsummary', vs);
+    } catch (_) {}
+    // Load verse-cross-refs.db (cross references)
+    try {
+      const vx = await loadDatabase('verse-cross-refs.db');
+      if (vx) databases.set('vxref', vx);
+    } catch (_) {}
+    // Load search-graph.db (pre-baked IDF, PageRank, entities for enhanced search)
+    try {
+      const sg = await loadDatabase('search-graph.db');
+      if (sg) databases.set('searchgraph', sg);
     } catch (_) {}
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length}/${entries.length} databases`);

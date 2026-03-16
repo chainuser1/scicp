@@ -107,7 +107,8 @@ function compileDoctrineAliases(aliases) {
 
 // ── FTS5 query builders ─────────────────────────────────────────────────────
 const buildFTSPhraseQuery = (phrase) => {
-  return `"${phrase.replace(/\"/g, '""')}"`;
+  const safe = phrase.replace(/[^a-zA-Z0-9\-\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return `"${safe}"`;
 };
 
 const buildFTSTermQuery = (terms, mode = 'and') => {
@@ -127,6 +128,10 @@ const buildFTSTermQuery = (terms, mode = 'and') => {
     ? wildcarded.join(' OR ')
     : wildcarded.join(' AND ');
 };
+
+// No stopword filtering — scripture phrases like "my jesus", "thou art my son",
+// "not be", "I am" etc. are meaningful. FTS5's BM25 naturally down-weights
+// high-frequency terms, so common words won't dominate rankings.
 
 const buildFTSMatchQuery = (input, { orFallback = false } = {}) => {
   if (!input) return '';
@@ -174,7 +179,8 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, db) =
       s.volume_title, s.book_title, s.volume_long_title, s.book_long_title,
       s.volume_subtitle, s.book_subtitle, s.volume_short_title, s.book_short_title,
       s.volume_lds_url, s.book_lds_url, s.chapter_number, s.verse_number,
-      s.scripture_text, s.verse_title, s.verse_short_title
+      s.scripture_text, s.verse_title, s.verse_short_title,
+      fts.rank AS _bm25_rank
     FROM scriptures s
     JOIN (
       SELECT verse_id, bm25(scriptures_fts, 0, 10, 5, 1, 0, 0) AS rank
@@ -199,7 +205,7 @@ const runFTSQuery = (matchQuery, rawPhrase = null, limit = 10, offset = 0, db) =
 const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
   if (!phrase || !phrase.trim()) return { results: [], total: 0 };
 
-  const raw    = phrase.trim();
+  const raw    = phrase.trim().replace(/[^a-zA-Z0-9\-\s]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^(the|a|an)\s+/i, '');
   const offset = page * pageSize;
 
   try {

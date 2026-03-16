@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket, isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
-const { searchEntities } = svc;
+const { search: svcSearch } = svc;
 import CastingControl from '../components/CastingControl';
+
+function groupByVolume(results) {
+  const m = new Map();
+  for (const r of results) {
+    const vid = r.volume_id || 0;
+    if (!m.has(vid)) m.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] });
+    m.get(vid).results.push(r);
+  }
+  return [...m.values()];
+}
 
 const themes = {
   light: {
@@ -219,21 +229,11 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
 
 // SearchResults — results are already the correct page from the server.
 // No client-side slicing. onPageChange(newPage) triggers a fresh socket request.
-const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang }) => {
+const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang, sentinelRef }) => {
   if (results.length === 0) return null;
-  const hasPrev = currentPage > 0;
-  const hasNext = currentPage < totalPages - 1;
 
   return (
     <>
-      {hasPrev && (
-        <button className="batch-nav batch-nav--prev" onClick={() => onPageChange(currentPage - 1)} aria-label="Previous batch">
-          ▲ <span>Prev batch</span>
-        </button>
-      )}
-      {totalPages > 1 && (
-        <div className="batch-indicator">Batch {currentPage + 1} of {totalPages}</div>
-      )}
       <ul className="results-ul">
         {results.map(verse => (
           <li
@@ -268,11 +268,7 @@ const SearchResults = ({ results, currentPage, totalPages, onSelect, onGoLive, o
           </li>
         ))}
       </ul>
-      {hasNext && (
-        <button className="batch-nav batch-nav--next" onClick={() => onPageChange(currentPage + 1)} aria-label="Next batch">
-          ▼ <span>Next batch</span>
-        </button>
-      )}
+      <div ref={sentinelRef} data-sentinel="search" style={{ height: 1 }} />
     </>
   );
 };
@@ -378,6 +374,8 @@ const MobilePresenter = () => {
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
   const [currentPage, setCurrentPage]       = useState(0);
+  const searchAppendRef = useRef(false);
+  const searchSentinelRef = useRef(null);
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
 
@@ -453,10 +451,14 @@ const MobilePresenter = () => {
   const [relatedTotal,   setRelatedTotal]   = useState(0);
   const [relatedBatchPage, setRelatedBatchPage] = useState(0);
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [], ready: false });
-  const [verseEntities,   setVerseEntities]   = useState({ people: [], places: [] });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+  const [verseSummary,    setVerseSummary]    = useState({ summary: null, cross_references: [], ready: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [entitySearch,    setEntitySearch]    = useState(null);
+  const [topicResults,    setTopicResults]    = useState(null);
+  const topicResultsRef = useRef(null);
+  const [summaryTopicResults, setSummaryTopicResults] = useState(null);
+  const summaryTopicResultsRef = useRef(null);
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
@@ -468,7 +470,13 @@ const MobilePresenter = () => {
   const [ctxScrolled,    setCtxScrolled]    = useState(false);
   const [ctxAtBottom,    setCtxAtBottom]    = useState(false);
   const ctxBodyRef     = useRef(null);
+  const ctxUserScrolled = useRef(false);   // true when user manually scrolls in chapter tab
+  const ctxLastScrolledVerse = useRef(null); // last verse_id we auto-scrolled to
+  const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
+  const relatedSentinelRef = useRef(null);
+  const entitySentinelRef  = useRef(null);
+  const topicSentinelRef   = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8;
@@ -486,8 +494,10 @@ const MobilePresenter = () => {
     setCtxChapterIdx(0);
     setCtxScrolled(false);
     setCtxAtBottom(false);
+    ctxUserScrolled.current = false;
+    ctxLastScrolledVerse.current = null;
+    ctxTabScrollPos.current = {};
     setVerseTags({ pov: null, speaker: null, labels: [], ready: false });
-    setVerseEntities({ people: [], places: [] });
     setEntitySearch(null);
     // Fetch verse-level NLP tags
     if (liveVerse?.verse_id) {
@@ -500,14 +510,20 @@ const MobilePresenter = () => {
   useEffect(() => {
     setChapterVerses([]);
     setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setVerseSummary({ summary: null, cross_references: [], ready: false });
     setChapterEntities({ people: [], places: [], ready: false });
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
+    // Eagerly fetch chapter entities for the preview card
+    if (liveVerse?.chapter_id) {
+      const entities = svc.getChapterEntities(liveVerse.chapter_id);
+      if (entities) setChapterEntities(entities);
+    }
   }, [liveVerse?.chapter_id]);
 
   // Re-fetch chapter modal data when chapter changes and modal is already open
   useEffect(() => {
     if (!liveVerse?.chapter_id || !contextOpen) return;
-    if (contextTab === 'chapter' || contextTab === 'summary' || contextTab === 'entities') {
+    if (contextTab === 'chapter' || contextTab === 'summary' || contextTab === 'entities' || contextTab === 'verse-context') {
       openContextModal('chapter');
     }
   }, [liveVerse?.chapter_id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -780,8 +796,13 @@ const MobilePresenter = () => {
       setConnectionState('disconnected');
     };
     const handleSearchResults = ({ results, total }) => {
-      setResults(results ?? []);
+      if (searchAppendRef.current) {
+        setResults(prev => [...prev, ...(results ?? [])]);
+      } else {
+        setResults(results ?? []);
+      }
       setTotalResults(total ?? 0);
+      searchAppendRef.current = false;
     };
     const handleUpdateVerse = data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); };
     socket.on('search-results', handleSearchResults);
@@ -842,8 +863,8 @@ const MobilePresenter = () => {
     setQuery(q);
     setCurrentPage(0);
     setTotalResults(0);
-    // 250 ms debounce — avoids flooding with a socket emit per
-    // keystroke, and prevents stale out-of-order results.
+    setResults([]);
+    searchAppendRef.current = false;
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => {
       emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
@@ -963,6 +984,16 @@ const MobilePresenter = () => {
           const entities = svc.getChapterEntities(chapterId);
           setChapterEntities(entities);
         }
+        // Always refresh verse summary for current verse
+        if (liveVerse?.verse_id && (force || !verseSummary.ready)) {
+          const vs = svc.getVerseSummary(liveVerse.verse_id);
+          setVerseSummary(vs);
+        }
+      } else if (tab === 'verse-context') {
+        if (liveVerse?.verse_id) {
+          const vs = svc.getVerseSummary(liveVerse.verse_id);
+          setVerseSummary(vs);
+        }
       } else if (tab === 'related' && !relatedVerses.length) {
         const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
         const allResults = results ?? [];
@@ -999,6 +1030,20 @@ const MobilePresenter = () => {
     try {
       const data = svc.search(topicLabel, 0, 50, currentLanguage);
       const allVerses = data?.results ?? [];
+
+      // Fallback: if Related returns 0 results, search chapter summaries instead
+      if (allVerses.length === 0 && batchPage === 0) {
+        try {
+          const sermonResults = svc.searchSermonTopics(topicLabel, 20);
+          if (sermonResults && sermonResults.length > 0) {
+            setSummaryTopicResults({ label: topicLabel, results: sermonResults });
+            setContextTab('summary');
+            setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+            return;
+          }
+        } catch { /* ignore */ }
+      }
+
       const newEntry = { label: topicLabel, concept: topicLabel, type: 'topic', payload: topicLabel, verses: allVerses, total: allVerses.length, page: batchPage, pageSize: RELATED_PAGE_SIZE };
       setCtxTopicHistory(prev => {
         const base = ctxTopicHistoryIdx >= 0 ? prev.slice(0, ctxTopicHistoryIdx + 1) : [];
@@ -1019,7 +1064,13 @@ const MobilePresenter = () => {
     const allVerses = entry.verses;
     const updated = { ...entry, page: batchPage };
     setCtxTopicHistory(prev => prev.map((e, i) => i === ctxTopicHistoryIdx ? updated : e));
-    _mobileSetBatchFromAllVerses(allVerses, entry.label, entry.concept, batchPage);
+    // Append: show all verses from page 0 through batchPage
+    const endIdx = (batchPage + 1) * RELATED_PAGE_SIZE;
+    const expanded = allVerses.slice(0, endIdx);
+    setRelatedVerses(expanded);
+    setRelatedConcept(entry.concept);
+    setRelatedBatchPage(batchPage);
+    setRelatedTotal(allVerses.length);
   };
 
   const ctxTopicBack = () => {
@@ -1105,11 +1156,97 @@ const MobilePresenter = () => {
     }, 210);
   };
 
+  const ctxProgrammaticScroll = useRef(false);
   const handleCtxBodyScroll = (e) => {
     const el = e.currentTarget;
     setCtxScrolled(el.scrollTop > 80);
     setCtxAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 16);
+    if (!ctxProgrammaticScroll.current && contextTab === 'chapter') {
+      ctxUserScrolled.current = true;
+    }
   };
+
+  // Save current tab scroll position and restore target tab's position
+  const switchCtxTab = (fromTab, toTab, afterSwitch) => {
+    if (ctxBodyRef.current) ctxTabScrollPos.current[fromTab] = ctxBodyRef.current.scrollTop;
+    afterSwitch();
+    requestAnimationFrame(() => {
+      if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = ctxTabScrollPos.current[toTab] || 0;
+    });
+  };
+
+  // Infinite-scroll sentinels
+  const infiniteLoadingRef = useRef(false);
+  useEffect(() => {
+    const root = ctxBodyRef.current;
+    if (!root) return;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
+        const id = entry.target.dataset.sentinel;
+        if (id === 'related') {
+          const totalPages = Math.ceil(relatedTotal / RELATED_PAGE_SIZE);
+          if (relatedBatchPage < totalPages - 1) {
+            infiniteLoadingRef.current = true;
+            loadHistoryPage(relatedBatchPage + 1);
+            infiniteLoadingRef.current = false;
+          }
+        } else if (id === 'topic' && topicResults) {
+          if (topicResults.total > (topicResults.page + 1) * topicResults.pageSize) {
+            infiniteLoadingRef.current = true;
+            const nextPage = topicResults.page + 1;
+            const res = svcSearch(topicResults.topic, nextPage, topicResults.pageSize, currentLanguage);
+            const merged = [...topicResults.results, ...(res.results || [])];
+            setTopicResults(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
+            infiniteLoadingRef.current = false;
+          }
+        } else if (id === 'entity' && entitySearch) {
+          if (entitySearch.total > (entitySearch.page + 1) * entitySearch.pageSize) {
+            infiniteLoadingRef.current = true;
+            const nextPage = entitySearch.page + 1;
+            if (entitySearch.entity_id) {
+              const res = svc.searchEntityDisambiguated(entitySearch.name, entitySearch.type, null, entitySearch.entity_id, nextPage, entitySearch.pageSize);
+              const merged = [...entitySearch.results, ...(res.results || [])];
+              setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
+            } else {
+              const q = entitySearch.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
+              const res = svcSearch(q, nextPage, entitySearch.pageSize, currentLanguage);
+              const merged = [...entitySearch.results, ...(res.results || [])];
+              setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
+            }
+            infiniteLoadingRef.current = false;
+          }
+        }
+      }
+    }, { root, threshold: 0.1 });
+    [relatedSentinelRef, entitySentinelRef, topicSentinelRef].forEach(ref => {
+      if (ref.current) observer.observe(ref.current);
+    });
+    return () => observer.disconnect();
+  });
+
+  // Search panel infinite scroll
+  const searchLoadingRef = useRef(false);
+  useEffect(() => {
+    const root = resultsListRef.current;
+    if (!root || !searchSentinelRef.current) return;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting || searchLoadingRef.current) continue;
+        const tp = Math.ceil(totalResults / PAGE_SIZE);
+        if (currentPage < tp - 1 && query) {
+          searchLoadingRef.current = true;
+          const nextPage = currentPage + 1;
+          searchAppendRef.current = true;
+          setCurrentPage(nextPage);
+          emitWithSession('search', { query, page: nextPage, pageSize: PAGE_SIZE, language: currentLanguage });
+          setTimeout(() => { searchLoadingRef.current = false; }, 500);
+        }
+      }
+    }, { root, threshold: 0.1 });
+    observer.observe(searchSentinelRef.current);
+    return () => observer.disconnect();
+  });
 
   const handleCtxTouchStart = (e) => {
     if (contextTab !== 'chapter') return;
@@ -1818,9 +1955,8 @@ const MobilePresenter = () => {
                         onGoLive={goLiveDirectly}
                         onAddToSetlist={addToSetlist}
                         onPageChange={(newPage) => {
+                          searchAppendRef.current = true;
                           setCurrentPage(newPage);
-                          setResultsScrolled(false);
-                          if (resultsListRef.current) resultsListRef.current.scrollTop = 0;
                           emitWithSession('search', { query, page: newPage, pageSize: PAGE_SIZE, language: currentLanguage });
                         }}
                         stagedVerseId={staged?.verse_id}
@@ -1828,6 +1964,7 @@ const MobilePresenter = () => {
                         expandedTranslations={expandedTranslations}
                         translationCache={translationCache}
                         currentLanguage={currentLanguage}
+                        sentinelRef={searchSentinelRef}
                       />
                     : <div className="empty-state">
                         {query.length > 0 ? 'No verses found' : <>Search for a verse<br />to begin...</>}
@@ -2173,7 +2310,14 @@ const MobilePresenter = () => {
                 {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
                 {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
                 {verseTags.labels.slice(0, 3).map(t => (
-                  <span key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview">{t.label}</span>
+                  <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview ctx-doctrine-chip--clickable"
+                    onClick={() => {
+                      setContextTab('related');
+                      setContextOpen(true);
+                      loadTopicInModal(t.label);
+                    }}>
+                    {t.label}
+                  </button>
                 ))}
               </div>
             )}
@@ -2255,6 +2399,29 @@ const MobilePresenter = () => {
                 </div>
               )}
             </div>
+            {/* Clickable chips at bottom of preview — open Related tab */}
+            {(verseTags.labels.length > 0 || chapterEntities.people.length > 0 || chapterEntities.places.length > 0) && (
+              <div className="preview-entity-chips">
+                {verseTags.labels.slice(0, 3).map(t => (
+                  <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--preview ctx-doctrine-chip--clickable"
+                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(t.label); }}>
+                    {t.label}
+                  </button>
+                ))}
+                {chapterEntities.people.slice(0, 3).map(p => (
+                  <button key={p} className="ctx-entity-chip ctx-entity-chip--person ctx-doctrine-chip--clickable"
+                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    {p}
+                  </button>
+                ))}
+                {chapterEntities.places.slice(0, 2).map(p => (
+                  <button key={p} className="ctx-entity-chip ctx-entity-chip--place ctx-doctrine-chip--clickable"
+                    onClick={() => { setContextTab('related'); setContextOpen(true); loadTopicInModal(p); }}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
@@ -2461,17 +2628,21 @@ const MobilePresenter = () => {
               <span className="ctx-title">
                 {contextTab === 'chapter' && bookChapters[ctxChapterIdx]
                   ? `${liveVerse.book_title} ${bookChapters[ctxChapterIdx].chapter_number}`
-                  : `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`}
+                  : contextTab === 'summary'
+                    ? 'Chapter Summary'
+                    : contextTab === 'entities'
+                      ? 'Peoples and Places'
+                      : `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`}
               </span>
               <button className="ctx-close" onClick={() => setContextOpen(false)}>✕</button>
             </div>
             <div className="ctx-tabs">
               <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); }}>
+                onClick={() => switchCtxTab(contextTab, 'chapter', () => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); })}>
                 Chapter {liveVerse.chapter_number}
               </button>
               <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); }}>
+                onClick={() => switchCtxTab(contextTab, 'related', () => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); })}>
                 Related
                 {relatedConcept && (
                   <span className="ctx-concept-tag">
@@ -2480,11 +2651,15 @@ const MobilePresenter = () => {
                 )}
               </button>
               <button className={`ctx-tab${contextTab === 'summary' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); }}>
-                Summary
+                onClick={() => switchCtxTab(contextTab, 'summary', () => { setContextTab('summary'); if (!chapterSummary.ready) openContextModal('chapter'); })}>
+                Chapter Summary
+              </button>
+              <button className={`ctx-tab${contextTab === 'verse-context' ? ' ctx-tab--active' : ''}`}
+                onClick={() => switchCtxTab(contextTab, 'verse-context', () => { setContextTab('verse-context'); openContextModal('verse-context'); })}>
+                Verse Context
               </button>
               <button className={`ctx-tab${contextTab === 'entities' ? ' ctx-tab--active' : ''}`}
-                onClick={() => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); }}>
+                onClick={() => switchCtxTab(contextTab, 'entities', () => { setContextTab('entities'); setEntitySearch(null); if (!chapterEntities.ready) openContextModal('chapter'); })}>
                 People &amp; Places
               </button>
             </div>
@@ -2516,18 +2691,31 @@ const MobilePresenter = () => {
                       </div>
                     )}
                     <ul className={`ctx-list${ctxSlideDir ? ` ctx-list--exit-${ctxSlideDir}` : ' ctx-list--enter'}`}>
-                      {chapterVerses.map(v => (
-                        <li key={v.verse_id}
-                          className={`ctx-item${v.verse_id === liveVerse.verse_id ? ' ctx-item--live' : ''}`}>
-                          <span className="ctx-item-ref">{v.verse_number}</span>
-                          <span className="ctx-item-text">{v.scripture_text}</span>
-                          <div className="ctx-item-actions">
-                            <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
-                            <button onClick={() => addToSetlist(v)}>+ List</button>
-                            <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
-                          </div>
-                        </li>
-                      ))}
+                      {chapterVerses.map(v => {
+                        const isLive = v.verse_id === liveVerse.verse_id;
+                        return (
+                         <li key={v.verse_id}
+                           ref={isLive ? el => {
+                             if (!el) return;
+                             if (ctxUserScrolled.current && ctxLastScrolledVerse.current === v.verse_id) return;
+                             ctxLastScrolledVerse.current = v.verse_id;
+                             setTimeout(() => {
+                               ctxProgrammaticScroll.current = true;
+                               el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                               setTimeout(() => { ctxProgrammaticScroll.current = false; }, 500);
+                             }, 150);
+                           } : undefined}
+                           className={`ctx-item${isLive ? ' ctx-item--live' : ''}`}>
+                           <span className="ctx-item-ref">{v.verse_number}</span>
+                           <span className="ctx-item-text">{v.scripture_text}</span>
+                           <div className="ctx-item-actions">
+                             <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                             <button onClick={() => addToSetlist(v)}>+ List</button>
+                             <button onClick={() => { goLiveDirectly(v); setContextOpen(false); }}>● Live</button>
+                           </div>
+                         </li>
+                        );
+                      })}
                     </ul>
                   </>
                 ) : (
@@ -2558,13 +2746,8 @@ const MobilePresenter = () => {
                               >▶</button>
                             </div>
                           )}
-                          {relatedBatchPage > 0 && (
-                            <button className="batch-nav batch-nav--prev" onClick={() => loadHistoryPage(relatedBatchPage - 1)}>
-                              ▲ <span>Prev batch</span>
-                            </button>
-                          )}
-                          {totalRelPages > 1 && (
-                            <div className="batch-indicator">Batch {relatedBatchPage + 1} of {totalRelPages}</div>
+                          {relatedTotal > 0 && (
+                            <div className="batch-indicator">{relatedVerses.length} of {relatedTotal} verses</div>
                           )}
                           <ul className="ctx-list">
                             {relatedVerses.length === 0
@@ -2592,11 +2775,7 @@ const MobilePresenter = () => {
                                 ))
                             }
                           </ul>
-                          {relatedBatchPage < totalRelPages - 1 && (
-                            <button className="batch-nav batch-nav--next" onClick={() => loadHistoryPage(relatedBatchPage + 1)}>
-                              ▼ <span>Next batch</span>
-                            </button>
-                          )}
+                          <div ref={relatedSentinelRef} data-sentinel="related" style={{ height: 1 }} />
                         </>
                       );
                     })()}
@@ -2613,7 +2792,17 @@ const MobilePresenter = () => {
                         {chapterSummary.top_topics.length > 0 && (
                           <div className="ctx-tag-row ctx-tag-row--topics">
                             {chapterSummary.top_topics.map(t => (
-                              <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>{t.label}</span>
+                              <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--clickable"
+                                title={t.source === 'topical-guide' ? 'LDS Topical Guide — tap to find related chapters' : `${Math.round((t.score || 0) * 100)}% match`}
+                                onClick={() => {
+                                  try {
+                                    const results = svc.searchSermonTopics(t.label, 20);
+                                    setSummaryTopicResults({ label: t.label, results: results || [] });
+                                    setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+                                  } catch { /* ignore */ }
+                                }}>
+                                {t.label}
+                              </button>
                             ))}
                           </div>
                         )}
@@ -2642,7 +2831,104 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         )}
+                        {/* Sermon topic search results from chip click — appears below summary + key verses */}
+                        {summaryTopicResults && (
+                          <div className="ctx-topic-results" ref={summaryTopicResultsRef}>
+                            <span className="ctx-entity-label">📚 Chapters about "{summaryTopicResults.label}"</span>
+                            {summaryTopicResults.results.length === 0 && <p className="ctx-empty">No matching chapters found.</p>}
+                            <ul className="ctx-items-list">
+                              {summaryTopicResults.results.map(r => (
+                                <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={() => {
+                                  setContextLoading(true);
+                                  try {
+                                    const verses = svc.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
+                                    setChapterVerses(Array.isArray(verses) ? verses : []);
+                                    const summary = svc.getChapterSummary(r.chapter_id);
+                                    setChapterSummary(summary);
+                                    const entities = svc.getChapterEntities(r.chapter_id);
+                                    setChapterEntities(entities);
+                                    setSummaryTopicResults(null);
+                                    setContextTab('chapter');
+                                    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+                                  } catch { /* ignore */ } finally { setContextLoading(false); }
+                                }}>
+                                  <span className="ctx-item-ref">{r.book_title} {r.chapter_num}</span>
+                                  <span className="ctx-item-text">{(r.summary_text || '').slice(0, 120)}…</span>
+                                  {r.top_topics?.length > 0 && (
+                                    <div className="ctx-tag-row ctx-tag-row--inline">
+                                      {r.top_topics.map(tp => <span key={tp.label} className="ctx-doctrine-chip ctx-doctrine-chip--small">{tp.label}</span>)}
+                                    </div>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* ── Verse Context tab ── */}
+              {contextTab === 'verse-context' && (
+                <div className="ctx-body" style={{ overflowY: 'auto' }}>
+                  <div className="ctx-summary-panel">
+                    {/* POV + Speaker + Doctrine badges from live verse */}
+                    {(verseTags.pov || verseTags.speaker || verseTags.labels.length > 0) && (
+                      <div className="ctx-tag-row">
+                        {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
+                        {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
+                        {verseTags.labels.slice(0, 4).map(t => (
+                          <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--clickable"
+                            title={t.source === 'topical-guide' ? 'LDS Topical Guide — tap to explore' : `${Math.round((t.score || 0) * 100)}% match`}
+                            onClick={() => {
+                              const res = svcSearch(t.label, 0, 10, currentLanguage);
+                              const results = res.results || [];
+                              setTopicResults({ topic: t.label, loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups: groupByVolume(results) });
+                              setTimeout(() => topicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+                            }}>{t.label}</button>
+                        ))}
+                      </div>
+                    )}
+                    {!verseSummary.ready && <p className="ctx-empty">Loading verse context…</p>}
+                    {verseSummary.ready && !verseSummary.summary && <p className="ctx-empty">No verse context available yet.</p>}
+                    {verseSummary.ready && verseSummary.summary && (
+                      <>
+                        <div className="ctx-summary-text">
+                          <span className="ctx-summary-method-badge">🔍 Verse Context</span>
+                          {verseSummary.summary.split('\n\n').map((para, i) => (
+                            <p key={i}>{para}</p>
+                          ))}
+                        </div>
+
+                      </>
+                    )}
+                    {/* Topic search results from clicking a doctrine chip */}
+                    {topicResults && (
+                      <div className="ctx-entity-results" ref={topicResultsRef}>
+                        <div className="ctx-entity-results-header">
+                          <span>📚 "{topicResults.topic}" — {topicResults.total} verse{topicResults.total !== 1 ? 's' : ''}</span>
+                          <button className="ctx-close-mini" onClick={() => setTopicResults(null)}>✕</button>
+                        </div>
+                        {topicResults.results.length === 0 && <p className="ctx-empty">No verses found for this topic.</p>}
+                        {(topicResults.groups || []).map(g => (
+                          <div key={g.volume_id} className="ctx-entity-volume-group">
+                            <span className="ctx-entity-volume-label">{g.volume_title}</span>
+                            <ul className="ctx-items-list">
+                              {g.results.map(v => (
+                                <li key={v.verse_id} className="ctx-item">
+                                  <span className="ctx-item-ref">{v.verse_title}</span>
+                                  <span className="ctx-item-text">{v.scripture_text}</span>
+                                  <div className="ctx-item-actions">
+                                    <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        <div ref={topicSentinelRef} data-sentinel="topic" style={{ height: 1 }} />
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2651,15 +2937,6 @@ const MobilePresenter = () => {
               {contextTab === 'entities' && (
                 <div className="ctx-body" style={{ overflowY: 'auto' }}>
                   <div className="ctx-entities-panel">
-                    {(verseTags.pov || verseTags.speaker) && (
-                      <div className="ctx-tag-row">
-                        {verseTags.pov && <span className="ctx-pov-badge">{verseTags.pov}</span>}
-                        {verseTags.speaker && <span className="ctx-pov-badge ctx-pov-badge--speaker" title="Speaker">✍ {verseTags.speaker}</span>}
-                        {verseTags.labels.slice(0, 4).map(t => (
-                          <span key={t.label} className="ctx-doctrine-chip" title={`${Math.round(t.score * 100)}% match`}>{t.label}</span>
-                        ))}
-                      </div>
-                    )}
                     {chapterEntities.people.length > 0 && (
                       <div className="ctx-entity-group">
                         <span className="ctx-entity-label">👤 People in this chapter</span>
@@ -2667,8 +2944,10 @@ const MobilePresenter = () => {
                           {chapterEntities.people.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
                               onClick={() => {
-                            const res = searchEntities(p, 'person');
-                            setEntitySearch({ name: p, type: 'person', loading: false, results: res.results, total: res.total });
+                            const res = svc.searchEntityDisambiguated(p, 'person', liveVerse?.verse_id, null, 0, 10);
+                            const results = res.results || [];
+                            const groups = groupByVolume(results);
+                            setEntitySearch({ name: p, type: 'person', loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
                           }}
                             >{p}</button>
                           ))}
@@ -2682,8 +2961,10 @@ const MobilePresenter = () => {
                           {chapterEntities.places.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
                               onClick={() => {
-                            const res = searchEntities(p, 'place');
-                            setEntitySearch({ name: p, type: 'place', loading: false, results: res.results, total: res.total });
+                            const res = svc.searchEntityDisambiguated(p, 'place', liveVerse?.verse_id, null, 0, 10);
+                            const results = res.results || [];
+                            const groups = groupByVolume(results);
+                            setEntitySearch({ name: p, type: 'place', loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
                           }}
                             >{p}</button>
                           ))}
@@ -2693,21 +2974,44 @@ const MobilePresenter = () => {
                     {entitySearch && (
                       <div className="ctx-entity-results">
                         <div className="ctx-entity-results-header">
-                          <span>"{entitySearch.name}" appears in {entitySearch.total} verse{entitySearch.total !== 1 ? 's' : ''}</span>
+                          <span>"{entitySearch.name}"{entitySearch.qualifier ? ` — ${entitySearch.qualifier}` : ''} — {entitySearch.total} result{entitySearch.total !== 1 ? 's' : ''}</span>
                           <button className="ctx-close-mini" onClick={() => setEntitySearch(null)}>✕</button>
                         </div>
+                        {/* Show sibling profiles (same name, different identity) */}
+                        {entitySearch.siblings && entitySearch.siblings.length > 0 && (
+                          <div className="ctx-entity-siblings">
+                            <span className="ctx-entity-siblings-label">Also see:</span>
+                            {entitySearch.siblings.map(s => (
+                              <button key={s.entity_id} className="ctx-entity-chip ctx-entity-chip--sibling"
+                                onClick={() => {
+                                  const res = svc.searchEntityDisambiguated(entitySearch.name, entitySearch.type, null, s.entity_id, 0, 10);
+                                  const results = res.results || [];
+                                  const groups = groupByVolume(results);
+                                  setEntitySearch(prev => ({ ...prev, results, total: res.total || 0, page: 0, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] }));
+                                }}>
+                                {s.qualifier || s.entity_id} ({s.verse_count})
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         {entitySearch.results.length === 0 && <p className="ctx-empty">No verses found.</p>}
-                        <ul className="ctx-items-list">
-                          {entitySearch.results.map(v => (
-                            <li key={v.verse_id} className="ctx-item">
-                              <span className="ctx-item-ref">{v.verse_title}</span>
-                              <span className="ctx-item-text">{v.scripture_text}</span>
-                              <div className="ctx-item-actions">
-                                <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
+                        {(entitySearch.groups || []).map(g => (
+                          <div key={g.volume_id} className="ctx-entity-volume-group">
+                            <span className="ctx-entity-volume-label">{g.volume_title}</span>
+                            <ul className="ctx-items-list">
+                              {g.results.map(v => (
+                                <li key={v.verse_id} className="ctx-item">
+                                  <span className="ctx-item-ref">{v.verse_title}</span>
+                                  <span className="ctx-item-text">{v.scripture_text}</span>
+                                  <div className="ctx-item-actions">
+                                    <button onClick={() => { setStaged({ ...v, theme: themeForVerse(currentTheme, v) }); setContextOpen(false); }}>Stage</button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        <div ref={entitySentinelRef} data-sentinel="entity" style={{ height: 1 }} />
                       </div>
                     )}
                     {!chapterEntities.ready && <p className="ctx-empty">Loading people &amp; places…</p>}

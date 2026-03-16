@@ -25,6 +25,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['@shared/db-adapter', '@shared/scripture-engine'],
-    exclude: ['sql.js'],
+    exclude: ['fts5-sql-bundle'],
   },
 });
