@@ -1484,6 +1484,20 @@ const Presenter = () => {
 
   // Infinite-scroll sentinels — auto-load when sentinel enters viewport
   const infiniteLoadingRef = useRef(false);
+  // Keep mutable refs so the single IntersectionObserver callback reads fresh values
+  const relatedBatchPageVal  = useRef(relatedBatchPage);
+  const relatedTotalVal      = useRef(relatedTotal);
+  const contextLoadingVal    = useRef(contextLoading);
+  const entitySearchVal      = useRef(entitySearch);
+  const topicResultsVal      = useRef(topicResults);
+  useEffect(() => { relatedBatchPageVal.current = relatedBatchPage; }, [relatedBatchPage]);
+  useEffect(() => { relatedTotalVal.current     = relatedTotal; },     [relatedTotal]);
+  useEffect(() => { contextLoadingVal.current   = contextLoading; },   [contextLoading]);
+  useEffect(() => { entitySearchVal.current     = entitySearch; },     [entitySearch]);
+  useEffect(() => { topicResultsVal.current     = topicResults; },     [topicResults]);
+
+  const [ctxBatchLoading, setCtxBatchLoading] = useState(false);
+
   useEffect(() => {
     const root = ctxBodyRef.current;
     if (!root) return;
@@ -1492,17 +1506,20 @@ const Presenter = () => {
         if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
         const id = entry.target.dataset.sentinel;
         if (id === 'related') {
-          const totalPages = Math.ceil(relatedTotal / RELATED_PAGE_SIZE);
-          if (relatedBatchPage < totalPages - 1 && !contextLoading) {
+          const totalPages = Math.ceil(relatedTotalVal.current / RELATED_PAGE_SIZE);
+          if (relatedBatchPageVal.current < totalPages - 1 && !contextLoadingVal.current) {
             infiniteLoadingRef.current = true;
-            loadHistoryPage(relatedBatchPage + 1).finally(() => { infiniteLoadingRef.current = false; });
+            setCtxBatchLoading(true);
+            loadHistoryPage(relatedBatchPageVal.current + 1).finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
           }
-        } else if (id === 'entity' && entitySearch && !entitySearch.loading) {
-          if (entitySearch.total > (entitySearch.page + 1) * entitySearch.pageSize) {
-            const nextPage = entitySearch.page + 1;
+        } else if (id === 'entity') {
+          const es = entitySearchVal.current;
+          if (es && !es.loading && es.total > (es.page + 1) * es.pageSize) {
+            const nextPage = es.page + 1;
             infiniteLoadingRef.current = true;
+            setCtxBatchLoading(true);
             setEntitySearch(s => ({ ...s, loading: true }));
-            fetch(`${API_URL}/entity/search?name=${encodeURIComponent(entitySearch.name)}&type=${entitySearch.type}&language=${currentLanguage}&page=${nextPage}&pageSize=${entitySearch.pageSize}${entitySearch.entity_id ? `&entity_id=${encodeURIComponent(entitySearch.entity_id)}` : ''}`)
+            fetch(`${API_URL}/entity/search?name=${encodeURIComponent(es.name)}&type=${es.type}&language=${currentLanguage}&page=${nextPage}&pageSize=${es.pageSize}${es.entity_id ? `&entity_id=${encodeURIComponent(es.entity_id)}` : ''}`)
               .then(r => r.ok ? r.json() : null)
               .then(d => {
                 if (!d) return;
@@ -1514,14 +1531,16 @@ const Presenter = () => {
                 });
               })
               .catch(() => setEntitySearch(s => ({ ...s, loading: false })))
-              .finally(() => { infiniteLoadingRef.current = false; });
+              .finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
           }
-        } else if (id === 'topic' && topicResults && !topicResults.loading) {
-          if (topicResults.total > (topicResults.page + 1) * topicResults.pageSize) {
-            const nextPage = topicResults.page + 1;
+        } else if (id === 'topic') {
+          const tr = topicResultsVal.current;
+          if (tr && !tr.loading && tr.total > (tr.page + 1) * tr.pageSize) {
+            const nextPage = tr.page + 1;
             infiniteLoadingRef.current = true;
+            setCtxBatchLoading(true);
             setTopicResults(s => ({ ...s, loading: true }));
-            fetch(`${API_URL}/topic-search?q=${encodeURIComponent(topicResults.topic)}&language=${currentLanguage}&page=${nextPage}&pageSize=${topicResults.pageSize}`)
+            fetch(`${API_URL}/topic-search?q=${encodeURIComponent(tr.topic)}&language=${currentLanguage}&page=${nextPage}&pageSize=${tr.pageSize}`)
               .then(r => r.ok ? r.json() : null)
               .then(d => {
                 if (!d) return;
@@ -1533,7 +1552,7 @@ const Presenter = () => {
                 });
               })
               .catch(() => setTopicResults(s => ({ ...s, loading: false })))
-              .finally(() => { infiniteLoadingRef.current = false; });
+              .finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
           }
         }
       }
@@ -1543,7 +1562,8 @@ const Presenter = () => {
       if (ref.current) observer.observe(ref.current);
     });
     return () => observer.disconnect();
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextOpen]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -3413,7 +3433,7 @@ const Presenter = () => {
                                 ))
                             }
                           </ul>
-                          {contextLoading && <p className="ctx-empty">Loading…</p>}
+                          {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
                           <div ref={relatedSentinelRef} data-sentinel="related" style={{ height: 1 }} />
                         </>
                       );
@@ -3584,7 +3604,7 @@ const Presenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {topicResults.loading && <p className="ctx-empty">Loading…</p>}
+                        {topicResults.loading && <p className="ctx-loading-more">Loading more…</p>}
                         <div ref={topicSentinelRef} data-sentinel="topic" style={{ height: 1 }} />
                       </div>
                     )}
@@ -3675,7 +3695,7 @@ const Presenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {entitySearch.loading && <p className="ctx-empty">Loading…</p>}
+                        {entitySearch.loading && <p className="ctx-loading-more">Loading more…</p>}
                         <div ref={entitySentinelRef} data-sentinel="entity" style={{ height: 1 }} />
                       </div>
                     )}

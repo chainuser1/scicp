@@ -5841,6 +5841,8 @@ button, [role="button"] {
 .ctx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 
 .ctx-empty { padding: 3rem; text-align: center; opacity: 0.35; font-size: 0.9rem; }
+.ctx-loading-more { padding: 0.75rem; text-align: center; opacity: 0.5; font-size: 0.8rem; animation: ctx-pulse 1.2s ease-in-out infinite; }
+@keyframes ctx-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
 
 .ctx-item {
   background: rgba(255, 255, 255, 0.03);

@@ -1177,6 +1177,17 @@ const MobilePresenter = () => {
 
   // Infinite-scroll sentinels
   const infiniteLoadingRef = useRef(false);
+  const relatedBatchPageVal  = useRef(relatedBatchPage);
+  const relatedTotalVal      = useRef(relatedTotal);
+  const entitySearchVal      = useRef(entitySearch);
+  const topicResultsVal      = useRef(topicResults);
+  useEffect(() => { relatedBatchPageVal.current = relatedBatchPage; }, [relatedBatchPage]);
+  useEffect(() => { relatedTotalVal.current     = relatedTotal; },     [relatedTotal]);
+  useEffect(() => { entitySearchVal.current     = entitySearch; },     [entitySearch]);
+  useEffect(() => { topicResultsVal.current     = topicResults; },     [topicResults]);
+
+  const [ctxBatchLoading, setCtxBatchLoading] = useState(false);
+
   useEffect(() => {
     const root = ctxBodyRef.current;
     if (!root) return;
@@ -1185,36 +1196,44 @@ const MobilePresenter = () => {
         if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
         const id = entry.target.dataset.sentinel;
         if (id === 'related') {
-          const totalPages = Math.ceil(relatedTotal / RELATED_PAGE_SIZE);
-          if (relatedBatchPage < totalPages - 1) {
+          const totalPages = Math.ceil(relatedTotalVal.current / RELATED_PAGE_SIZE);
+          if (relatedBatchPageVal.current < totalPages - 1) {
             infiniteLoadingRef.current = true;
-            loadHistoryPage(relatedBatchPage + 1);
+            setCtxBatchLoading(true);
+            loadHistoryPage(relatedBatchPageVal.current + 1);
             infiniteLoadingRef.current = false;
+            setCtxBatchLoading(false);
           }
-        } else if (id === 'topic' && topicResults) {
-          if (topicResults.total > (topicResults.page + 1) * topicResults.pageSize) {
+        } else if (id === 'topic') {
+          const tr = topicResultsVal.current;
+          if (tr && tr.total > (tr.page + 1) * tr.pageSize) {
             infiniteLoadingRef.current = true;
-            const nextPage = topicResults.page + 1;
-            const res = svcSearch(topicResults.topic, nextPage, topicResults.pageSize, currentLanguage);
-            const merged = [...topicResults.results, ...(res.results || [])];
+            setCtxBatchLoading(true);
+            const nextPage = tr.page + 1;
+            const res = svcSearch(tr.topic, nextPage, tr.pageSize, currentLanguage);
+            const merged = [...tr.results, ...(res.results || [])];
             setTopicResults(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
             infiniteLoadingRef.current = false;
+            setCtxBatchLoading(false);
           }
-        } else if (id === 'entity' && entitySearch) {
-          if (entitySearch.total > (entitySearch.page + 1) * entitySearch.pageSize) {
+        } else if (id === 'entity') {
+          const es = entitySearchVal.current;
+          if (es && es.total > (es.page + 1) * es.pageSize) {
             infiniteLoadingRef.current = true;
-            const nextPage = entitySearch.page + 1;
-            if (entitySearch.entity_id) {
-              const res = svc.searchEntityDisambiguated(entitySearch.name, entitySearch.type, null, entitySearch.entity_id, nextPage, entitySearch.pageSize);
-              const merged = [...entitySearch.results, ...(res.results || [])];
+            setCtxBatchLoading(true);
+            const nextPage = es.page + 1;
+            if (es.entity_id) {
+              const res = svc.searchEntityDisambiguated(es.name, es.type, null, es.entity_id, nextPage, es.pageSize);
+              const merged = [...es.results, ...(res.results || [])];
               setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
             } else {
-              const q = entitySearch.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
-              const res = svcSearch(q, nextPage, entitySearch.pageSize, currentLanguage);
-              const merged = [...entitySearch.results, ...(res.results || [])];
+              const q = es.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
+              const res = svcSearch(q, nextPage, es.pageSize, currentLanguage);
+              const merged = [...es.results, ...(res.results || [])];
               setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
             }
             infiniteLoadingRef.current = false;
+            setCtxBatchLoading(false);
           }
         }
       }
@@ -1223,7 +1242,8 @@ const MobilePresenter = () => {
       if (ref.current) observer.observe(ref.current);
     });
     return () => observer.disconnect();
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextOpen]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -2775,6 +2795,7 @@ const MobilePresenter = () => {
                                 ))
                             }
                           </ul>
+                          {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
                           <div ref={relatedSentinelRef} data-sentinel="related" style={{ height: 1 }} />
                         </>
                       );
@@ -2927,6 +2948,7 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         ))}
+                        {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
                         <div ref={topicSentinelRef} data-sentinel="topic" style={{ height: 1 }} />
                       </div>
                     )}
@@ -3011,6 +3033,7 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         ))}
+                        {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
                         <div ref={entitySentinelRef} data-sentinel="entity" style={{ height: 1 }} />
                       </div>
                     )}
