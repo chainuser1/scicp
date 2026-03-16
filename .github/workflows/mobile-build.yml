@@ -40,12 +40,12 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install root dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
 
       - name: Install mobile dependencies
         working-directory: mobile
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Build web assets
         working-directory: mobile
@@ -106,7 +106,7 @@ jobs:
           cache: 'npm'
 
       - name: Install root dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Rebuild better-sqlite3 for macOS Node
         run: npm rebuild better-sqlite3
@@ -114,7 +114,7 @@ jobs:
 
       - name: Install mobile dependencies
         working-directory: mobile
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Build web assets
         working-directory: mobile
