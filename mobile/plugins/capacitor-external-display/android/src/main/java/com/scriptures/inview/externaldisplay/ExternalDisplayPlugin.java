@@ -4,6 +4,8 @@ import android.app.Presentation;
 import android.content.Context;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Display;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
@@ -120,10 +122,18 @@ public class ExternalDisplayPlugin extends Plugin {
     private void registerDisplayListener() {
         if (displayManager == null) return;
 
+        final Handler handler = new Handler(Looper.getMainLooper());
+
         displayListener = new DisplayManager.DisplayListener() {
             @Override
             public void onDisplayAdded(int displayId) {
-                notifyListeners("displayConnected", new JSObject());
+                // Miracast/virtual displays may not be added to DISPLAY_CATEGORY_PRESENTATION
+                // immediately — wait 800ms then check if a presentation display is available.
+                handler.postDelayed(() -> {
+                    if (findPresentationDisplay() != null) {
+                        notifyListeners("displayConnected", new JSObject());
+                    }
+                }, 800);
             }
 
             @Override
@@ -140,7 +150,13 @@ public class ExternalDisplayPlugin extends Plugin {
 
             @Override
             public void onDisplayChanged(int displayId) {
-                // No action needed
+                // Miracast display state can change to PRESENTATION after initial add —
+                // notify if this display is now available as a presentation display.
+                handler.postDelayed(() -> {
+                    if (findPresentationDisplay() != null) {
+                        notifyListeners("displayConnected", new JSObject());
+                    }
+                }, 400);
             }
         };
 

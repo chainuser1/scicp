@@ -17,6 +17,7 @@
     "@capacitor/app": "^7.0.0",
     "@capacitor/core": "^7.0.0",
     "@capacitor/ios": "^7.0.0",
+    "capacitor-external-display": "file:./plugins/capacitor-external-display",
     "fts5-sql-bundle": "^1.0.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
