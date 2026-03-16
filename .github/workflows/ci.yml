@@ -31,7 +31,8 @@ jobs:
         run: npm ci
 
       - name: Install mobile dependencies (lockfile check)
-        run: npm ci --prefix mobile
+        working-directory: mobile
+        run: npm ci
 
       - name: Rebuild native modules for Node.js
         run: npm rebuild better-sqlite3
