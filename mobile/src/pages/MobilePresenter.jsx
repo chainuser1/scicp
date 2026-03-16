@@ -2651,7 +2651,6 @@ const MobilePresenter = () => {
           </div>
         </div>
       )}
-    </div>
 
       {/* Context Modal — Chapter / Related (offline, TG-powered) */}
       {contextOpen && liveVerse && (
@@ -3081,6 +3080,7 @@ const MobilePresenter = () => {
           </div>
         </div>
       )}
+    </div>
     </>
   );
 };
