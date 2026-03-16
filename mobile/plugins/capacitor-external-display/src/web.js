@@ -11,8 +11,16 @@ export class ExternalDisplayWeb extends WebPlugin {
   }
 
   async isAvailable() {
-    // In a browser, we can open a popup as a "fake" external display
-    return { available: true };
+    // In a browser we check the Web Presentation API; if not supported, allow popup fallback
+    if (typeof window !== 'undefined' && typeof window.PresentationRequest === 'function') {
+      try {
+        const request = new window.PresentationRequest(['about:blank']);
+        const avail = await request.getAvailability();
+        return { available: !!avail?.value };
+      } catch { /* fallback below */ }
+    }
+    // Popup-based fallback always available in browsers (dev mode)
+    return { available: typeof window !== 'undefined' && typeof window.open === 'function' };
   }
 
   async startPresentation({ url }) {
