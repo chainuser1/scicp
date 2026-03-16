@@ -3,9 +3,15 @@
  *
  * Detects external displays, starts/stops presentation, and shows
  * connection status. Used in the MobilePresenter header.
+ *
+ * HOW CASTING WORKS:
+ *   The plugin uses Android's DISPLAY_CATEGORY_PRESENTATION API, which only
+ *   sees displays that Android has already connected at the OS level.
+ *   Steps: Android quick settings → Cast/Screen Cast → select your receiver
+ *   (AirServer, Miracast TV, Chromecast, etc.) → then tap Cast here.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { ExternalDisplay } from '../../plugins/capacitor-external-display/src/index.js';
+import { ExternalDisplay } from 'capacitor-external-display';
 import { startCasting, stopCasting, isDisplayAvailable, isCasting } from '../socket-local';
 
 const IconCast = ({ active }) => (
@@ -18,6 +24,7 @@ const IconCast = ({ active }) => (
 export default function CastingControl({ className = '', label = '' }) {
   const [available, setAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
+  const [showHint, setShowHint] = useState(false);
 
   // Poll for display availability
   useEffect(() => {
@@ -29,9 +36,13 @@ export default function CastingControl({ className = '', label = '' }) {
     };
     check();
 
+    // Poll every 2s so we catch displays connected before component mounts
+    // and handle devices where the event fires before CATEGORY_PRESENTATION is ready.
+    const pollInterval = setInterval(check, 2000);
+
     // Listen for connect/disconnect events from native
     const onConnect = ExternalDisplay.addListener('displayConnected', () => {
-      if (mounted) setAvailable(true);
+      if (mounted) { setAvailable(true); setShowHint(false); }
     });
     const onDisconnect = ExternalDisplay.addListener('displayDisconnected', () => {
       if (mounted) {
@@ -42,6 +53,7 @@ export default function CastingControl({ className = '', label = '' }) {
 
     return () => {
       mounted = false;
+      clearInterval(pollInterval);
       onConnect.then(h => h.remove()).catch(() => {});
       onDisconnect.then(h => h.remove()).catch(() => {});
     };
@@ -51,33 +63,55 @@ export default function CastingControl({ className = '', label = '' }) {
     if (casting) {
       await stopCasting();
       setCasting(false);
-    } else {
-      // Build the client-display URL relative to the app's own origin
-      const base = window.location.origin;
-      const clientUrl = `${base}/client-display.html`;
-      const success = await startCasting(clientUrl);
-      setCasting(success);
+      return;
     }
-  }, [casting]);
+    if (!available) {
+      // Show setup hint instead of silently doing nothing
+      setShowHint(h => !h);
+      return;
+    }
+    setShowHint(false);
+    // Capacitor Android serves the app at http://localhost
+    const base = window.location.origin.replace('capacitor://', 'http://');
+    const clientUrl = `${base}/client-display.html`;
+    const success = await startCasting(clientUrl);
+    if (success) {
+      setCasting(true);
+    } else {
+      // Display was detected but presentation failed — re-check availability
+      setAvailable(false);
+      setShowHint(true);
+    }
+  }, [casting, available]);
 
   return (
-    <button
-      className={`hdr-btn${casting ? ' hdr-btn--active' : ''}${className ? ` ${className}` : ''}`}
-      onClick={handleToggle}
-      disabled={!available && !casting}
-      aria-label={casting ? 'Stop casting' : 'Cast to display'}
-      title={
-        casting
-          ? 'Stop casting'
-          : available
-            ? 'Cast to display'
-            : 'No external display detected'
-      }
-      style={{ opacity: available || casting ? 1 : 0.4 }}
-    >
-      <IconCast active={casting} />
-      {label && <span>{label}</span>}
-      {casting && <span className="hdr-badge" style={{ background: '#c9a84c', width: 6, height: 6, borderRadius: '50%', position: 'absolute', top: 4, right: 4 }} />}
-    </button>
+    <div style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        className={`hdr-btn${casting ? ' hdr-btn--active' : ''}${className ? ` ${className}` : ''}`}
+        onClick={handleToggle}
+        aria-label={casting ? 'Stop casting' : available ? 'Cast to display' : 'Cast setup'}
+        title={casting ? 'Stop casting' : available ? 'Cast to display' : 'Tap for cast setup instructions'}
+        style={{ opacity: available || casting ? 1 : 0.55, position: 'relative' }}
+      >
+        <IconCast active={casting} />
+        {label && <span>{label}</span>}
+        {casting && <span className="hdr-badge" style={{ background: '#c9a84c', width: 6, height: 6, borderRadius: '50%', position: 'absolute', top: 4, right: 4 }} />}
+      </button>
+
+      {showHint && !casting && (
+        <div className="cast-hint-popover" role="dialog" aria-label="Cast setup instructions">
+          <button className="cast-hint-close" onClick={() => setShowHint(false)} aria-label="Dismiss">✕</button>
+          <p className="cast-hint-title">📡 How to Cast</p>
+          <ol className="cast-hint-steps">
+            <li>Swipe down twice → tap <strong>"Cast"</strong> or <strong>"Screen Cast"</strong></li>
+            <li>Select your TV or <strong>AirServer</strong> from the list</li>
+            <li>Wait for the connection to establish (a few seconds)</li>
+            <li>Return here — the Cast button turns gold when ready</li>
+            <li>Tap Cast → scripture shows on the TV</li>
+          </ol>
+          <p className="cast-hint-note">Works with Miracast TVs and AirServer. The button polls every 2 seconds — it will activate automatically once connected.</p>
+        </div>
+      )}
+    </div>
   );
 }

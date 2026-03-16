@@ -2395,6 +2395,45 @@ button,
   color: var(--gold-light);
 }
 
+/* Cast hint popover */
+.cast-hint-popover {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  z-index: 9000;
+  width: min(20rem, 90vw);
+  background: var(--surface, #14141f);
+  border: 1px solid rgba(201,168,76,0.35);
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem 1rem;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  animation: ctx-slide-in 0.2s cubic-bezier(0.22,1,0.36,1);
+  color: var(--text-primary);
+}
+.cast-hint-close {
+  position: absolute; top: 0.55rem; right: 0.7rem;
+  background: none; border: none; cursor: pointer;
+  color: inherit; opacity: 0.5; font-size: 0.88rem; padding: 0.2rem 0.4rem;
+}
+.cast-hint-title {
+  font-family: 'Cinzel', serif; font-size: 0.88rem; font-weight: 700;
+  color: var(--gold, #c9a84c); margin: 0 0 0.65rem; padding-right: 1.5rem;
+  letter-spacing: 0.04em;
+}
+.cast-hint-steps {
+  margin: 0 0 0.65rem; padding-left: 1.3rem;
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+.cast-hint-steps li { font-size: 0.88rem; line-height: 1.5; }
+.cast-hint-note {
+  margin: 0; font-size: 0.78rem; opacity: 0.5; font-style: italic;
+}
+.presenter-container--light .cast-hint-popover {
+  background: #faf7f2;
+  border-color: rgba(139,58,26,0.25);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+}
+
 /* Theme popover wrapper */
 .hdr-theme-wrap {
   position: relative;

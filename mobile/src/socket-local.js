@@ -10,7 +10,7 @@
  * ExternalDisplay plugin (when casting to a TV).
  */
 import * as svc from './scripture-service';
-import { ExternalDisplay } from '../plugins/capacitor-external-display/src/index.js';
+import { ExternalDisplay } from 'capacitor-external-display';
 
 const listeners = new Map();
 
