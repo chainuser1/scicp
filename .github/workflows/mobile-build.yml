@@ -51,11 +51,9 @@ jobs:
         working-directory: mobile
         run: npm run build
 
-      - name: Add Android platform and sync
+      - name: Sync Capacitor Android
         working-directory: mobile
-        run: |
-          npx cap add android
-          npx cap sync android
+        run: npx cap sync android
 
       - name: Apply custom Android launcher icon
         run: |
@@ -122,11 +120,9 @@ jobs:
         working-directory: mobile
         run: npm run build
 
-      - name: Add iOS platform and sync
+      - name: Sync Capacitor iOS
         working-directory: mobile
-        run: |
-          npx cap add ios
-          npx cap sync ios
+        run: npx cap sync ios
 
       - name: Build iOS archive
         working-directory: mobile/ios/App
