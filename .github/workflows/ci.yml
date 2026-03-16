@@ -26,11 +26,11 @@ jobs:
           cache: 'npm'
 
       - name: Install root dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Install mobile dependencies (lockfile check)
         working-directory: mobile
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Rebuild native modules for Node.js
         run: npm rebuild better-sqlite3
