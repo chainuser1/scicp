@@ -1693,13 +1693,15 @@ button,
    ══════════════════════════════════════════════════════════════ */
 .mobile-golive-actions {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-shrink: 0;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .mobile-mini-btn {
-  min-height: 36px;
+  min-height: 40px;
   border: 1px solid rgba(201,168,76,0.24);
   border-radius: var(--radius);
   background: rgba(201,168,76,0.08);
@@ -4659,6 +4661,77 @@ button,
 
 .presenter-container--light .drawer-backdrop {
   background: rgba(42, 28, 20, 0.35);
+}
+
+/* Light theme — mobile action bar, font buttons, tour card */
+.presenter-container--light .mobile-golive-bar {
+  background: #faf7f2;
+  box-shadow: 0 -4px 20px rgba(139, 58, 26, 0.1);
+  border-top: 1px solid rgba(139, 58, 26, 0.12);
+}
+.presenter-container--light .mobile-golive-ref {
+  color: #6b2e10;
+}
+.presenter-container--light .mobile-nav-btn {
+  background: rgba(139, 58, 26, 0.06);
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #8b3a1a;
+}
+.presenter-container--light .mobile-nav-btn:active {
+  background: rgba(139, 58, 26, 0.12);
+}
+.presenter-container--light .mobile-golive-btn {
+  background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
+  color: #fff;
+}
+.presenter-container--light .mobile-core-btn {
+  background: rgba(139, 58, 26, 0.06);
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #8b3a1a;
+}
+.presenter-container--light .mobile-core-btn--active {
+  background: rgba(201, 168, 76, 0.15);
+  border-color: rgba(201, 168, 76, 0.45);
+  color: #6b4e0a;
+}
+.presenter-container--light .mobile-mini-btn {
+  background: rgba(139, 58, 26, 0.06);
+  border-color: rgba(139, 58, 26, 0.18);
+  color: #6b2e10;
+}
+.presenter-container--light .mobile-font-btn {
+  background: rgba(201, 168, 76, 0.1);
+  border-color: rgba(201, 168, 76, 0.35);
+  color: #8b6914;
+}
+.presenter-container--light .mobile-font-btn--reading {
+  background: rgba(120, 80, 200, 0.08);
+  border-color: rgba(120, 80, 200, 0.25);
+  color: #5a3a9a;
+}
+.presenter-container--light .mobile-endlive-btn {
+  background: rgba(192, 57, 43, 0.08);
+  border-color: rgba(192, 57, 43, 0.3);
+  color: #a93226;
+}
+.presenter-container--light .tour-card {
+  background: #faf7f2;
+  border-color: rgba(139, 58, 26, 0.22);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+  color: #2e1608;
+}
+.presenter-container--light .tour-chip { color: #8b3a1a; }
+.presenter-container--light .tour-title { color: #6b2e10; }
+.presenter-container--light .tour-desc { color: #5c3d2e; }
+.presenter-container--light .tour-btn {
+  background: rgba(139, 58, 26, 0.06);
+  border-color: rgba(139, 58, 26, 0.2);
+  color: #8b3a1a;
+}
+.presenter-container--light .tour-btn--primary {
+  background: rgba(139, 58, 26, 0.12);
+  border-color: rgba(139, 58, 26, 0.4);
+  color: #6b2e10;
 }
 
 /* ══════════════════════════════════════════════════════════════
