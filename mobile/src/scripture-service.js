@@ -640,11 +640,20 @@ export function getChapterSummary(chapterId) {
   } catch { return { summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false }; }
 }
 
+export function getChapterFootnotes(chapterId) {
+  const fnDb = getDb('footnotes');
+  if (!fnDb) return { nabre_footnotes: null, net_footnotes: null };
+  try {
+    const rows = fnDb.exec('SELECT bg_footnotes, net_notes FROM chapter_footnotes WHERE chapter_id = ?', [chapterId]);
+    if (!rows.length || !rows[0].values.length) return { nabre_footnotes: null, net_footnotes: null };
+    const [bg_footnotes, net_notes] = rows[0].values[0];
+    return { nabre_footnotes: bg_footnotes || null, net_footnotes: net_notes || null };
+  } catch { return { nabre_footnotes: null, net_footnotes: null }; }
+}
+
 export function getChapterEntities(chapterId) {
   const tagsDb = getDb('tags');
   if (!tagsDb) return { people: [], places: [], ready: false };
-  try {
-    const rows = tagsDb.exec('SELECT entities_json FROM chapter_entities WHERE chapter_id = ?', [chapterId]);
     if (!rows.length || !rows[0].values.length) return { people: [], places: [], ready: true };
     const jsonStr = rows[0].values[0][0];
     if (!jsonStr) return { people: [], places: [], ready: true };

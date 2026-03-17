@@ -59,6 +59,7 @@ let db_chsummary = null;
 let db_vsummary = null;   // verse-summaries.db (summary text)
 let db_vxref = null;      // verse-cross-refs.db (cross references)
 let db_graph = null;      // verse-graph.db (kNN, RWR, clusters)
+let db_footnotes = null;  // footnotes-lds-summaries.db (NABRE + NET scholarly footnotes)
 try {
   db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'), { readonly: true, fileMustExist: true });
 } catch (_) {}
@@ -73,6 +74,9 @@ try {
 } catch (_) {}
 try {
   db_graph = require('better-sqlite3')(path.join(DB_DIR, 'verse-graph.db'), { readonly: true, fileMustExist: true });
+} catch (_) {}
+try {
+  db_footnotes = require('better-sqlite3')(path.join(DB_DIR, 'footnotes-lds-summaries.db'), { readonly: true, fileMustExist: true });
 } catch (_) {}
 // If not found (dev mode), create writable
 if (!db_tags) {
@@ -2950,16 +2954,26 @@ fastify.get('/chapter/:chapter_id/summary', async (request, reply) => {
   if (!db_chsummary) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
   try {
     const row = db_chsummary.prepare('SELECT summary_text, summary_method, key_verses_json, top_topics_json FROM chapter_summaries WHERE chapter_id = ?').get(chapterId);
-    if (!row) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
+    if (!row) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false };
+    let nabre_footnotes = null;
+    let net_footnotes = null;
+    if (db_footnotes) {
+      try {
+        const fn = db_footnotes.prepare('SELECT bg_footnotes, net_notes FROM chapter_footnotes WHERE chapter_id = ?').get(chapterId);
+        if (fn) { nabre_footnotes = fn.bg_footnotes || null; net_footnotes = fn.net_notes || null; }
+      } catch (_) {}
+    }
     return {
-      chapter_id:     chapterId,
-      summary_text:   row.summary_text,
-      summary_method: row.summary_method || 'extractive',
-      key_verses:     JSON.parse(row.key_verses_json  || '[]'),
-      top_topics:     JSON.parse(row.top_topics_json  || '[]'),
+      chapter_id:      chapterId,
+      summary_text:    row.summary_text,
+      summary_method:  row.summary_method || 'extractive',
+      key_verses:      JSON.parse(row.key_verses_json  || '[]'),
+      top_topics:      JSON.parse(row.top_topics_json  || '[]'),
+      nabre_footnotes,
+      net_footnotes,
       ready: true
     };
-  } catch { return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false }; }
+  } catch { return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false }; }
 });
 
 // ── HTTP route: get verse context summary ────────────────────────────────────
