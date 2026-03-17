@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { socket, isDisplayAvailable, isCasting } from '../socket-local';
+import { useSocketCtx } from '../App';
+import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
 const { search: svcSearch } = svc;
 import CastingControl from '../components/CastingControl';
@@ -305,6 +306,23 @@ function getCitation(language, volumeId, secondaryLanguage) {
 
 /* ─── Main component ─── */
 const MobilePresenter = () => {
+  const { socket, mode, isOnline, switchMode, serverUrl } = useSocketCtx();
+
+  // ── Online session management ──
+  const PRESENTER_TOKEN_KEY      = 'scicp.presenter_token';
+  const PRESENTER_LAST_SESSION   = 'scicp.last_session';
+  const [sessionId, setSessionId]           = useState('LOCAL');
+  const [sessionInput, setSessionInput]     = useState('');
+  const [sessionMessage, setSessionMessage] = useState('');
+  const [sessionJoined, setSessionJoined]   = useState(!isOnline); // offline starts joined
+  const [pinEntryOpen, setPinEntryOpen]     = useState(false);
+  const [pinInput, setPinInput]             = useState('');
+  const [pinError, setPinError]             = useState('');
+  const [pendingPinSession, setPendingPinSession] = useState('');
+  const [connectionState, setConnectionState] = useState(isOnline ? 'connecting' : 'connected');
+  const [queuedCount, setQueuedCount]       = useState(0);
+  const rejoinInFlightRef = useRef(false);
+
   const PRESENTER_TOUR_KEY = 'scicp.presenter_tour_seen_v2';
   const presenterTourSteps = [
     {
@@ -381,7 +399,6 @@ const MobilePresenter = () => {
 
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
-  const [connectionState, setConnectionState] = useState('connecting');
   const [pendingGoLive, setPendingGoLive]   = useState(false);
   const [verseOfDay, setVerseOfDay]         = useState(null);
   const [votdError, setVotdError]           = useState(false);
@@ -633,13 +650,136 @@ const MobilePresenter = () => {
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
   const PAGE_SIZE = 4; // 4 results/batch on mobile — thumb-friendly glide navigation
-  const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId: 'LOCAL' });
+  const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
 
   const showToast = (msg) => {
     setToastMsg(msg);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastMsg(''), 2200);
   };
+
+  // ── Online session management ──
+  const normalizeSessionId = (raw) => (raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+
+  const joinSession = (codeOverride, pin) => {
+    if (!isOnline) return;
+    const normalized = normalizeSessionId(codeOverride || sessionInput);
+    if (!normalized || normalized.length < 4) {
+      setSessionMessage('Enter the session code from the TV');
+      return;
+    }
+    setSessionMessage('Connecting…');
+    const savedToken = (() => { try { return sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
+    const payload = { sessionId: normalized, role: 'presenter', presenterToken: savedToken };
+    if (pin) payload.pin = pin;
+    socket.emit('join-session', payload, (response) => {
+      if (response?.requiresPin) {
+        setPendingPinSession(normalized);
+        setPinInput('');
+        setPinError('');
+        setPinEntryOpen(true);
+        setSessionMessage('PIN required');
+        return;
+      }
+      if (response?.pinIncorrect) {
+        setPinError('Incorrect PIN — try again');
+        return;
+      }
+      if (response?.ok && response.sessionId) {
+        setPinEntryOpen(false);
+        setSessionId(response.sessionId);
+        setSessionInput('');
+        setSessionMessage(`Connected — ${response.sessionId}`);
+        setSessionJoined(true);
+        try {
+          sessionStorage.setItem(PRESENTER_LAST_SESSION, response.sessionId);
+          if (response.presenterToken) sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken);
+        } catch { /* ignore */ }
+      } else if (response?.error === 'presenter-locked-out') {
+        setSessionMessage('Session has an active presenter');
+      } else {
+        setSessionMessage(response?.message || 'Session not found');
+      }
+    });
+  };
+
+  const leaveSession = () => {
+    socket.emit('leave-session', {}, () => {
+      setSessionId('LOCAL');
+      setSessionJoined(false);
+      setSessionMessage('Disconnected');
+      setLiveVerse(null);
+      try {
+        sessionStorage.removeItem(PRESENTER_LAST_SESSION);
+        sessionStorage.removeItem(PRESENTER_TOKEN_KEY);
+      } catch { /* ignore */ }
+    });
+  };
+
+  // Auto-join from QR scan (pending session stored by App.jsx)
+  useEffect(() => {
+    if (!isOnline) return;
+    const pending = sessionStorage.getItem('scicp.pending_session');
+    if (pending) {
+      sessionStorage.removeItem('scicp.pending_session');
+      joinSession(pending);
+      return;
+    }
+    // Try to rejoin last session
+    const last = (() => { try { return sessionStorage.getItem(PRESENTER_LAST_SESSION) || ''; } catch { return ''; } })();
+    if (last) joinSession(last);
+  }, [isOnline]);
+
+  // Connection state tracking + auto-rejoin for online mode
+  useEffect(() => {
+    if (!isOnline) return;
+
+    const onConnect = () => {
+      setConnectionState('connected');
+      // Auto-rejoin session after reconnect
+      if (!rejoinInFlightRef.current) {
+        const lastSession = (() => { try { return sessionStorage.getItem(PRESENTER_LAST_SESSION) || ''; } catch { return ''; } })();
+        const token = (() => { try { return sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
+        if (lastSession && token) {
+          rejoinInFlightRef.current = true;
+          socket.emit('join-session', { sessionId: lastSession, role: 'presenter', presenterToken: token }, (response) => {
+            rejoinInFlightRef.current = false;
+            if (response?.ok && response.sessionId) {
+              setSessionId(response.sessionId);
+              setSessionJoined(true);
+              if (response.presenterToken) {
+                try { sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken); } catch { /* ignore */ }
+              }
+              // Flush queued events now that we've rejoined
+              const flushed = socket.flushQueue?.() || 0;
+              if (flushed > 0) showToast(`✓ Connection restored — ${flushed} action${flushed > 1 ? 's' : ''} delivered`);
+              else showToast('✓ Connection restored');
+            }
+          });
+        }
+      }
+    };
+    const onDisconnect = () => setConnectionState('disconnected');
+    const onReconnecting = () => setConnectionState('reconnecting');
+    const onTakeover = () => {
+      showToast('⚠️ Another presenter is trying to join');
+    };
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('reconnect_attempt', onReconnecting);
+    socket.on('presenter-takeover-attempt', onTakeover);
+
+    // Subscribe to queue size changes
+    const unsubQueue = socket.onQueueChange?.(count => setQueuedCount(count));
+
+    return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('reconnect_attempt', onReconnecting);
+      socket.off('presenter-takeover-attempt', onTakeover);
+      if (unsubQueue) unsubQueue();
+    };
+  }, [isOnline]);
 
   const endLive = () => {
     emitWithSession('clear-screen');
@@ -1532,6 +1672,50 @@ const MobilePresenter = () => {
 
   return (
     <>
+    {/* ── Online session bar ── */}
+    {isOnline && !sessionJoined && (
+      <div className="online-session-bar">
+        <div className="online-session-bar-inner">
+          <span className={`online-conn-dot online-conn-dot--${connectionState}`} />
+          <input
+            type="text"
+            className="online-session-input"
+            placeholder="Session code"
+            value={sessionInput}
+            onChange={e => setSessionInput(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && joinSession()}
+            maxLength={24}
+          />
+          <button className="online-session-join-btn" onClick={() => joinSession()} disabled={!sessionInput.trim()}>Join</button>
+          <button className="online-session-back-btn" onClick={switchMode} title="Back to mode selection">⚙</button>
+        </div>
+        {sessionMessage && <p className="online-session-msg">{sessionMessage}</p>}
+      </div>
+    )}
+
+    {/* ── PIN entry modal ── */}
+    {pinEntryOpen && (
+      <div className="pin-modal-backdrop" onClick={() => setPinEntryOpen(false)}>
+        <div className="pin-modal" onClick={e => e.stopPropagation()}>
+          <h3 className="pin-modal-title">🔒 Session PIN Required</h3>
+          <input
+            type="number"
+            className="pin-modal-input"
+            placeholder="Enter PIN"
+            value={pinInput}
+            onChange={e => setPinInput(e.target.value.slice(0, 8))}
+            onKeyDown={e => e.key === 'Enter' && joinSession(pendingPinSession, pinInput)}
+            autoFocus
+          />
+          {pinError && <p className="pin-modal-error">{pinError}</p>}
+          <div className="pin-modal-actions">
+            <button onClick={() => setPinEntryOpen(false)}>Cancel</button>
+            <button className="pin-modal-submit" onClick={() => joinSession(pendingPinSession, pinInput)} disabled={pinInput.length < 4}>Unlock</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* ════════════════════════════════════════
@@ -1543,6 +1727,11 @@ const MobilePresenter = () => {
         <div className="hdr-brand">
           <EmblemSVG size={24} />
           <span className="hdr-title">Scripture</span>
+          {isOnline && sessionJoined && (
+            <span className="hdr-session-badge" title={`Session: ${sessionId}\nServer: ${serverUrl}`}>
+              🌐 {sessionId}
+            </span>
+          )}
         </div>
 
         {/* Live verse summary */}
@@ -1836,6 +2025,28 @@ const MobilePresenter = () => {
                   </button>
                 </div>
               </div>
+
+              {/* Online session controls */}
+              {isOnline && (
+                <>
+                  <div className="mobile-menu-divider" />
+                  <div className="mobile-menu-section">
+                    <div className="mobile-menu-label">🌐 Online Session</div>
+                    <div className="mobile-menu-row">
+                      {sessionJoined ? (
+                        <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }}>
+                          Leave Session
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: '0.8rem', color: '#888' }}>Not connected to a session</span>
+                      )}
+                      <button className="theme-btn" onClick={() => { switchMode(); setMobileMenuOpen(false); }}>
+                        Switch Mode
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1844,10 +2055,13 @@ const MobilePresenter = () => {
       {connectionState !== 'connected' && (
         <div className={`mobile-conn-banner mobile-conn-banner--${connectionState}`} role="status" aria-live="polite">
           <span>
-            {connectionState === 'connecting' ? 'Connecting offline services...' : 'Offline services disconnected.'}
-            {pendingGoLive ? ' Go Live is queued.' : ''}
+            {isOnline
+              ? (connectionState === 'connecting' ? 'Connecting to server…' : 'Server connection lost — reconnecting…')
+              : (connectionState === 'connecting' ? 'Connecting offline services…' : 'Offline services disconnected.')}
+            {queuedCount > 0 && ` ${queuedCount} action${queuedCount > 1 ? 's' : ''} queued.`}
+            {!isOnline && pendingGoLive ? ' Go Live is queued.' : ''}
           </span>
-          {connectionState !== 'connecting' && (
+          {connectionState !== 'connecting' && !isOnline && (
             <button className="mobile-conn-banner-btn" onClick={retryConnection}>Retry</button>
           )}
         </div>

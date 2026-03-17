@@ -1439,6 +1439,21 @@ button,
 .hdr-conn-dot--disconnected,
 .hdr-conn-dot--error        { background: #e74c3c; box-shadow: 0 0 0 2px rgba(231,76,60,0.2); }
 
+.hdr-queue-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.65rem;
+  background: rgba(243,156,18,0.15);
+  border: 1px solid rgba(243,156,18,0.4);
+  color: #f39c12;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin-right: 0.4rem;
+  white-space: nowrap;
+  animation: pulse-queue 1.5s infinite;
+}
+@keyframes pulse-queue { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
 /* ══════════════════════════════════════════════════════════════
    PREVIEW CARD — End Live button, Clear Highlight, Session Status
    ══════════════════════════════════════════════════════════════ */
@@ -6242,6 +6257,11 @@ button, [role="button"] {
   color: #8b3a1a;
 }
 .presenter-container--light .ctx-chapter-indicator { color: #8b3a1a; }
+.presenter-container--light .hdr-queue-badge {
+  background: rgba(200, 120, 0, 0.1);
+  border-color: rgba(200, 120, 0, 0.35);
+  color: #b57a00;
+}
 
 /* Mobile: larger touch targets for chapter arrows */
 @media (max-width: 600px) {
