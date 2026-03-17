@@ -48,7 +48,18 @@ if (isDev) {
   process.env.FRONTEND_DIST_DIR  = path.resolve(__dirname, '../frontend/dist');
   process.env.USER_DATA_DIR      = path.resolve(__dirname, '../resources/db');
 } else {
-  process.env.DB_DIR             = path.join(process.resourcesPath, 'db');
+  // AppImage / packaged builds: extraResources live on a read-only squashfs.
+  // SQLite needs journal/WAL access, so copy DBs to writable userData on first run.
+  const srcDbDir  = path.join(process.resourcesPath, 'db');
+  const destDbDir = path.join(app.getPath('userData'), 'db');
+  if (!fs.existsSync(destDbDir)) fs.mkdirSync(destDbDir, { recursive: true });
+  for (const file of fs.readdirSync(srcDbDir)) {
+    const dest = path.join(destDbDir, file);
+    if (!fs.existsSync(dest)) {
+      fs.copyFileSync(path.join(srcDbDir, file), dest);
+    }
+  }
+  process.env.DB_DIR             = destDbDir;
   process.env.FRONTEND_DIST_DIR  = path.join(process.resourcesPath, 'frontend-dist');
   process.env.USER_DATA_DIR      = app.getPath('userData');
 }
