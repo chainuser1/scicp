@@ -1454,6 +1454,18 @@ button,
 }
 @keyframes pulse-queue { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 
+.hdr-session-badge {
+  font-size: 0.65rem;
+  background: rgba(100,180,255,0.12);
+  border: 1px solid rgba(100,180,255,0.3);
+  color: #8cc5ff;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 6px;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
 /* ══════════════════════════════════════════════════════════════
    PREVIEW CARD — End Live button, Clear Highlight, Session Status
    ══════════════════════════════════════════════════════════════ */
@@ -6261,6 +6273,11 @@ button, [role="button"] {
   background: rgba(200, 120, 0, 0.1);
   border-color: rgba(200, 120, 0, 0.35);
   color: #b57a00;
+}
+.presenter-container--light .hdr-session-badge {
+  background: rgba(30,100,200,0.1);
+  border-color: rgba(30,100,200,0.3);
+  color: #1a6bc4;
 }
 
 /* Mobile: larger touch targets for chapter arrows */
