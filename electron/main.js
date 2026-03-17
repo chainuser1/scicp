@@ -345,6 +345,34 @@ ipcMain.handle('get-displays', () => {
   }));
 });
 
+// ─── IPC: hot mode-switch (offline ↔ online) without losing presenter state ──
+ipcMain.handle('switch-connection-mode', async (_e, newMode) => {
+  // newMode: { mode: 'offline' } or { mode: 'online', serverUrl: '...' }
+  if (!presenterWin || presenterWin.isDestroyed()) return { error: 'no-presenter' };
+
+  const isNowOnline = newMode?.mode === 'online';
+  selectedMode = newMode;
+
+  // Reload the presenter URL — the page saves state to sessionStorage before calling this
+  if (isNowOnline) {
+    const serverUrl = encodeURIComponent(newMode.serverUrl || '');
+    presenterWin.loadURL(`http://127.0.0.1:3000/presenter?mode=online&server=${serverUrl}&restored=1`);
+  } else {
+    presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL&restored=1');
+  }
+
+  // Open or close the client projection window as appropriate
+  if (!isNowOnline && !clientWin) {
+    const chosen = await resolveClientDisplay();
+    openClientWindow(chosen);
+  } else if (isNowOnline && clientWin) {
+    clientWin.destroy();
+    clientWin = null;
+  }
+
+  return { ok: true, mode: newMode.mode };
+});
+
 // ─── Auto-updater (only in packaged builds) ─────────────────────────────────
 function setupAutoUpdater() {
   if (isDev || !autoUpdater) return;

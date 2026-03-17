@@ -1,6 +1,6 @@
 {
   "name": "scicp-electron",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "Electron desktop app \u2014 self-contained native deps",
   "main": "main.js",

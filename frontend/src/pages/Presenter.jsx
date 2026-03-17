@@ -548,8 +548,9 @@ const Presenter = () => {
   const [summaryTopicResults, setSummaryTopicResults] = useState(null);
   const summaryTopicResultsRef = useRef(null);
   const [summaryTopicPage, setSummaryTopicPage] = useState(0);
+  const [scholarExpanded, setScholarExpanded] = useState({ nabre: false, net: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
-  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false });
   const [verseSummary,    setVerseSummary]    = useState({ summary: null, cross_references: [], ready: false });
   const [bookChapters,   setBookChapters]   = useState([]);
   const [ctxChapterIdx,  setCtxChapterIdx]  = useState(0);
@@ -635,6 +636,25 @@ const Presenter = () => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
   }, [secondaryLanguage]);
 
+  // Restore state after Electron mode-switch reload
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('restored') !== '1') return;
+      const raw = sessionStorage.getItem('scicp.mode_switch_state');
+      if (!raw) return;
+      sessionStorage.removeItem('scicp.mode_switch_state');
+      const s = JSON.parse(raw);
+      if (s.liveVerse)     setLiveVerse(s.liveVerse);
+      if (s.staged)        setStaged(s.staged);
+      if (s.currentTheme)  setCurrentTheme(s.currentTheme);
+      if (s.currentLanguage) setCurrentLanguage(s.currentLanguage);
+      if (s.secondaryLanguage) setSecondaryLanguage(s.secondaryLanguage);
+      if (Array.isArray(s.history) && s.history.length) setHistory(s.history);
+      if (Array.isArray(s.setlist) && s.setlist.length) setSetlist(s.setlist);
+    } catch { /* ignore parse errors */ }
+  }, []);
+
   // Watch OS theme changes at runtime and sync if user hasn't customized the theme
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: light)');
@@ -673,9 +693,10 @@ const Presenter = () => {
   // Reset chapter-level modal data only when the CHAPTER changes (not on every verse)
   useEffect(() => {
     setChapterEntities({ people: [], places: [], ready: false });
-    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false });
     setVerseSummary({ summary: null, cross_references: [], ready: false });
     setChapterVerses([]);
+    setScholarExpanded({ nabre: false, net: false });
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
     // Eagerly fetch chapter entities for the preview card
     if (liveVerse?.chapter_id) {
@@ -2400,6 +2421,28 @@ const Presenter = () => {
                       Change display
                     </button>
                   )}
+                  {isElectronApp && window.electronAPI?.switchConnectionMode && (
+                    <button className="theme-btn" onClick={async () => {
+                      setMobileMenuOpen(false);
+                      // Save state to sessionStorage before reload
+                      try {
+                        sessionStorage.setItem('scicp.mode_switch_state', JSON.stringify({
+                          liveVerse, staged, currentTheme, currentLanguage, secondaryLanguage,
+                          history: history.slice(0, 20),
+                          setlist: setlist.slice(0, 50),
+                        }));
+                      } catch { /* ignore */ }
+                      // Switch to the opposite mode
+                      if (isRemoteMode) {
+                        await window.electronAPI.switchConnectionMode({ mode: 'offline' });
+                      } else {
+                        const url = prompt('Enter remote server URL:', 'https://cap-teyyko.live');
+                        if (url) await window.electronAPI.switchConnectionMode({ mode: 'online', serverUrl: url });
+                      }
+                    }}>
+                      {isRemoteMode ? '📱 Switch to Offline' : '🌐 Switch to Online'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -3481,6 +3524,42 @@ const Presenter = () => {
                                 </li>
                               ))}
                             </ul>
+                          </div>
+                        )}
+                        {/* Scholar Context — NABRE (historical) + NET (linguistic) footnotes */}
+                        {(chapterSummary.nabre_footnotes || chapterSummary.net_footnotes) && (
+                          <div className="ctx-scholar-context">
+                            <span className="ctx-entity-label">🎓 Scholar Context</span>
+                            {chapterSummary.nabre_footnotes && (() => {
+                              const paras = chapterSummary.nabre_footnotes.split('\n').filter(p => p.trim().length > 30);
+                              const visible = scholarExpanded.nabre ? paras : paras.slice(0, 3);
+                              return (
+                                <div className="ctx-scholar-source">
+                                  <span className="ctx-scholar-source-label">Some scholars note… <em>(Historical &amp; Contextual — NABRE)</em></span>
+                                  {visible.map((p, i) => <p key={i} className="ctx-scholar-note">{p.trim()}</p>)}
+                                  {paras.length > 3 && (
+                                    <button className="ctx-scholar-toggle" onClick={() => setScholarExpanded(s => ({ ...s, nabre: !s.nabre }))}>
+                                      {scholarExpanded.nabre ? '▲ Show less' : `▼ Show ${paras.length - 3} more notes`}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                            {chapterSummary.net_footnotes && (() => {
+                              const paras = chapterSummary.net_footnotes.split('\n').filter(p => p.trim().length > 30);
+                              const visible = scholarExpanded.net ? paras : paras.slice(0, 3);
+                              return (
+                                <div className="ctx-scholar-source">
+                                  <span className="ctx-scholar-source-label">Other scholars observe… <em>(Linguistic &amp; Translation — NET Bible)</em></span>
+                                  {visible.map((p, i) => <p key={i} className="ctx-scholar-note">{p.trim()}</p>)}
+                                  {paras.length > 3 && (
+                                    <button className="ctx-scholar-toggle" onClick={() => setScholarExpanded(s => ({ ...s, net: !s.net }))}>
+                                      {scholarExpanded.net ? '▲ Show less' : `▼ Show ${paras.length - 3} more notes`}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                         {/* Sermon topic search results from chip click — appears below summary + key verses */}
