@@ -546,6 +546,7 @@ const Presenter = () => {
   const topicResultsRef = useRef(null);
   const [summaryTopicResults, setSummaryTopicResults] = useState(null);
   const summaryTopicResultsRef = useRef(null);
+  const [summaryTopicPage, setSummaryTopicPage] = useState(0);
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
   const [verseSummary,    setVerseSummary]    = useState({ summary: null, cross_references: [], ready: false });
@@ -560,7 +561,6 @@ const Presenter = () => {
   const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
-  const topicSentinelRef   = useRef(null);
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8; // server page size
   const [verseOfDay, setVerseOfDay]         = useState(null);
@@ -1312,6 +1312,7 @@ const Presenter = () => {
             const sData = await sRes.json();
             if ((sData.results || []).length > 0) {
               setSummaryTopicResults({ label: topicLabel, results: sData.results });
+              setSummaryTopicPage(0);
               setContextTab('summary');
               setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
               return;
@@ -1380,6 +1381,26 @@ const Presenter = () => {
     } catch {
       setEntitySearch(s => ({ ...s, loading: false }));
     }
+  };
+
+  const loadTopicPage = (page) => {
+    const tr = topicResults;
+    if (!tr) return;
+    setTopicResults(s => ({ ...s, loading: true }));
+    fetch(`${API_URL}/topic-search?q=${encodeURIComponent(tr.topic)}&language=${currentLanguage}&page=${page}&pageSize=${tr.pageSize}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) return;
+        const results = d.results || [];
+        const vMap = new Map();
+        for (const r of results) {
+          const vid = r.volume_id || 0;
+          if (!vMap.has(vid)) vMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] });
+          vMap.get(vid).results.push(r);
+        }
+        setTopicResults(s => ({ ...s, loading: false, results, total: d.total || 0, page, groups: [...vMap.values()] }));
+      })
+      .catch(() => setTopicResults(s => ({ ...s, loading: false })));
   };
 
   const ctxTopicBack = () => {
@@ -1509,61 +1530,6 @@ const Presenter = () => {
       if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = ctxTabScrollPos.current[toTab] || 0;
     });
   };
-
-  // Infinite-scroll sentinels — auto-load when sentinel enters viewport
-  const infiniteLoadingRef = useRef(false);
-  // Keep mutable refs so the single IntersectionObserver callback reads fresh values
-  const relatedBatchPageVal  = useRef(relatedBatchPage);
-  const relatedTotalVal      = useRef(relatedTotal);
-  const contextLoadingVal    = useRef(contextLoading);
-  const entitySearchVal      = useRef(entitySearch);
-  const topicResultsVal      = useRef(topicResults);
-  useEffect(() => { relatedBatchPageVal.current = relatedBatchPage; }, [relatedBatchPage]);
-  useEffect(() => { relatedTotalVal.current     = relatedTotal; },     [relatedTotal]);
-  useEffect(() => { contextLoadingVal.current   = contextLoading; },   [contextLoading]);
-  useEffect(() => { entitySearchVal.current     = entitySearch; },     [entitySearch]);
-  useEffect(() => { topicResultsVal.current     = topicResults; },     [topicResults]);
-
-  const [, setCtxBatchLoading] = useState(false);
-
-  useEffect(() => {
-    const root = ctxBodyRef.current;
-    if (!root) return;
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
-        const id = entry.target.dataset.sentinel;
-        if (id === 'topic') {
-          const tr = topicResultsVal.current;
-          if (tr && !tr.loading && tr.total > (tr.page + 1) * tr.pageSize) {
-            const nextPage = tr.page + 1;
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            setTopicResults(s => ({ ...s, loading: true }));
-            fetch(`${API_URL}/topic-search?q=${encodeURIComponent(tr.topic)}&language=${currentLanguage}&page=${nextPage}&pageSize=${tr.pageSize}`)
-              .then(r => r.ok ? r.json() : null)
-              .then(d => {
-                if (!d) return;
-                setTopicResults(s => {
-                  const merged = [...s.results, ...(d.results || [])];
-                  const vMap = new Map();
-                  for (const r of merged) { const vid = r.volume_id || 0; if (!vMap.has(vid)) vMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] }); vMap.get(vid).results.push(r); }
-                  return { ...s, loading: false, results: merged, groups: [...vMap.values()], page: nextPage };
-                });
-              })
-              .catch(() => setTopicResults(s => ({ ...s, loading: false })))
-              .finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
-          }
-        }
-      }
-    }, { root, threshold: 0.1 });
-
-    [topicSentinelRef].forEach(ref => {
-      if (ref.current) observer.observe(ref.current);
-    });
-    return () => observer.disconnect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextOpen, contextTab]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -3458,6 +3424,7 @@ const Presenter = () => {
                                     if (res.ok) {
                                       const d = await res.json();
                                       setSummaryTopicResults({ label: t.label, results: d.results || [] });
+                                      setSummaryTopicPage(0);
                                       setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
                                     }
                                   } catch { /* ignore */ }
@@ -3500,34 +3467,50 @@ const Presenter = () => {
                           <div className="ctx-topic-results" ref={summaryTopicResultsRef}>
                             <span className="ctx-entity-label">📚 Chapters about "{summaryTopicResults.label}"</span>
                             {summaryTopicResults.results.length === 0 && <p className="ctx-empty">No matching chapters found.</p>}
-                            <ul className="ctx-items-list">
-                              {summaryTopicResults.results.map(r => (
-                                <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={async () => {
-                                  setContextLoading(true);
-                                  try {
-                                    const [versesRes, summaryRes, entitiesRes] = await Promise.all([
-                                      fetch(`${API_URL}/browse/verses?chapter_id=${r.chapter_id}&language=${currentLanguage}`),
-                                      fetch(`${API_URL}/chapter/${r.chapter_id}/summary`),
-                                      fetch(`${API_URL}/chapter/${r.chapter_id}/entities`),
-                                    ]);
-                                    if (versesRes.ok) { const d = await versesRes.json(); setChapterVerses(Array.isArray(d) ? d : (d.verses ?? [])); }
-                                    if (summaryRes.ok) setChapterSummary(await summaryRes.json());
-                                    if (entitiesRes.ok) setChapterEntities(await entitiesRes.json());
-                                    setSummaryTopicResults(null);
-                                    setContextTab('chapter');
-                                    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
-                                  } catch { /* ignore */ } finally { setContextLoading(false); }
-                                }}>
-                                  <span className="ctx-item-ref">{r.book_title} {r.chapter_num}</span>
-                                  <span className="ctx-item-text">{(r.summary_text || '').slice(0, 120)}…</span>
-                                  {r.top_topics?.length > 0 && (
-                                    <div className="ctx-tag-row ctx-tag-row--inline">
-                                      {r.top_topics.map(tp => <span key={tp.label} className="ctx-doctrine-chip ctx-doctrine-chip--small">{tp.label}</span>)}
+                            {(() => {
+                              const STP_SIZE = 8;
+                              const totalPages = Math.ceil(summaryTopicResults.results.length / STP_SIZE);
+                              const pageResults = summaryTopicResults.results.slice(summaryTopicPage * STP_SIZE, (summaryTopicPage + 1) * STP_SIZE);
+                              return (
+                                <>
+                                  {totalPages > 1 && (
+                                    <div className="ctx-paginator">
+                                      <button disabled={summaryTopicPage <= 0} onClick={() => setSummaryTopicPage(p => p - 1)}>◀</button>
+                                      <span>Page {summaryTopicPage + 1} of {totalPages}</span>
+                                      <button disabled={summaryTopicPage >= totalPages - 1} onClick={() => setSummaryTopicPage(p => p + 1)}>▶</button>
                                     </div>
                                   )}
-                                </li>
-                              ))}
-                            </ul>
+                                  <ul className="ctx-items-list">
+                                    {pageResults.map(r => (
+                                      <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={async () => {
+                                        setContextLoading(true);
+                                        try {
+                                          const [versesRes, summaryRes, entitiesRes] = await Promise.all([
+                                            fetch(`${API_URL}/browse/verses?chapter_id=${r.chapter_id}&language=${currentLanguage}`),
+                                            fetch(`${API_URL}/chapter/${r.chapter_id}/summary`),
+                                            fetch(`${API_URL}/chapter/${r.chapter_id}/entities`),
+                                          ]);
+                                          if (versesRes.ok) { const d = await versesRes.json(); setChapterVerses(Array.isArray(d) ? d : (d.verses ?? [])); }
+                                          if (summaryRes.ok) setChapterSummary(await summaryRes.json());
+                                          if (entitiesRes.ok) setChapterEntities(await entitiesRes.json());
+                                          setSummaryTopicResults(null);
+                                          setContextTab('chapter');
+                                          if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+                                        } catch { /* ignore */ } finally { setContextLoading(false); }
+                                      }}>
+                                        <span className="ctx-item-ref">{r.book_title} {r.chapter_num}</span>
+                                        <span className="ctx-item-text">{(r.summary_text || '').slice(0, 120)}…</span>
+                                        {r.top_topics?.length > 0 && (
+                                          <div className="ctx-tag-row ctx-tag-row--inline">
+                                            {r.top_topics.map(tp => <span key={tp.label} className="ctx-doctrine-chip ctx-doctrine-chip--small">{tp.label}</span>)}
+                                          </div>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </>
+                              );
+                            })()}
                           </div>
                         )}
                       </>
@@ -3589,6 +3572,16 @@ const Presenter = () => {
                         </div>
                         {topicResults.loading && <p className="ctx-empty">Searching…</p>}
                         {!topicResults.loading && topicResults.results.length === 0 && <p className="ctx-empty">No verses found for this topic.</p>}
+                        {!topicResults.loading && (() => {
+                          const _topicTotalPages = topicResults.total > 0 ? Math.ceil(topicResults.total / topicResults.pageSize) : 1;
+                          return _topicTotalPages > 1 ? (
+                            <div className="ctx-paginator">
+                              <button disabled={topicResults.page <= 0} onClick={() => loadTopicPage(topicResults.page - 1)}>◀</button>
+                              <span>Page {topicResults.page + 1} of {_topicTotalPages}</span>
+                              <button disabled={topicResults.page >= _topicTotalPages - 1} onClick={() => loadTopicPage(topicResults.page + 1)}>▶</button>
+                            </div>
+                          ) : null;
+                        })()}
                         {!topicResults.loading && (topicResults.groups || []).map(g => (
                           <div key={g.volume_id} className="ctx-entity-volume-group">
                             <span className="ctx-entity-volume-label">{g.volume_title}</span>
@@ -3605,8 +3598,6 @@ const Presenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {topicResults.loading && <p className="ctx-loading-more">Loading more…</p>}
-                        <div ref={topicSentinelRef} data-sentinel="topic" style={{ height: 1 }} />
                       </div>
                     )}
                   </div>

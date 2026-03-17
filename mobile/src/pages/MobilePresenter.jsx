@@ -459,6 +459,7 @@ const MobilePresenter = () => {
   const topicResultsRef = useRef(null);
   const [summaryTopicResults, setSummaryTopicResults] = useState(null);
   const summaryTopicResultsRef = useRef(null);
+  const [summaryTopicPage, setSummaryTopicPage] = useState(0);
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
@@ -476,7 +477,6 @@ const MobilePresenter = () => {
   const ctxLastScrolledVerse = useRef(null); // last verse_id we auto-scrolled to
   const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
-  const topicSentinelRef   = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8;
@@ -1037,6 +1037,7 @@ const MobilePresenter = () => {
           const sermonResults = svc.searchSermonTopics(topicLabel, 20);
           if (sermonResults && sermonResults.length > 0) {
             setSummaryTopicResults({ label: topicLabel, results: sermonResults });
+            setSummaryTopicPage(0);
             setContextTab('summary');
             setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
             return;
@@ -1106,6 +1107,16 @@ const MobilePresenter = () => {
       const groups = groupByVolume(results);
       setEntitySearch(s => ({ ...s, results, groups, page }));
     }
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+  };
+
+  const loadTopicPage = (page) => {
+    const tr = topicResults;
+    if (!tr) return;
+    const res = svcSearch(tr.topic, page, tr.pageSize, currentLanguage);
+    const results = res.results || [];
+    const groups = groupByVolume(results);
+    setTopicResults(s => ({ ...s, results, total: res.total || 0, page, groups }));
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
@@ -1203,48 +1214,6 @@ const MobilePresenter = () => {
       if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = ctxTabScrollPos.current[toTab] || 0;
     });
   };
-
-  // Infinite-scroll sentinels
-  const infiniteLoadingRef = useRef(false);
-  const relatedBatchPageVal  = useRef(relatedBatchPage);
-  const relatedTotalVal      = useRef(relatedTotal);
-  const entitySearchVal      = useRef(entitySearch);
-  const topicResultsVal      = useRef(topicResults);
-  useEffect(() => { relatedBatchPageVal.current = relatedBatchPage; }, [relatedBatchPage]);
-  useEffect(() => { relatedTotalVal.current     = relatedTotal; },     [relatedTotal]);
-  useEffect(() => { entitySearchVal.current     = entitySearch; },     [entitySearch]);
-  useEffect(() => { topicResultsVal.current     = topicResults; },     [topicResults]);
-
-  const [ctxBatchLoading, setCtxBatchLoading] = useState(false);
-
-  useEffect(() => {
-    const root = ctxBodyRef.current;
-    if (!root) return;
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
-        const id = entry.target.dataset.sentinel;
-        if (id === 'topic') {
-          const tr = topicResultsVal.current;
-          if (tr && tr.total > (tr.page + 1) * tr.pageSize) {
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            const nextPage = tr.page + 1;
-            const res = svcSearch(tr.topic, nextPage, tr.pageSize, currentLanguage);
-            const merged = [...tr.results, ...(res.results || [])];
-            setTopicResults(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
-            infiniteLoadingRef.current = false;
-            setCtxBatchLoading(false);
-          }
-        }
-      }
-    }, { root, threshold: 0.1 });
-    [topicSentinelRef].forEach(ref => {
-      if (ref.current) observer.observe(ref.current);
-    });
-    return () => observer.disconnect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextOpen, contextTab]);
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
@@ -2837,6 +2806,7 @@ const MobilePresenter = () => {
                                   try {
                                     const results = svc.searchSermonTopics(t.label, 20);
                                     setSummaryTopicResults({ label: t.label, results: results || [] });
+                                    setSummaryTopicPage(0);
                                     setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
                                   } catch { /* ignore */ }
                                 }}>
@@ -2875,32 +2845,48 @@ const MobilePresenter = () => {
                           <div className="ctx-topic-results" ref={summaryTopicResultsRef}>
                             <span className="ctx-entity-label">📚 Chapters about "{summaryTopicResults.label}"</span>
                             {summaryTopicResults.results.length === 0 && <p className="ctx-empty">No matching chapters found.</p>}
-                            <ul className="ctx-items-list">
-                              {summaryTopicResults.results.map(r => (
-                                <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={() => {
-                                  setContextLoading(true);
-                                  try {
-                                    const verses = svc.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
-                                    setChapterVerses(Array.isArray(verses) ? verses : []);
-                                    const summary = svc.getChapterSummary(r.chapter_id);
-                                    setChapterSummary(summary);
-                                    const entities = svc.getChapterEntities(r.chapter_id);
-                                    setChapterEntities(entities);
-                                    setSummaryTopicResults(null);
-                                    setContextTab('chapter');
-                                    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
-                                  } catch { /* ignore */ } finally { setContextLoading(false); }
-                                }}>
-                                  <span className="ctx-item-ref">{r.book_title} {r.chapter_num}</span>
-                                  <span className="ctx-item-text">{(r.summary_text || '').slice(0, 120)}…</span>
-                                  {r.top_topics?.length > 0 && (
-                                    <div className="ctx-tag-row ctx-tag-row--inline">
-                                      {r.top_topics.map(tp => <span key={tp.label} className="ctx-doctrine-chip ctx-doctrine-chip--small">{tp.label}</span>)}
+                            {(() => {
+                              const STP_SIZE = 8;
+                              const totalPages = Math.ceil(summaryTopicResults.results.length / STP_SIZE);
+                              const pageResults = summaryTopicResults.results.slice(summaryTopicPage * STP_SIZE, (summaryTopicPage + 1) * STP_SIZE);
+                              return (
+                                <>
+                                  {totalPages > 1 && (
+                                    <div className="ctx-paginator">
+                                      <button disabled={summaryTopicPage <= 0} onClick={() => setSummaryTopicPage(p => p - 1)}>◀</button>
+                                      <span>Page {summaryTopicPage + 1} of {totalPages}</span>
+                                      <button disabled={summaryTopicPage >= totalPages - 1} onClick={() => setSummaryTopicPage(p => p + 1)}>▶</button>
                                     </div>
                                   )}
-                                </li>
-                              ))}
-                            </ul>
+                                  <ul className="ctx-items-list">
+                                    {pageResults.map(r => (
+                                      <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={() => {
+                                        setContextLoading(true);
+                                        try {
+                                          const verses = svc.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
+                                          setChapterVerses(Array.isArray(verses) ? verses : []);
+                                          const summary = svc.getChapterSummary(r.chapter_id);
+                                          setChapterSummary(summary);
+                                          const entities = svc.getChapterEntities(r.chapter_id);
+                                          setChapterEntities(entities);
+                                          setSummaryTopicResults(null);
+                                          setContextTab('chapter');
+                                          if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
+                                        } catch { /* ignore */ } finally { setContextLoading(false); }
+                                      }}>
+                                        <span className="ctx-item-ref">{r.book_title} {r.chapter_num}</span>
+                                        <span className="ctx-item-text">{(r.summary_text || '').slice(0, 120)}…</span>
+                                        {r.top_topics?.length > 0 && (
+                                          <div className="ctx-tag-row ctx-tag-row--inline">
+                                            {r.top_topics.map(tp => <span key={tp.label} className="ctx-doctrine-chip ctx-doctrine-chip--small">{tp.label}</span>)}
+                                          </div>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </>
+                              );
+                            })()}
                           </div>
                         )}
                       </>
@@ -2950,6 +2936,16 @@ const MobilePresenter = () => {
                           <button className="ctx-close-mini" onClick={() => setTopicResults(null)}>✕</button>
                         </div>
                         {topicResults.results.length === 0 && <p className="ctx-empty">No verses found for this topic.</p>}
+                        {(() => {
+                          const _topicTotalPages = topicResults.total > 0 ? Math.ceil(topicResults.total / topicResults.pageSize) : 1;
+                          return _topicTotalPages > 1 ? (
+                            <div className="ctx-paginator">
+                              <button disabled={topicResults.page <= 0} onClick={() => loadTopicPage(topicResults.page - 1)}>◀</button>
+                              <span>Page {topicResults.page + 1} of {_topicTotalPages}</span>
+                              <button disabled={topicResults.page >= _topicTotalPages - 1} onClick={() => loadTopicPage(topicResults.page + 1)}>▶</button>
+                            </div>
+                          ) : null;
+                        })()}
                         {(topicResults.groups || []).map(g => (
                           <div key={g.volume_id} className="ctx-entity-volume-group">
                             <span className="ctx-entity-volume-label">{g.volume_title}</span>
@@ -2966,8 +2962,6 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
-                        <div ref={topicSentinelRef} data-sentinel="topic" style={{ height: 1 }} />
                       </div>
                     )}
                   </div>

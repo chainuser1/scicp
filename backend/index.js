@@ -11,9 +11,7 @@ const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
 // Inside Electron the DBs live in the read-only extraResources — open them
 // as readonly so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
-const DB_OPTS = IS_ELECTRON_PKG
-  ? { fileMustExist: true, readonly: true }
-  : { fileMustExist: true };
+const DB_OPTS = { fileMustExist: true };
 // In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
 const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
