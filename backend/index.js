@@ -2032,6 +2032,14 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           return { error: 'presenter-locked-out' };
         }
 
+        // PIN gate — runs BEFORE token assignment so a failed/incomplete PIN
+        // attempt doesn't pollute the presenter slot with a half-assigned token.
+        if (state.pinHash) {
+          const provided = String(pin || '').trim();
+          if (!provided) return { requiresPin: true };
+          if (hashPin(provided) !== state.pinHash) return { pinIncorrect: true };
+        }
+
         // The token matches — this is the original device/tab returning after
         // a network blip or page refresh.  Clear the disconnect timer now that
         // they're back, then fall through to the grant section.
@@ -2059,13 +2067,6 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             // not open the slot — the preacher's place is always held for them.
             return { error: 'presenter-session-in-progress' };
           }
-        }
-
-        // PIN gate (runs after token checks so locked-out is caught first)
-        if (state.pinHash) {
-          const provided = String(pin || '').trim();
-          if (!provided) return { requiresPin: true };
-          if (hashPin(provided) !== state.pinHash) return { pinIncorrect: true };
         }
       }
       if (activeSessionId && activeSessionId !== normalized) {
