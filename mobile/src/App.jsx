@@ -17,6 +17,8 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || 'https://cap-teyyko.live');
   const [scannerOpen, setScannerOpen] = useState(false);
+  // Hot mode-switch: shows an overlay *over* MobilePresenter without unmounting it
+  const [modeSwitchOpen, setModeSwitchOpen] = useState(false);
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
   const rafRef     = useRef(null);
@@ -43,10 +45,20 @@ export default function App() {
   }, []);
 
   const startScanner = useCallback(() => {
-    setScannerOpen(true);
-    scanActiveRef.current = true;
-
     (async () => {
+      // Check camera permission state before opening the scanner overlay
+      if (navigator.permissions) {
+        try {
+          const status = await navigator.permissions.query({ name: 'camera' });
+          if (status.state === 'denied') {
+            setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+            return;
+          }
+        } catch { /* browser may not support querying camera permission — proceed anyway */ }
+      }
+
+      setScannerOpen(true);
+      scanActiveRef.current = true;
       let jsQR;
       try {
         const mod = await import('jsqr');
@@ -62,9 +74,16 @@ export default function App() {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-      } catch {
-        setError('Camera access denied');
+      } catch (err) {
         setScannerOpen(false);
+        scanActiveRef.current = false;
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setError('Camera access was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          setError('No camera found on this device.');
+        } else {
+          setError('Could not start camera: ' + (err.message || err.name));
+        }
         return;
       }
 
@@ -92,7 +111,7 @@ export default function App() {
                 const origin = url.origin;
                 stopCamera();
                 setScannerOpen(false);
-                connectOnline(origin, session.toUpperCase());
+                switchToOnline(origin, session.toUpperCase());
                 return;
               }
             } catch {
@@ -101,7 +120,7 @@ export default function App() {
               if (bare.length >= 4 && serverUrl) {
                 stopCamera();
                 setScannerOpen(false);
-                connectOnline(serverUrl, bare);
+                switchToOnline(serverUrl, bare);
                 return;
               }
             }
@@ -111,13 +130,36 @@ export default function App() {
       };
       rafRef.current = requestAnimationFrame(tick);
     })();
-  }, [serverUrl, stopCamera]);
+  }, [serverUrl, stopCamera, switchToOnline]);
 
-  // ── Online connect ──
-  const connectOnline = useCallback(async (url, sessionCode) => {
+  // ── Switch mode (hot — keeps MobilePresenter mounted) ──
+  const requestModeSwitch = useCallback(() => {
+    setModeSwitchOpen(true);
+    setError(null);
+  }, []);
+
+  const switchToOffline = useCallback(async () => {
+    setModeSwitchOpen(false);
+    setConnecting(true);
+    try {
+      // Ensure local DBs are initialised (no-op if already done)
+      await localSocket.init();
+      remoteSocket.destroy();
+      localStorage.setItem(MODE_KEY, 'offline');
+      setMode('offline');
+      setReady(true);
+    } catch (err) {
+      setError('Failed to load local databases: ' + (err.message || err));
+    } finally {
+      setConnecting(false);
+    }
+  }, []);
+
+  const switchToOnline = useCallback(async (url, sessionCode) => {
+    setModeSwitchOpen(false);
     setConnecting(true);
     setError(null);
-    const cleanUrl = url.replace(/\/+$/, '');
+    const cleanUrl = (url || serverUrl).replace(/\/+$/, '');
     try {
       await remoteSocket.init(cleanUrl);
       localStorage.setItem(MODE_KEY, 'online');
@@ -125,43 +167,185 @@ export default function App() {
       setServerUrl(cleanUrl);
       setMode('online');
       setReady(true);
-      // Store session code for MobilePresenter to auto-join
       if (sessionCode) sessionStorage.setItem('scicp.pending_session', sessionCode);
     } catch (err) {
       setError(`Failed to connect to ${cleanUrl}: ${err.message}`);
     } finally {
       setConnecting(false);
     }
-  }, []);
-
-  // ── Switch back to mode selection ──
-  const switchMode = useCallback(() => {
-    remoteSocket.destroy();
-    setReady(false);
-    setMode(null);
-    setError(null);
-    localStorage.removeItem(MODE_KEY);
-  }, []);
+  }, [serverUrl]);
 
   // Context value
   const ctxValue = React.useMemo(() => ({
     socket: mode === 'online' ? remoteSocket : localSocket,
     mode: mode || 'offline',
     serverUrl,
-    switchMode,
+    switchMode: requestModeSwitch,
+    switchToOffline,
+    switchToOnline,
     isOnline: mode === 'online',
-  }), [mode, serverUrl, switchMode]);
+  }), [mode, serverUrl, requestModeSwitch, switchToOffline, switchToOnline]);
 
-  // ── Already initialized — show presenter ──
+  // ── Mode-switch scanner (reuses the same QR flow but calls switchToOnline) ──
+  const startModeSwitchScanner = useCallback(() => {
+    setModeSwitchOpen(false);
+    setScannerOpen(true);
+    scanActiveRef.current = true;
+
+    (async () => {
+      // Check camera permission state before opening the scanner overlay
+      if (navigator.permissions) {
+        try {
+          const status = await navigator.permissions.query({ name: 'camera' });
+          if (status.state === 'denied') {
+            setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+            setScannerOpen(false);
+            return;
+          }
+        } catch { /* proceed anyway */ }
+      }
+
+      let jsQR;
+      try {
+        const mod = await import('jsqr');
+        jsQR = mod.default || mod;
+      } catch {
+        setError('QR scanner not available');
+        setScannerOpen(false);
+        return;
+      }
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+      } catch (err) {
+        setScannerOpen(false);
+        scanActiveRef.current = false;
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          setError('Camera access was denied. Open Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          setError('No camera found on this device.');
+        } else {
+          setError('Could not start camera: ' + (err.message || err.name));
+        }
+        return;
+      }
+
+      if (!scanActiveRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+      streamRef.current = stream;
+      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); }
+
+      const tick = () => {
+        if (!scanActiveRef.current) return;
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (code?.data) {
+            try {
+              const url = new URL(code.data);
+              const session = url.searchParams.get('session');
+              if (session && session.length >= 4) {
+                stopCamera();
+                setScannerOpen(false);
+                switchToOnline(url.origin, session.toUpperCase());
+                return;
+              }
+            } catch {
+              const bare = code.data.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+              if (bare.length >= 4 && serverUrl) {
+                stopCamera();
+                setScannerOpen(false);
+                switchToOnline(serverUrl, bare);
+                return;
+              }
+            }
+          }
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    })();
+  }, [serverUrl, stopCamera, switchToOnline]);
+
+  // ── Already initialized — show presenter + overlays ──
   if (ready && mode) {
     return (
       <SocketCtx.Provider value={ctxValue}>
         <MobilePresenter />
+        {/* Mode-switch overlay — floats above MobilePresenter without unmounting it */}
+        {modeSwitchOpen && (
+          <div className="mode-screen mode-screen--overlay">
+            <button className="mode-overlay-close" onClick={() => setModeSwitchOpen(false)}>✕</button>
+            <div className="mode-logo">📖</div>
+            <h1 className="mode-title">Switch Mode</h1>
+            <p className="mode-subtitle">Your live verse and settings will carry over</p>
+            {error && <p style={{ color: '#e85050', fontSize: '0.85rem', textAlign: 'center', padding: '0 1rem' }}>{error}</p>}
+            <div className="mode-cards">
+              <button className={`mode-card${mode === 'offline' ? ' mode-card--active' : ''}`}
+                disabled={connecting}
+                onClick={mode === 'offline' ? () => setModeSwitchOpen(false) : switchToOffline}>
+                <span className="mode-card-icon">📱</span>
+                <span className="mode-card-label">Offline Mode{mode === 'offline' ? ' ✓' : ''}</span>
+                <span className="mode-card-desc">Self-contained — search & present from this device.</span>
+              </button>
+              <button className={`mode-card mode-card--online${mode === 'online' ? ' mode-card--active' : ''}`}
+                disabled={connecting}
+                onClick={startModeSwitchScanner}>
+                <span className="mode-card-icon">📷</span>
+                <span className="mode-card-label">Online Mode{mode === 'online' ? ' ✓' : ''}</span>
+                <span className="mode-card-desc">Scan QR code to connect to a TV session.</span>
+              </button>
+            </div>
+            {/* Manual URL entry for online */}
+            <details className="mode-manual">
+              <summary>Enter server URL manually</summary>
+              <select className="mode-url-input" style={{ marginBottom: 8 }}
+                onChange={e => { if (e.target.value) setServerUrl(e.target.value); }} value={serverUrl}>
+                <option value="https://cap-teyyko.live">cap-teyyko.live (Primary)</option>
+                <option value="https://backend-production-9a27.up.railway.app">Railway (backend-production-9a27)</option>
+                <option value="">Custom URL…</option>
+              </select>
+              <div className="mode-manual-form">
+                <input type="url" placeholder="https://your-server.com" value={serverUrl}
+                  onChange={e => setServerUrl(e.target.value)} className="mode-url-input" />
+                <button className="mode-connect-btn" disabled={connecting || !serverUrl.trim()}
+                  onClick={() => switchToOnline(serverUrl)}>
+                  {connecting ? 'Connecting…' : 'Connect'}
+                </button>
+              </div>
+            </details>
+          </div>
+        )}
+        {/* QR Scanner overlay (mode-switch or initial) */}
+        {scannerOpen && (
+          <div className="mode-screen mode-screen--overlay">
+            <div className="qr-scan-overlay">
+              <div className="qr-scan-header">
+                <span>📷 Scan TV QR Code</span>
+                <button onClick={() => { stopCamera(); setScannerOpen(false); setModeSwitchOpen(true); }} className="qr-scan-close">✕</button>
+              </div>
+              <div className="qr-scan-viewport">
+                <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 12 }} />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+                <div className="qr-scan-reticle"><span /><span /><span /><span /></div>
+              </div>
+              <p className="qr-scan-hint">Point your camera at the QR code on the TV screen</p>
+            </div>
+          </div>
+        )}
       </SocketCtx.Provider>
     );
   }
 
-  // ── Error state ──
+  // ── Error state (before first init) ──
   if (error && !scannerOpen) {
     return (
       <div style={{ padding: 24, color: '#c9a84c', background: '#0a0a0f', minHeight: '100vh', fontFamily: 'sans-serif' }}>
@@ -250,7 +434,7 @@ export default function App() {
           <button
             className="mode-connect-btn"
             disabled={connecting || !serverUrl.trim()}
-            onClick={() => connectOnline(serverUrl)}>
+            onClick={() => switchToOnline(serverUrl)}>
             {connecting ? 'Connecting…' : 'Connect'}
           </button>
         </div>

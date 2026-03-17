@@ -308,6 +308,10 @@ function getCitation(language, volumeId, secondaryLanguage) {
 const MobilePresenter = () => {
   const { socket, mode, isOnline, switchMode, serverUrl } = useSocketCtx();
 
+  // Track previous socket ref so we can detect hot-swaps
+  const prevSocketRef = useRef(socket);
+  const prevModeRef   = useRef(mode);
+
   // ── Online session management ──
   const PRESENTER_TOKEN_KEY      = 'scicp.presenter_token';
   const PRESENTER_LAST_SESSION   = 'scicp.last_session';
@@ -468,7 +472,7 @@ const MobilePresenter = () => {
   const [relatedTotal,   setRelatedTotal]   = useState(0);
   const [relatedBatchPage, setRelatedBatchPage] = useState(0);
   const [verseTags,       setVerseTags]       = useState({ pov: null, speaker: null, labels: [], ready: false });
-  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+  const [chapterSummary,  setChapterSummary]  = useState({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false });
   const [verseSummary,    setVerseSummary]    = useState({ summary: null, cross_references: [], ready: false });
   const [chapterEntities, setChapterEntities] = useState({ people: [], places: [], ready: false });
   const [entitySearch,    setEntitySearch]    = useState(null);
@@ -477,6 +481,7 @@ const MobilePresenter = () => {
   const [summaryTopicResults, setSummaryTopicResults] = useState(null);
   const summaryTopicResultsRef = useRef(null);
   const [summaryTopicPage, setSummaryTopicPage] = useState(0);
+  const [scholarExpanded, setScholarExpanded] = useState({ nabre: false, net: false });
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
@@ -526,9 +531,10 @@ const MobilePresenter = () => {
   // Reset chapter-level modal data only when the CHAPTER changes (not on every verse)
   useEffect(() => {
     setChapterVerses([]);
-    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false });
+    setChapterSummary({ summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false });
     setVerseSummary({ summary: null, cross_references: [], ready: false });
     setChapterEntities({ people: [], places: [], ready: false });
+    setScholarExpanded({ nabre: false, net: false });
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
     // Eagerly fetch chapter entities for the preview card
     if (liveVerse?.chapter_id) {
@@ -949,6 +955,7 @@ const MobilePresenter = () => {
     socket.on('update-verse',   handleUpdateVerse);
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
+    // Only call init on first mount or when socket reference actually changes
     socket.init().catch(err => {
       console.error('[MobilePresenter] socket.init failed:', err);
       setConnectionState('error');
@@ -962,8 +969,30 @@ const MobilePresenter = () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [socket]);
+
+  // ── Hot mode-switch: re-sync session state when mode/socket changes ──
+  useEffect(() => {
+    if (prevModeRef.current === mode && prevSocketRef.current === socket) return;
+    const prevMode = prevModeRef.current;
+    prevModeRef.current = mode;
+    prevSocketRef.current = socket;
+
+    if (mode === 'offline') {
+      // Switched to offline — mark as joined immediately, push current theme
+      setSessionJoined(true);
+      setSessionId('LOCAL');
+      setSessionMessage('');
+      setConnectionState('connected');
+      if (currentTheme) socket.emit('update-theme', { theme: currentTheme });
+    } else {
+      // Switched to online — reset session so user can join/scan
+      setSessionJoined(false);
+      setSessionId('LOCAL');
+      setConnectionState('connecting');
+      setSessionMessage('');
+    }
+  }, [mode, socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Close drawer, theme popover, and mobile menu on outside tap ── */
   useEffect(() => {
@@ -1118,7 +1147,8 @@ const MobilePresenter = () => {
         }
         if (force || !chapterSummary.ready) {
           const summary = svc.getChapterSummary(chapterId);
-          setChapterSummary(summary);
+          const footnotes = svc.getChapterFootnotes(chapterId);
+          setChapterSummary({ ...summary, nabre_footnotes: footnotes.nabre_footnotes, net_footnotes: footnotes.net_footnotes });
         }
         if (force || !chapterEntities.ready) {
           const entities = svc.getChapterEntities(chapterId);
@@ -1323,7 +1353,9 @@ const MobilePresenter = () => {
         const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
         const summary = svc.getChapterSummary(ch.chapter_id);
-        setChapterSummary(summary);
+        const footnotes1 = svc.getChapterFootnotes(ch.chapter_id);
+        setChapterSummary({ ...summary, nabre_footnotes: footnotes1.nabre_footnotes, net_footnotes: footnotes1.net_footnotes });
+        setScholarExpanded({ nabre: false, net: false });
         const entities = svc.getChapterEntities(ch.chapter_id);
         setChapterEntities(entities);
         setCtxChapterIdx(idx);
@@ -3054,6 +3086,42 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         )}
+                        {/* Scholar Context — NABRE (historical) + NET (linguistic) footnotes */}
+                        {(chapterSummary.nabre_footnotes || chapterSummary.net_footnotes) && (
+                          <div className="ctx-scholar-context">
+                            <span className="ctx-entity-label">🎓 Scholar Context</span>
+                            {chapterSummary.nabre_footnotes && (() => {
+                              const paras = chapterSummary.nabre_footnotes.split('\n').filter(p => p.trim().length > 30);
+                              const visible = scholarExpanded.nabre ? paras : paras.slice(0, 3);
+                              return (
+                                <div className="ctx-scholar-source">
+                                  <span className="ctx-scholar-source-label">Some scholars note… <em>(Historical &amp; Contextual — NABRE)</em></span>
+                                  {visible.map((p, i) => <p key={i} className="ctx-scholar-note">{p.trim()}</p>)}
+                                  {paras.length > 3 && (
+                                    <button className="ctx-scholar-toggle" onClick={() => setScholarExpanded(s => ({ ...s, nabre: !s.nabre }))}>
+                                      {scholarExpanded.nabre ? '▲ Show less' : `▼ Show ${paras.length - 3} more notes`}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                            {chapterSummary.net_footnotes && (() => {
+                              const paras = chapterSummary.net_footnotes.split('\n').filter(p => p.trim().length > 30);
+                              const visible = scholarExpanded.net ? paras : paras.slice(0, 3);
+                              return (
+                                <div className="ctx-scholar-source">
+                                  <span className="ctx-scholar-source-label">Other scholars observe… <em>(Linguistic &amp; Translation — NET Bible)</em></span>
+                                  {visible.map((p, i) => <p key={i} className="ctx-scholar-note">{p.trim()}</p>)}
+                                  {paras.length > 3 && (
+                                    <button className="ctx-scholar-toggle" onClick={() => setScholarExpanded(s => ({ ...s, net: !s.net }))}>
+                                      {scholarExpanded.net ? '▲ Show less' : `▼ Show ${paras.length - 3} more notes`}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                         {/* Sermon topic search results from chip click — appears below summary + key verses */}
                         {summaryTopicResults && (
                           <div className="ctx-topic-results" ref={summaryTopicResultsRef}>
@@ -3080,7 +3148,9 @@ const MobilePresenter = () => {
                                           const verses = svc.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
                                           setChapterVerses(Array.isArray(verses) ? verses : []);
                                           const summary = svc.getChapterSummary(r.chapter_id);
-                                          setChapterSummary(summary);
+                                          const footnotes2 = svc.getChapterFootnotes(r.chapter_id);
+                                          setChapterSummary({ ...summary, nabre_footnotes: footnotes2.nabre_footnotes, net_footnotes: footnotes2.net_footnotes });
+                                          setScholarExpanded({ nabre: false, net: false });
                                           const entities = svc.getChapterEntities(r.chapter_id);
                                           setChapterEntities(entities);
                                           setSummaryTopicResults(null);

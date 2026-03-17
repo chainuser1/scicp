@@ -106,6 +106,11 @@ export async function initAllDatabases() {
       const sg = await loadDatabase('search-graph.db');
       if (sg) databases.set('searchgraph', sg);
     } catch (_) {}
+    // Load footnotes-lds-summaries.db (NABRE + NET scholarly footnotes — optional)
+    try {
+      const fn = await loadDatabase('footnotes-lds-summaries.db');
+      if (fn) databases.set('footnotes', fn);
+    } catch (_) {}
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length}/${entries.length} databases`);
     return databases;

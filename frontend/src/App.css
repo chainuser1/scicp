@@ -5984,6 +5984,21 @@ button, [role="button"] {
 .ctx-summary-text p { font-size: var(--ui-font-size, 0.85rem); line-height: 1.6; color: var(--text-body, #e0d8c8); margin: 0; font-style: italic; }
 .ctx-key-verses { display: flex; flex-direction: column; gap: 0.35rem; }
 
+/* Scholar Context section */
+.ctx-scholar-context { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.75rem; border-radius: 8px; background: rgba(180, 140, 60, 0.06); border: 1px solid rgba(180, 140, 60, 0.18); }
+.ctx-scholar-source { display: flex; flex-direction: column; gap: 0.4rem; }
+.ctx-scholar-source + .ctx-scholar-source { padding-top: 0.6rem; border-top: 1px solid rgba(255,255,255,0.07); }
+.ctx-scholar-source-label { font-size: 0.68rem; font-family: 'Cinzel', serif; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent, #c9a84c); font-style: normal; }
+.ctx-scholar-source-label em { font-style: italic; text-transform: none; letter-spacing: 0; color: var(--text-dim); font-family: inherit; }
+.ctx-scholar-note { font-size: var(--ui-font-size, 0.8rem); line-height: 1.65; color: var(--text-body, #d8d0bf); margin: 0; }
+.ctx-scholar-toggle { align-self: flex-start; background: none; border: 1px solid rgba(201,168,76,0.35); color: var(--accent, #c9a84c); font-size: 0.7rem; font-family: 'Cinzel', serif; letter-spacing: 0.08em; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; transition: background 0.15s; margin-top: 0.25rem; }
+.ctx-scholar-toggle:hover { background: rgba(201,168,76,0.1); }
+.presenter-container--light .ctx-scholar-context { background: rgba(140,100,20,0.06); border-color: rgba(140,100,20,0.18); }
+.presenter-container--light .ctx-scholar-source + .ctx-scholar-source { border-top-color: rgba(0,0,0,0.08); }
+.presenter-container--light .ctx-scholar-note { color: #2a2010; }
+.presenter-container--light .ctx-scholar-toggle { border-color: rgba(140,100,20,0.35); color: #7a5010; }
+.presenter-container--light .ctx-scholar-toggle:hover { background: rgba(140,100,20,0.08); }
+
 /* Light theme overrides for entity chips */
 .presenter-container--light .ctx-pov-badge { background: rgba(120,60,10,0.1); color: #7a3a10; border-color: rgba(120,60,10,0.25); }
 .presenter-container--light .ctx-doctrine-chip { background: rgba(30,80,160,0.1); color: #1a3a8a; border-color: rgba(30,80,160,0.2); }

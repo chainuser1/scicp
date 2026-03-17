@@ -14,4 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Online mode: send chosen server URL back to main process
   sendOnlineConnect: (url) => ipcRenderer.send('online-mode-connect', url),
+
+  // Hot mode-switch: reload presenter URL preserving state via sessionStorage.
+  // newMode: { mode: 'offline' } or { mode: 'online', serverUrl: '...' }
+  switchConnectionMode: (newMode) => ipcRenderer.invoke('switch-connection-mode', newMode),
 });
