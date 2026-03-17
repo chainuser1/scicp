@@ -142,6 +142,91 @@ async function resolveClientDisplay(forceAsk = false) {
   return pickProjectionDisplay(displays);
 }
 
+// ─── Mode selection: offline (local backend) or online (remote server) ────────
+async function selectConnectionMode() {
+  const { response } = await dialog.showMessageBox({
+    type:      'question',
+    title:     'Scriptures in View',
+    message:   'How would you like to present?',
+    detail:    'Offline: Use local scripture database — no internet needed.\n'
+             + 'Online: Connect to a remote server and join a TV session.',
+    buttons:   ['Offline (Local)', 'Online (Remote Server)'],
+    defaultId: 0,
+    cancelId:  0,
+    icon:      getIcon(),
+  });
+
+  if (response === 0) return { mode: 'offline' };
+
+  // Online — ask for server URL
+  const urlWin = new BrowserWindow({
+    width: 440, height: 280,
+    resizable: false,
+    title: 'Connect to Server',
+    icon: getIcon(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  urlWin.setMenuBarVisibility(false);
+
+  return new Promise((resolve) => {
+    ipcMain.once('online-mode-connect', (_e, serverUrl) => {
+      if (!urlWin.isDestroyed()) urlWin.close();
+      resolve({ mode: 'online', serverUrl: serverUrl.replace(/\/+$/, '') });
+    });
+    urlWin.on('closed', () => {
+      ipcMain.removeAllListeners('online-mode-connect');
+      resolve({ mode: 'offline' }); // fallback if window closed
+    });
+
+    urlWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a24; color: #e8e0d0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }
+  h3 { margin: 0 0 6px; color: #c9a84c; font-size: 1.1rem; }
+  p { margin: 0 0 16px; font-size: 0.82rem; color: #888; }
+  select { width: 100%; padding: 10px 14px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8e0d0;
+    font-size: 0.95rem; box-sizing: border-box; outline: none; margin-bottom: 8px; }
+  select:focus { border-color: #c9a84c; }
+  input { width: 100%; padding: 10px 14px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; color: #e8e0d0;
+    font-size: 0.95rem; box-sizing: border-box; outline: none; }
+  input:focus { border-color: #c9a84c; }
+  button { margin-top: 12px; padding: 10px 28px; background: #c9a84c; color: #1a1a24;
+    border: none; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; }
+  button:disabled { opacity: 0.4; cursor: default; }
+</style></head><body>
+  <h3>🌐 Connect to Server</h3>
+  <p>Select or enter the server URL</p>
+  <select id="preset" onchange="document.getElementById('url').value = this.value">
+    <option value="https://cap-teyyko.live">cap-teyyko.live (Primary)</option>
+    <option value="https://backend-production-9a27.up.railway.app">Railway (backend-production-9a27)</option>
+    <option value="">Custom URL…</option>
+  </select>
+  <input id="url" type="url" placeholder="https://your-server.com"
+    value="${'https://cap-teyyko.live'}" />
+  <button id="go" onclick="submit()">Connect</button>
+  <script>
+    const inp = document.getElementById('url');
+    const btn = document.getElementById('go');
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    inp.addEventListener('input', () => { btn.disabled = !inp.value.trim(); });
+    function submit() {
+      const v = inp.value.trim();
+      if (!v) return;
+      if (window.electronAPI) window.electronAPI.sendOnlineConnect(v);
+    }
+  </script>
+</body></html>`)}`);
+  });
+}
+
 // ─── Window management ────────────────────────────────────────────────────────
 let presenterWin = null;
 let clientWin    = null;
@@ -192,9 +277,10 @@ function openClientWindow(display) {
   clientWin.on('closed', () => { clientWin = null; });
 }
 
-async function createWindows() {
+async function createWindows(connectionMode) {
   const preload = path.join(__dirname, 'preload.js');
   const primary = screen.getPrimaryDisplay();
+  const isOnline = connectionMode?.mode === 'online';
 
   // ── Presenter window ──────────────────────────────────────────────────────
   presenterWin = new BrowserWindow({
@@ -212,7 +298,14 @@ async function createWindows() {
     },
   });
   presenterWin.setMenuBarVisibility(false);
-  presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL');
+
+  if (isOnline) {
+    // Online: load presenter from local server but point socket at remote
+    const serverUrl = encodeURIComponent(connectionMode.serverUrl);
+    presenterWin.loadURL(`http://127.0.0.1:3000/presenter?mode=online&server=${serverUrl}`);
+  } else {
+    presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL');
+  }
 
   presenterWin.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -220,9 +313,11 @@ async function createWindows() {
   });
   presenterWin.on('closed', () => { presenterWin = null; });
 
-  // ── Client / projection window ────────────────────────────────────────────
-  const chosen = await resolveClientDisplay();
-  openClientWindow(chosen);
+  // ── Client / projection window (offline mode only) ────────────────────────
+  if (!isOnline) {
+    const chosen = await resolveClientDisplay();
+    openClientWindow(chosen);
+  }
 }
 
 // ─── IPC: presenter can ask to change the projection display ─────────────────
@@ -325,6 +420,8 @@ function setupAutoUpdater() {
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
+let selectedMode = null;
+
 app.whenReady().then(async () => {
   try {
     await startElectron();
@@ -333,8 +430,9 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  waitForServer(() => {
-    createWindows();
+  waitForServer(async () => {
+    selectedMode = await selectConnectionMode();
+    createWindows(selectedMode);
     setupAutoUpdater();
   });
 });
@@ -343,6 +441,6 @@ app.on('window-all-closed', () => { app.quit(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    waitForServer(createWindows);
+    waitForServer(() => createWindows(selectedMode));
   }
 });

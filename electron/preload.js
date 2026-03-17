@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // projection window to the chosen display. Returns { displayId, bounds }
   // or { cancelled: true } if the user dismissed the dialog.
   changeProjectionDisplay: () => ipcRenderer.invoke('change-projection-display'),
+
+  // Online mode: send chosen server URL back to main process
+  sendOnlineConnect: (url) => ipcRenderer.send('online-mode-connect', url),
 });

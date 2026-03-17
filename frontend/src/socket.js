@@ -1,8 +1,14 @@
 import { io } from 'socket.io-client';
 
+// Support Electron online mode: ?server=https://cap-teyyko.live overrides the target
+const _params = new URLSearchParams(window.location.search);
+const _remoteServer = _params.get('server');
+
 // "undefined" means the URL will be computed from the `window.location` object
-// use Vite's environment variables instead of process.env
-const URL = import.meta.env.MODE === 'production' ? undefined : 'http://localhost:3000';
+const URL = _remoteServer || (import.meta.env.MODE === 'production' ? undefined : 'http://localhost:3000');
+
+/** True when connected to a remote server (Electron online mode) */
+export const isRemoteMode = Boolean(_remoteServer);
 
 // Events that should be queued when disconnected and replayed after rejoin
 const QUEUEABLE_EVENTS = new Set([

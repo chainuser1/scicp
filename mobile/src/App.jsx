@@ -15,7 +15,7 @@ export default function App() {
   const [ready, setReady]         = useState(false);
   const [error, setError]         = useState(null);
   const [connecting, setConnecting] = useState(false);
-  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || '');
+  const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || 'https://cap-teyyko.live');
   const [scannerOpen, setScannerOpen] = useState(false);
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
@@ -229,10 +229,20 @@ export default function App() {
       {/* Manual URL entry (expandable) */}
       <details className="mode-manual">
         <summary>Enter server URL manually</summary>
+        <select
+          className="mode-url-input"
+          style={{ marginBottom: 8 }}
+          onChange={e => { if (e.target.value) setServerUrl(e.target.value); }}
+          value={serverUrl}
+        >
+          <option value="https://cap-teyyko.live">cap-teyyko.live (Primary)</option>
+          <option value="https://backend-production-9a27.up.railway.app">Railway (backend-production-9a27)</option>
+          <option value="">Custom URL…</option>
+        </select>
         <div className="mode-manual-form">
           <input
             type="url"
-            placeholder="https://cap-teyyko.live"
+            placeholder="https://your-server.com"
             value={serverUrl}
             onChange={e => setServerUrl(e.target.value)}
             className="mode-url-input"

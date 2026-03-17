@@ -51,6 +51,10 @@ jobs:
         working-directory: mobile
         run: npm run build
 
+      - name: Add Capacitor Android platform
+        working-directory: mobile
+        run: npx cap add android
+
       - name: Sync Capacitor Android
         working-directory: mobile
         run: npx cap sync android
