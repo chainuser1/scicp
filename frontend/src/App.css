@@ -3011,6 +3011,9 @@ button,
   border-color: rgba(201, 168, 76, 0.4);
 }
 .presenter-container--light .batch-indicator { color: #8b3a1a; }
+.presenter-container--light .ctx-paginator { color: #555; }
+.presenter-container--light .ctx-paginator button { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.12); color: #333; }
+.presenter-container--light .ctx-paginator button:not(:disabled):hover { background: rgba(0,0,0,0.1); }
 
 /* ── History ── */
 .history-list {
@@ -5843,6 +5846,32 @@ button, [role="button"] {
 .ctx-empty { padding: 3rem; text-align: center; opacity: 0.35; font-size: 0.9rem; }
 .ctx-loading-more { padding: 0.75rem; text-align: center; opacity: 0.5; font-size: 0.8rem; animation: ctx-pulse 1.2s ease-in-out infinite; }
 @keyframes ctx-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.7; } }
+
+.ctx-paginator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+.ctx-paginator button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #ccc;
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.ctx-paginator button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.ctx-paginator button:not(:disabled):hover {
+  background: rgba(255,255,255,0.15);
+}
 
 .ctx-item {
   background: rgba(255, 255, 255, 0.03);
