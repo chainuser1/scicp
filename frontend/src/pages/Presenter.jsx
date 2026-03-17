@@ -507,6 +507,7 @@ const Presenter = () => {
   const [scannerOpen, setScannerOpen]       = useState(false);
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
   const [connectionState, setConnectionState] = useState('connecting');
+  const [queuedCount, setQueuedCount]       = useState(0);
   const [viewerCount, setViewerCount]       = useState(0);
   const [takeoverAlert, setTakeoverAlert]   = useState(false);
   // show persistent banner when this device was evicted by a new presenter
@@ -989,9 +990,15 @@ const Presenter = () => {
         socket.emit('join-session', { sessionId: lastSession, role: 'presenter', presenterToken: savedToken }, (response) => {
           if (response?.ok && response.sessionId) {
             setSessionId(response.sessionId);
-            setSessionMessage(`Reconnected — session ${response.sessionId}`);
             if (response.presenterToken) {
               try { window.sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken); } catch { /* ignore */ }
+            }
+            // Flush queued events now that we've rejoined
+            const flushed = socket.flushQueue?.() || 0;
+            if (flushed > 0) {
+              setSessionMessage(`Reconnected — ${flushed} action${flushed > 1 ? 's' : ''} delivered`);
+            } else {
+              setSessionMessage(`Reconnected — session ${response.sessionId}`);
             }
           } else {
             // Last session is gone — clear it and wait for the presenter to scan/type
@@ -1009,10 +1016,11 @@ const Presenter = () => {
     };
     const handleDisconnect = () => {
       setConnectionState('disconnected');
-      setSessionMessage('Disconnected - attempting to reconnect...');
+      setSessionMessage('Disconnected — attempting to reconnect…');
     };
     const handleReconnectAttempt = () => {
       setConnectionState('reconnecting');
+      setSessionMessage('Reconnecting…');
     };
     const handleConnectError = () => {
       setConnectionState('error');
@@ -1065,6 +1073,8 @@ const Presenter = () => {
     if (socket.connected) {
       handleConnect();
     }
+    // Subscribe to emit queue size changes
+    const unsubQueue = socket.onQueueChange?.(count => setQueuedCount(count));
     return () => {
       socket.off('search-results', handleSearchResults);
       socket.off('update-verse',   handleUpdateVerse);
@@ -1080,6 +1090,7 @@ const Presenter = () => {
       socket.off('viewer-count');
       socket.off('presenter-takeover-attempt');
       socket.off('presenter-evicted');
+      if (unsubQueue) unsubQueue();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSessionParam]);
@@ -1958,9 +1969,14 @@ const Presenter = () => {
           {/* Persistent connection dot — always visible on desktop */}
           <span
             className={`hdr-conn-dot hdr-conn-dot--${connectionState}`}
-            title={`Connection: ${connectionState}`}
+            title={`Connection: ${connectionState}${queuedCount > 0 ? ` (${queuedCount} queued)` : ''}`}
             aria-label={`Connection: ${connectionState}`}
           />
+          {queuedCount > 0 && (
+            <span className="hdr-queue-badge" title={`${queuedCount} action${queuedCount > 1 ? 's' : ''} queued — will send on reconnect`}>
+              {queuedCount} queued
+            </span>
+          )}
           {liveVerse ? (
             <div className="hdr-verse-info">
               <span className="hdr-verse-ref">
