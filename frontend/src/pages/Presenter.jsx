@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { socket } from '../socket';
+import { socket, isRemoteMode } from '../socket';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
@@ -1962,6 +1962,11 @@ const Presenter = () => {
         <div className="hdr-brand">
           <EmblemSVG size={24} />
           <span className="hdr-title">Scripture</span>
+          {isRemoteMode && sessionId && (
+            <span className="hdr-session-badge" title={`Online session: ${sessionId}`}>
+              🌐 {sessionId}
+            </span>
+          )}
         </div>
 
         {/* Live verse summary */}
@@ -2010,7 +2015,7 @@ const Presenter = () => {
           <HdrBtn onClick={openTour} label="Open walkthrough" title="Open walkthrough">
             <IconInfo />
           </HdrBtn>
-          {!isElectronApp && (
+          {(!isElectronApp || isRemoteMode) && (
           <div className={`hdr-session-wrap${activeTourTarget === 'session' ? ' tour-focus' : ''}`}>
             <HdrBtn
               onClick={() => setSessionPopover(o => !o)}
@@ -2244,7 +2249,7 @@ const Presenter = () => {
           {mobileMenuOpen && (
             <div className="hdr-mobile-menu">
               {/* Session (web only) / Display status (Electron only) */}
-              {isElectronApp ? (
+              {(isElectronApp && !isRemoteMode) ? (
                 <div className="mobile-menu-section">
                   <div className="mobile-menu-label">Local Display</div>
                   <div className="idle-viewer-count">
