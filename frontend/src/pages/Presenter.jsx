@@ -560,8 +560,6 @@ const Presenter = () => {
   const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
-  const relatedSentinelRef = useRef(null);
-  const entitySentinelRef  = useRef(null);
   const topicSentinelRef   = useRef(null);
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8; // server page size
@@ -1356,9 +1354,8 @@ const Presenter = () => {
       const d = await res.json();
       const verses = d.results ?? [];
       const total  = d.total ?? verses.length;
-      // Append using functional updater so we always merge with latest list
-      setRelatedVerses(prev => [...prev, ...verses]);
-      setCtxTopicHistory(prev => prev.map((e, i) => i === idx ? { ...e, verses: [...(e.verses || []), ...verses], total, page } : e));
+      setRelatedVerses(verses);
+      setCtxTopicHistory(prev => prev.map((e, i) => i === idx ? { ...e, total, page } : e));
       setRelatedBatchPage(page);
       setRelatedTotal(total);
     } finally {
@@ -1367,6 +1364,23 @@ const Presenter = () => {
   };
   const loadHistoryPageRef = useRef(null);
   loadHistoryPageRef.current = loadHistoryPage;
+
+  const loadEntityPage = async (page) => {
+    const es = entitySearch;
+    if (!es) return;
+    setEntitySearch(s => ({ ...s, loading: true }));
+    try {
+      const res = await fetch(`${API_URL}/entity/search?name=${encodeURIComponent(es.name)}&type=${es.type}&language=${currentLanguage}&page=${page}&pageSize=${es.pageSize}${es.entity_id ? `&entity_id=${encodeURIComponent(es.entity_id)}` : ''}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      const results = d.results || [];
+      const vMap = new Map();
+      for (const r of results) { const vid = r.volume_id || 0; if (!vMap.has(vid)) vMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] }); vMap.get(vid).results.push(r); }
+      setEntitySearch(s => ({ ...s, loading: false, results, groups: [...vMap.values()], page }));
+    } catch {
+      setEntitySearch(s => ({ ...s, loading: false }));
+    }
+  };
 
   const ctxTopicBack = () => {
     const newIdx = ctxTopicHistoryIdx - 1;
@@ -1510,7 +1524,7 @@ const Presenter = () => {
   useEffect(() => { entitySearchVal.current     = entitySearch; },     [entitySearch]);
   useEffect(() => { topicResultsVal.current     = topicResults; },     [topicResults]);
 
-  const [ctxBatchLoading, setCtxBatchLoading] = useState(false);
+  const [, setCtxBatchLoading] = useState(false);
 
   useEffect(() => {
     const root = ctxBodyRef.current;
@@ -1519,35 +1533,7 @@ const Presenter = () => {
       for (const entry of entries) {
         if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
         const id = entry.target.dataset.sentinel;
-        if (id === 'related') {
-          const totalPages = Math.ceil(relatedTotalVal.current / RELATED_PAGE_SIZE);
-          if (relatedBatchPageVal.current < totalPages - 1 && !contextLoadingVal.current) {
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            loadHistoryPageRef.current(relatedBatchPageVal.current + 1).finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
-          }
-        } else if (id === 'entity') {
-          const es = entitySearchVal.current;
-          if (es && !es.loading && es.total > (es.page + 1) * es.pageSize) {
-            const nextPage = es.page + 1;
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            setEntitySearch(s => ({ ...s, loading: true }));
-            fetch(`${API_URL}/entity/search?name=${encodeURIComponent(es.name)}&type=${es.type}&language=${currentLanguage}&page=${nextPage}&pageSize=${es.pageSize}${es.entity_id ? `&entity_id=${encodeURIComponent(es.entity_id)}` : ''}`)
-              .then(r => r.ok ? r.json() : null)
-              .then(d => {
-                if (!d) return;
-                setEntitySearch(s => {
-                  const merged = [...s.results, ...d.results];
-                  const vMap = new Map();
-                  for (const r of merged) { const vid = r.volume_id || 0; if (!vMap.has(vid)) vMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] }); vMap.get(vid).results.push(r); }
-                  return { ...s, loading: false, results: merged, groups: [...vMap.values()], page: nextPage };
-                });
-              })
-              .catch(() => setEntitySearch(s => ({ ...s, loading: false })))
-              .finally(() => { infiniteLoadingRef.current = false; setCtxBatchLoading(false); });
-          }
-        } else if (id === 'topic') {
+        if (id === 'topic') {
           const tr = topicResultsVal.current;
           if (tr && !tr.loading && tr.total > (tr.page + 1) * tr.pageSize) {
             const nextPage = tr.page + 1;
@@ -1572,7 +1558,7 @@ const Presenter = () => {
       }
     }, { root, threshold: 0.1 });
 
-    [relatedSentinelRef, entitySentinelRef, topicSentinelRef].forEach(ref => {
+    [topicSentinelRef].forEach(ref => {
       if (ref.current) observer.observe(ref.current);
     });
     return () => observer.disconnect();
@@ -3388,8 +3374,8 @@ const Presenter = () => {
                       const _totalServerPages = relatedTotal > 0 ? Math.ceil(relatedTotal / RELATED_PAGE_SIZE) : 1;
                       return (
                         <>
-                          {/* Topic history nav bar */}
-                          {ctxTopicHistory.length > 0 && (
+                          {/* Topic drill-down back/forward (when navigating between different topics) */}
+                          {ctxTopicHistory.length > 1 && (
                             <div className="ctx-topic-nav">
                               <button
                                 className="ctx-topic-nav-btn"
@@ -3410,8 +3396,19 @@ const Presenter = () => {
                               >▶</button>
                             </div>
                           )}
-                          {relatedTotal > 0 && (
-                            <div className="batch-indicator">{relatedVerses.length} of {relatedTotal} verses</div>
+                          {ctxTopicHistory.length <= 1 && relatedConcept && (
+                            <div className="ctx-topic-nav">
+                              <span className="ctx-topic-nav-label">
+                                {relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                          )}
+                          {_totalServerPages > 1 && (
+                            <div className="ctx-paginator">
+                              <button disabled={relatedBatchPage <= 0} onClick={() => loadHistoryPage(relatedBatchPage - 1)}>◀</button>
+                              <span>Page {relatedBatchPage + 1} of {_totalServerPages}</span>
+                              <button disabled={relatedBatchPage >= _totalServerPages - 1} onClick={() => loadHistoryPage(relatedBatchPage + 1)}>▶</button>
+                            </div>
                           )}
                           <ul className="ctx-list">
                             {relatedVerses.length === 0
@@ -3439,8 +3436,6 @@ const Presenter = () => {
                                 ))
                             }
                           </ul>
-                          {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
-                          <div ref={relatedSentinelRef} data-sentinel="related" style={{ height: 1 }} />
                         </>
                       );
                     })()}
@@ -3685,6 +3680,16 @@ const Presenter = () => {
                         )}
                         {entitySearch.loading && <p className="ctx-empty">Searching…</p>}
                         {!entitySearch.loading && entitySearch.results.length === 0 && <p className="ctx-empty">No verses found.</p>}
+                        {!entitySearch.loading && (() => {
+                          const _entityTotalPages = entitySearch.total > 0 ? Math.ceil(entitySearch.total / entitySearch.pageSize) : 1;
+                          return _entityTotalPages > 1 ? (
+                            <div className="ctx-paginator">
+                              <button disabled={entitySearch.page <= 0} onClick={() => loadEntityPage(entitySearch.page - 1)}>◀</button>
+                              <span>Page {entitySearch.page + 1} of {_entityTotalPages}</span>
+                              <button disabled={entitySearch.page >= _entityTotalPages - 1} onClick={() => loadEntityPage(entitySearch.page + 1)}>▶</button>
+                            </div>
+                          ) : null;
+                        })()}
                         {!entitySearch.loading && (entitySearch.groups || []).map(g => (
                           <div key={g.volume_id} className="ctx-entity-volume-group">
                             <span className="ctx-entity-volume-label">{g.volume_title}</span>
@@ -3701,8 +3706,6 @@ const Presenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {entitySearch.loading && <p className="ctx-loading-more">Loading more…</p>}
-                        <div ref={entitySentinelRef} data-sentinel="entity" style={{ height: 1 }} />
                       </div>
                     )}
 
