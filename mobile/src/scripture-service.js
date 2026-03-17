@@ -654,12 +654,17 @@ export function getChapterFootnotes(chapterId) {
 export function getChapterEntities(chapterId) {
   const tagsDb = getDb('tags');
   if (!tagsDb) return { people: [], places: [], ready: false };
+  
+  try {
+    const rows = tagsDb.getRowsByChapterId(chapterId); // (Assuming you missed this line)
     if (!rows.length || !rows[0].values.length) return { people: [], places: [], ready: true };
     const jsonStr = rows[0].values[0][0];
     if (!jsonStr) return { people: [], places: [], ready: true };
     const j = JSON.parse(jsonStr);
     return { people: j.people || [], places: j.places || [], ready: true };
-  } catch { return { people: [], places: [], ready: false }; }
+  } catch (e) {
+    return { people: [], places: [], ready: false };
+  }
 }
 
 export function searchEntities(name, type = 'person') {
