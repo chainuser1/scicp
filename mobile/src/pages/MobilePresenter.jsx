@@ -476,8 +476,6 @@ const MobilePresenter = () => {
   const ctxLastScrolledVerse = useRef(null); // last verse_id we auto-scrolled to
   const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
-  const relatedSentinelRef = useRef(null);
-  const entitySentinelRef  = useRef(null);
   const topicSentinelRef   = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
@@ -1066,13 +1064,13 @@ const MobilePresenter = () => {
     if (!entry) return;
     const allVerses = entry.verses;
     setCtxTopicHistory(prev => prev.map((e, i) => i === idx ? { ...e, page: batchPage } : e));
-    // Append: show all verses from page 0 through batchPage
-    const endIdx = (batchPage + 1) * RELATED_PAGE_SIZE;
-    const expanded = allVerses.slice(0, endIdx);
-    setRelatedVerses(expanded);
+    // Show only the current page slice
+    const pageSlice = allVerses.slice(batchPage * RELATED_PAGE_SIZE, (batchPage + 1) * RELATED_PAGE_SIZE);
+    setRelatedVerses(pageSlice);
     setRelatedConcept(entry.concept);
     setRelatedBatchPage(batchPage);
     setRelatedTotal(allVerses.length);
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
   const loadHistoryPageRef = useRef(null);
   loadHistoryPageRef.current = loadHistoryPage;
@@ -1091,6 +1089,24 @@ const MobilePresenter = () => {
     const entry = ctxTopicHistory[newIdx];
     setCtxTopicHistoryIdx(newIdx);
     _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
+  };
+
+  const loadEntityPage = (page) => {
+    const es = entitySearch;
+    if (!es) return;
+    if (es.entity_id) {
+      const res = svc.searchEntityDisambiguated(es.name, es.type, null, es.entity_id, page, es.pageSize);
+      const results = res.results || [];
+      const groups = groupByVolume(results);
+      setEntitySearch(s => ({ ...s, results, groups, page }));
+    } else {
+      const q = es.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
+      const res = svcSearch(q, page, es.pageSize, currentLanguage);
+      const results = res.results || [];
+      const groups = groupByVolume(results);
+      setEntitySearch(s => ({ ...s, results, groups, page }));
+    }
+    if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
   const openEntitySearchInModal = (name, type) => {
@@ -1208,16 +1224,7 @@ const MobilePresenter = () => {
       for (const entry of entries) {
         if (!entry.isIntersecting || infiniteLoadingRef.current) continue;
         const id = entry.target.dataset.sentinel;
-        if (id === 'related') {
-          const totalPages = Math.ceil(relatedTotalVal.current / RELATED_PAGE_SIZE);
-          if (relatedBatchPageVal.current < totalPages - 1) {
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            loadHistoryPageRef.current(relatedBatchPageVal.current + 1);
-            infiniteLoadingRef.current = false;
-            setCtxBatchLoading(false);
-          }
-        } else if (id === 'topic') {
+        if (id === 'topic') {
           const tr = topicResultsVal.current;
           if (tr && tr.total > (tr.page + 1) * tr.pageSize) {
             infiniteLoadingRef.current = true;
@@ -1229,29 +1236,10 @@ const MobilePresenter = () => {
             infiniteLoadingRef.current = false;
             setCtxBatchLoading(false);
           }
-        } else if (id === 'entity') {
-          const es = entitySearchVal.current;
-          if (es && es.total > (es.page + 1) * es.pageSize) {
-            infiniteLoadingRef.current = true;
-            setCtxBatchLoading(true);
-            const nextPage = es.page + 1;
-            if (es.entity_id) {
-              const res = svc.searchEntityDisambiguated(es.name, es.type, null, es.entity_id, nextPage, es.pageSize);
-              const merged = [...es.results, ...(res.results || [])];
-              setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
-            } else {
-              const q = es.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
-              const res = svcSearch(q, nextPage, es.pageSize, currentLanguage);
-              const merged = [...es.results, ...(res.results || [])];
-              setEntitySearch(s => ({ ...s, results: merged, groups: groupByVolume(merged), page: nextPage }));
-            }
-            infiniteLoadingRef.current = false;
-            setCtxBatchLoading(false);
-          }
         }
       }
     }, { root, threshold: 0.1 });
-    [relatedSentinelRef, entitySentinelRef, topicSentinelRef].forEach(ref => {
+    [topicSentinelRef].forEach(ref => {
       if (ref.current) observer.observe(ref.current);
     });
     return () => observer.disconnect();
@@ -2765,7 +2753,7 @@ const MobilePresenter = () => {
                       const totalRelPages = relatedTotal > 0 ? Math.ceil(relatedTotal / RELATED_PAGE_SIZE) : 1;
                       return (
                         <>
-                          {/* Topic history nav bar */}
+                          {/* Topic drill-down back/forward (when navigating between different topics) */}
                           {ctxTopicHistory.length > 1 && (
                             <div className="ctx-topic-nav">
                               <button
@@ -2787,8 +2775,19 @@ const MobilePresenter = () => {
                               >▶</button>
                             </div>
                           )}
-                          {relatedTotal > 0 && (
-                            <div className="batch-indicator">{relatedVerses.length} of {relatedTotal} verses</div>
+                          {ctxTopicHistory.length <= 1 && relatedConcept && (
+                            <div className="ctx-topic-nav">
+                              <span className="ctx-topic-nav-label">
+                                {relatedConcept.replace(/^_+/, '').replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                          )}
+                          {totalRelPages > 1 && (
+                            <div className="ctx-paginator">
+                              <button disabled={relatedBatchPage <= 0} onClick={() => loadHistoryPage(relatedBatchPage - 1)}>◀</button>
+                              <span>Page {relatedBatchPage + 1} of {totalRelPages}</span>
+                              <button disabled={relatedBatchPage >= totalRelPages - 1} onClick={() => loadHistoryPage(relatedBatchPage + 1)}>▶</button>
+                            </div>
                           )}
                           <ul className="ctx-list">
                             {relatedVerses.length === 0
@@ -2816,8 +2815,6 @@ const MobilePresenter = () => {
                                 ))
                             }
                           </ul>
-                          {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
-                          <div ref={relatedSentinelRef} data-sentinel="related" style={{ height: 1 }} />
                         </>
                       );
                     })()}
@@ -3038,6 +3035,16 @@ const MobilePresenter = () => {
                           </div>
                         )}
                         {entitySearch.results.length === 0 && <p className="ctx-empty">No verses found.</p>}
+                        {(() => {
+                          const _entityTotalPages = entitySearch.total > 0 ? Math.ceil(entitySearch.total / entitySearch.pageSize) : 1;
+                          return _entityTotalPages > 1 ? (
+                            <div className="ctx-paginator">
+                              <button disabled={entitySearch.page <= 0} onClick={() => loadEntityPage(entitySearch.page - 1)}>◀</button>
+                              <span>Page {entitySearch.page + 1} of {_entityTotalPages}</span>
+                              <button disabled={entitySearch.page >= _entityTotalPages - 1} onClick={() => loadEntityPage(entitySearch.page + 1)}>▶</button>
+                            </div>
+                          ) : null;
+                        })()}
                         {(entitySearch.groups || []).map(g => (
                           <div key={g.volume_id} className="ctx-entity-volume-group">
                             <span className="ctx-entity-volume-label">{g.volume_title}</span>
@@ -3054,8 +3061,6 @@ const MobilePresenter = () => {
                             </ul>
                           </div>
                         ))}
-                        {ctxBatchLoading && <p className="ctx-loading-more">Loading more…</p>}
-                        <div ref={entitySentinelRef} data-sentinel="entity" style={{ height: 1 }} />
                       </div>
                     )}
                     {!chapterEntities.ready && <p className="ctx-empty">Loading people &amp; places…</p>}
