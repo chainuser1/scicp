@@ -300,8 +300,8 @@ public class ExternalDisplayPlugin extends Plugin {
 
         void dispatchBridgeMessage(String json) {
             if (webView == null) return;
-            String escaped = json.replace("\\", "\\\\").replace("'", "\\'");
-            String js = "window.dispatchEvent(new CustomEvent('bridge-message',{detail:" + escaped + "}));";
+            // JSON is already a valid JS expression — inject it directly as the detail value
+            String js = "window.dispatchEvent(new CustomEvent('bridge-message',{detail:" + json + "}));";
             if (!pageReady) {
                 pendingMessages.add(js);
                 return;
