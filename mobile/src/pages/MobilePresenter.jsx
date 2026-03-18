@@ -503,6 +503,7 @@ const MobilePresenter = () => {
   const ctxLastScrolledVerse = useRef(null); // last verse_id we auto-scrolled to
   const ctxTabScrollPos = useRef({});      // saved scrollTop per tab name
   const ctxTouchStartX = useRef(null);
+  const ctxTouchStartY = useRef(null);
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8;
@@ -1494,14 +1495,18 @@ const MobilePresenter = () => {
   const handleCtxTouchStart = (e) => {
     if (contextTab !== 'chapter') return;
     ctxTouchStartX.current = e.touches[0].clientX;
+    ctxTouchStartY.current = e.touches[0].clientY;
   };
 
   const handleCtxTouchEnd = (e) => {
-    if (contextTab !== 'chapter' || ctxTouchStartX.current === null) return;
-    const delta = e.changedTouches[0].clientX - ctxTouchStartX.current;
+    if (contextTab !== 'chapter' || ctxTouchStartX.current === null || ctxTouchStartY.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - ctxTouchStartX.current;
+    const deltaY = e.changedTouches[0].clientY - ctxTouchStartY.current;
     ctxTouchStartX.current = null;
-    if (Math.abs(delta) < 60) return;
-    const nextIdx = ctxChapterIdx + (delta < 0 ? 1 : -1);
+    ctxTouchStartY.current = null;
+    if (Math.abs(deltaX) < 90) return;
+    if (Math.abs(deltaX) < Math.abs(deltaY) * 1.3) return;
+    const nextIdx = ctxChapterIdx + (deltaX < 0 ? 1 : -1);
     if (nextIdx >= 0 && nextIdx < bookChapters.length) loadCtxChapterByIdx(nextIdx);
   };
 
@@ -2982,7 +2987,7 @@ const MobilePresenter = () => {
                 {contextTab === 'chapter' && bookChapters[ctxChapterIdx]
                   ? `${liveVerse.book_title} ${bookChapters[ctxChapterIdx].chapter_number}`
                   : contextTab === 'summary'
-                    ? 'Chapter Summary'
+                    ? `Chapter ${bookChapters[ctxChapterIdx]?.chapter_number ?? liveVerse.chapter_number} Summary`
                     : contextTab === 'entities'
                       ? 'Peoples and Places'
                       : `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`}
@@ -2998,7 +3003,7 @@ const MobilePresenter = () => {
               }}>
                 <button className={`ctx-tab${contextTab === 'chapter' ? ' ctx-tab--active' : ''}`}
                   onClick={() => switchCtxTab(contextTab, 'chapter', () => { setContextTab('chapter'); setCtxWordChip(null); if (!chapterVerses.length) openContextModal('chapter'); })}>
-                  <span className="ctx-tab-icon">📖</span> Ch. {liveVerse.chapter_number}
+                  <span className="ctx-tab-icon">📖</span> Ch. {bookChapters[ctxChapterIdx]?.chapter_number ?? liveVerse.chapter_number}
                 </button>
                 <button className={`ctx-tab${contextTab === 'related' ? ' ctx-tab--active' : ''}`}
                   onClick={() => switchCtxTab(contextTab, 'related', () => { setContextTab('related'); if (!relatedVerses.length) openContextModal('related'); })}>
