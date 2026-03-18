@@ -59,4 +59,26 @@ export class ExternalDisplayWeb extends WebPlugin {
     // Browser/dev fallback has no system cast settings; keep API parity.
     return { opened: false };
   }
+
+  async checkCameraPermission() {
+    // In browser, check via Permissions API or assume prompt
+    if (navigator.permissions) {
+      try {
+        const result = await navigator.permissions.query({ name: 'camera' });
+        return { status: result.state };
+      } catch { /* fallback */ }
+    }
+    return { status: 'prompt' };
+  }
+
+  async requestCameraPermission() {
+    // In browser, trigger getUserMedia to prompt for permission
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(t => t.stop());
+      return { status: 'granted' };
+    } catch {
+      return { status: 'denied' };
+    }
+  }
 }

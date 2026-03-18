@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { useSocketCtx } from '../socket-context';
 import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
-const { search: svcSearch } = svc;
+import { createServiceProxy } from '../scripture-service-proxy';
+import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
 import CastingControl from '../components/CastingControl';
 
 function groupByVolume(results) {
@@ -308,6 +309,7 @@ function getCitation(language, volumeId, secondaryLanguage) {
 /* ─── Main component ─── */
 const MobilePresenter = () => {
   const { socket, mode, isOnline, switchMode, serverUrl } = useSocketCtx();
+  const svcProxy = useMemo(() => createServiceProxy(isOnline, serverUrl), [isOnline, serverUrl]);
 
   // Track previous socket ref so we can detect hot-swaps
   const prevSocketRef = useRef(socket);
@@ -491,6 +493,8 @@ const MobilePresenter = () => {
   const [summaryTopicPage, setSummaryTopicPage] = useState(0);
   const [scholarExpanded, setScholarExpanded] = useState({ nabre: false, net: false });
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
+  const [enhancedAI,      setEnhancedAI]      = useState(isEnhancedSearchEnabled());
+  const [aiModelStatus,   setAiModelStatus]   = useState(getEmbeddingStatus()); // idle|loading|ready|error
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
@@ -532,8 +536,10 @@ const MobilePresenter = () => {
     setEntitySearch(null);
     // Fetch verse-level NLP tags
     if (liveVerse?.verse_id) {
-      const tags = svc.getVerseTags(liveVerse.verse_id);
-      if (tags) setVerseTags(tags);
+      (async () => {
+        const tags = await svcProxy.getVerseTags(liveVerse.verse_id);
+        if (tags) setVerseTags(tags);
+      })();
     }
   }, [liveVerse?.verse_id]);
 
@@ -547,8 +553,10 @@ const MobilePresenter = () => {
     chapterNeedsRefetchRef.current = true; // signal openContextModal to force-refetch
     // Eagerly fetch chapter entities for the preview card
     if (liveVerse?.chapter_id) {
-      const entities = svc.getChapterEntities(liveVerse.chapter_id);
-      if (entities) setChapterEntities(entities);
+      (async () => {
+        const entities = await svcProxy.getChapterEntities(liveVerse.chapter_id);
+        if (entities) setChapterEntities(entities);
+      })();
     }
   }, [liveVerse?.chapter_id]);
 
@@ -593,13 +601,15 @@ const MobilePresenter = () => {
 
   useEffect(() => {
     if (drawerTab === 'browse' && !browseBooksLoaded) {
-      try {
-        const data = svc.browse('books', {}, currentLanguage);
-        setBrowseBooks(data || []);
-        setBrowseBooksLoaded(true);
-      } catch {
-        setBrowseBooks([]);
-      }
+      (async () => {
+        try {
+          const data = await svcProxy.browse('books', {}, currentLanguage);
+          setBrowseBooks(data || []);
+          setBrowseBooksLoaded(true);
+        } catch {
+          setBrowseBooks([]);
+        }
+      })();
     }
   }, [drawerTab, browseBooksLoaded, currentLanguage]);
 
@@ -923,7 +933,7 @@ const MobilePresenter = () => {
       language: {
         primary: currentLanguage,
         secondary: secondaryLanguage || null,
-        loaded: svc.getLoadedLanguages ? svc.getLoadedLanguages() : [],
+        loaded: svcProxy.getLoadedLanguages ? svcProxy.getLoadedLanguages() : [],
       },
       runtime: {
         online: navigator.onLine,
@@ -988,14 +998,16 @@ const MobilePresenter = () => {
   }, [connectionState]);
 
   useEffect(() => {
-    try {
-      const data = svc.verseOfTheDay();
-      if (data && data.verse_id) setVerseOfDay(data);
-      else setVotdError(true);
-    } catch (err) {
-      console.error('[MobilePresenter] verse-of-the-day failed:', err);
-      setVotdError(true);
-    }
+    (async () => {
+      try {
+        const data = await svcProxy.verseOfTheDay();
+        if (data && data.verse_id) setVerseOfDay(data);
+        else setVotdError(true);
+      } catch (err) {
+        console.error('[MobilePresenter] verse-of-the-day failed:', err);
+        setVotdError(true);
+      }
+    })();
   }, []);
 
   const closeTour = () => {
@@ -1167,6 +1179,20 @@ const MobilePresenter = () => {
     emitWithSession('now-reading', { on: next, verse_id: liveVerse?.verse_id || null });
   };
 
+  // Toggle Enhanced AI Search (downloads MiniLM model on first enable)
+  const toggleEnhancedAI = async () => {
+    const next = !enhancedAI;
+    setEnhancedSearch(next);
+    setEnhancedAI(next);
+    if (next && getEmbeddingStatus() !== 'ready') {
+      setAiModelStatus('loading');
+      const ok = await initPipeline((p) => {
+        if (p.status === 'progress') setAiModelStatus('loading');
+      });
+      setAiModelStatus(ok ? 'ready' : 'error');
+    }
+  };
+
   const navigateSegment = direction => {
     if (!liveVerse?.segments) return;
     const limit = liveVerse.segments.length - 1;
@@ -1181,7 +1207,7 @@ const MobilePresenter = () => {
     const source = preferStaged ? (staged || liveVerse) : liveVerse;
     if (!source?.verse_id) return;
     try {
-      const data = svc.getAdjacent(source, direction, currentLanguage);
+      const data = await svcProxy.getAdjacent(source, direction, currentLanguage);
       if (!data) return;
       const v = { ...data, theme: themeForVerse(currentTheme, data) };
       if (preferStaged && staged) {
@@ -1204,7 +1230,7 @@ const MobilePresenter = () => {
     emitWithSession('highlight-text', { text: sel });
   };
 
-  const openContextModal = (tab = 'chapter') => {
+  const openContextModal = async (tab = 'chapter') => {
     if (!liveVerse) return;
     setContextOpen(true);
     setContextLoading(true);
@@ -1215,7 +1241,7 @@ const MobilePresenter = () => {
         let chapterId = liveVerse.chapter_id;
         let chapters  = bookChapters;
         if (!chapters.length && liveVerse.book_id) {
-          chapters = svc.browse('chapters', { bookId: liveVerse.book_id }, currentLanguage);
+          chapters = await svcProxy.browse('chapters', { bookId: liveVerse.book_id }, currentLanguage);
           if (Array.isArray(chapters)) setBookChapters(chapters);
         }
         if (!chapterId && Array.isArray(chapters) && liveVerse.chapter_number) {
@@ -1231,30 +1257,30 @@ const MobilePresenter = () => {
         const force = chapterNeedsRefetchRef.current;
         if (force) chapterNeedsRefetchRef.current = false;
         if (force || !chapterVerses.length) {
-          const verses = svc.browse('verses', { chapterId }, currentLanguage);
+          const verses = await svcProxy.browse('verses', { chapterId }, currentLanguage);
           setChapterVerses(Array.isArray(verses) ? verses : []);
         }
         if (force || !chapterSummary.ready) {
-          const summary = svc.getChapterSummary(chapterId);
-          const footnotes = svc.getChapterFootnotes(chapterId);
+          const summary = await svcProxy.getChapterSummary(chapterId);
+          const footnotes = await svcProxy.getChapterFootnotes(chapterId);
           setChapterSummary({ ...summary, nabre_footnotes: footnotes.nabre_footnotes, net_footnotes: footnotes.net_footnotes });
         }
         if (force || !chapterEntities.ready) {
-          const entities = svc.getChapterEntities(chapterId);
+          const entities = await svcProxy.getChapterEntities(chapterId);
           setChapterEntities(entities);
         }
         // Always refresh verse summary for current verse
         if (liveVerse?.verse_id && (force || !verseSummary.ready)) {
-          const vs = svc.getVerseSummary(liveVerse.verse_id);
+          const vs = await svcProxy.getVerseSummary(liveVerse.verse_id);
           setVerseSummary(vs);
         }
       } else if (tab === 'verse-context') {
         if (liveVerse?.verse_id) {
-          const vs = svc.getVerseSummary(liveVerse.verse_id);
+          const vs = await svcProxy.getVerseSummary(liveVerse.verse_id);
           setVerseSummary(vs);
         }
       } else if (tab === 'related' && !relatedVerses.length) {
-        const { results, matchedConcept: mc, total } = svc.getRelated(liveVerse.verse_id, currentLanguage);
+        const { results, matchedConcept: mc, total } = await svcProxy.getRelated(liveVerse.verse_id, currentLanguage);
         const allResults = results ?? [];
         setRelatedVerses(allResults.slice(0, RELATED_PAGE_SIZE));
         setRelatedConcept(mc ?? null);
@@ -1283,17 +1309,17 @@ const MobilePresenter = () => {
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
-  const loadTopicInModal = (topicLabel, batchPage = 0) => {
+  const loadTopicInModal = async (topicLabel, batchPage = 0) => {
     if (!topicLabel) return;
     setContextLoading(true);
     try {
-      const data = svc.search(topicLabel, 0, 50, currentLanguage);
+      const data = await svcProxy.search(topicLabel, 0, 50, currentLanguage);
       const allVerses = data?.results ?? [];
 
       // Fallback: if Related returns 0 results, search chapter summaries instead
       if (allVerses.length === 0 && batchPage === 0) {
         try {
-          const sermonResults = svc.searchSermonTopics(topicLabel, 20);
+          const sermonResults = await svcProxy.searchSermonTopics(topicLabel, 20);
           if (sermonResults && sermonResults.length > 0) {
             setSummaryTopicResults({ label: topicLabel, results: sermonResults });
             setSummaryTopicPage(0);
@@ -1351,17 +1377,17 @@ const MobilePresenter = () => {
     _mobileSetBatchFromAllVerses(entry.verses, entry.label, entry.concept, entry.page ?? 0);
   };
 
-  const loadEntityPage = (page) => {
+  const loadEntityPage = async (page) => {
     const es = entitySearch;
     if (!es) return;
     if (es.entity_id) {
-      const res = svc.searchEntityDisambiguated(es.name, es.type, null, es.entity_id, page, es.pageSize);
+      const res = await svcProxy.searchEntityDisambiguated(es.name, es.type, null, es.entity_id, page, es.pageSize);
       const results = res.results || [];
       const groups = groupByVolume(results);
       setEntitySearch(s => ({ ...s, results, groups, page }));
     } else {
       const q = es.name.replace(/\s*\([^)]*\)\s*/g, '').trim();
-      const res = svcSearch(q, page, es.pageSize, currentLanguage);
+      const res = await svcProxy.search(q, page, es.pageSize, currentLanguage);
       const results = res.results || [];
       const groups = groupByVolume(results);
       setEntitySearch(s => ({ ...s, results, groups, page }));
@@ -1369,30 +1395,30 @@ const MobilePresenter = () => {
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
-  const loadTopicPage = (page) => {
+  const loadTopicPage = async (page) => {
     const tr = topicResults;
     if (!tr) return;
-    const res = svcSearch(tr.topic, page, tr.pageSize, currentLanguage);
+    const res = await svcProxy.search(tr.topic, page, tr.pageSize, currentLanguage);
     const results = res.results || [];
     const groups = groupByVolume(results);
     setTopicResults(s => ({ ...s, results, total: res.total || 0, page, groups }));
     if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
   };
 
-  const openEntitySearchInModal = (name, type) => {
+  const openEntitySearchInModal = async (name, type) => {
     setContextTab('entities');
     setContextOpen(true);
-    const res = svc.searchEntityDisambiguated(name, type, liveVerse?.verse_id || null, null, 0, 10);
+    const res = await svcProxy.searchEntityDisambiguated(name, type, liveVerse?.verse_id || null, null, 0, 10);
     const results = res.results || [];
     const groups = groupByVolume(results);
     setEntitySearch({ name, type, loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
   };
 
-  const drillIntoVerse = (verse, batchPage = 0) => {
+  const drillIntoVerse = async (verse, batchPage = 0) => {
     setContextLoading(true);
     setCtxWordChip(null);
     try {
-      const data = svc.getRelated(verse.verse_id, currentLanguage);
+      const data = await svcProxy.getRelated(verse.verse_id, currentLanguage);
       const allVerses = data?.results ?? [];
       const label = verse.verse_title || `${verse.book_title} ${verse.chapter_number}:${verse.verse_number}`;
       const concept = data?.matchedConcept ?? label;
@@ -1433,19 +1459,19 @@ const MobilePresenter = () => {
     if (!ch) return;
     const dir = idx > ctxChapterIdx ? 'next' : 'prev';
     setCtxSlideDir(dir);
-    setTimeout(() => {
+    setTimeout(async () => {
       setCtxSlideDir(null);
       setCtxScrolled(false);
       setCtxAtBottom(false);
       setContextLoading(true);
       try {
-        const verses = svc.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
+        const verses = await svcProxy.browse('verses', { chapterId: ch.chapter_id }, currentLanguage);
         setChapterVerses(Array.isArray(verses) ? verses : []);
-        const summary = svc.getChapterSummary(ch.chapter_id);
-        const footnotes1 = svc.getChapterFootnotes(ch.chapter_id);
+        const summary = await svcProxy.getChapterSummary(ch.chapter_id);
+        const footnotes1 = await svcProxy.getChapterFootnotes(ch.chapter_id);
         setChapterSummary({ ...summary, nabre_footnotes: footnotes1.nabre_footnotes, net_footnotes: footnotes1.net_footnotes });
         setScholarExpanded({ nabre: false, net: false });
-        const entities = svc.getChapterEntities(ch.chapter_id);
+        const entities = await svcProxy.getChapterEntities(ch.chapter_id);
         setChapterEntities(entities);
         setCtxChapterIdx(idx);
         if (ctxBodyRef.current) ctxBodyRef.current.scrollTop = 0;
@@ -1524,7 +1550,7 @@ const MobilePresenter = () => {
     if (nextIdx >= 0 && nextIdx < bookChapters.length) loadCtxChapterByIdx(nextIdx);
   };
 
-  const handleLanguageChange = e => {
+  const handleLanguageChange = async e => {
     const lang = e.target.value;
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
@@ -1539,7 +1565,7 @@ const MobilePresenter = () => {
     // Update live verse text directly (handles offline / no session case)
     if (liveVerse) {
       try {
-        const row = svc.getVerse({ verse_id: liveVerse.verse_id }, lang);
+        const row = await svcProxy.getVerse({ verse_id: liveVerse.verse_id }, lang);
         if (row?.scripture_text) setLiveVerse(prev => prev ? { ...prev, scripture_text: row.scripture_text, segments: null, language: lang } : prev);
       } catch (_) {}
       emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: lang, secondaryLanguage: secondaryLanguage || null });
@@ -1547,7 +1573,7 @@ const MobilePresenter = () => {
     // Update staged verse text to the new language
     if (staged) {
       try {
-        const row = svc.getVerse({ verse_id: staged.verse_id }, lang);
+        const row = await svcProxy.getVerse({ verse_id: staged.verse_id }, lang);
         if (row?.scripture_text) setStaged(prev => prev ? { ...prev, scripture_text: row.scripture_text } : prev);
       } catch (_) {}
     }
@@ -1568,7 +1594,7 @@ const MobilePresenter = () => {
     if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
   };
 
-  const handleSwapLanguages = () => {
+  const handleSwapLanguages = async () => {
     if (!secondaryLanguage) return;
     const newPrimary   = secondaryLanguage;
     const newSecondary = currentLanguage;
@@ -1582,14 +1608,14 @@ const MobilePresenter = () => {
     emitWithSession('update-language', { language: newPrimary });
     if (liveVerse) {
       try {
-        const row = svc.getVerse({ verse_id: liveVerse.verse_id }, newPrimary);
+        const row = await svcProxy.getVerse({ verse_id: liveVerse.verse_id }, newPrimary);
         if (row?.scripture_text) setLiveVerse(prev => prev ? { ...prev, scripture_text: row.scripture_text, segments: null, language: newPrimary } : prev);
       } catch (_) {}
       emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: newPrimary, secondaryLanguage: newSecondary });
     }
     if (staged) {
       try {
-        const row = svc.getVerse({ verse_id: staged.verse_id }, newPrimary);
+        const row = await svcProxy.getVerse({ verse_id: staged.verse_id }, newPrimary);
         if (row?.scripture_text) setStaged(prev => prev ? { ...prev, scripture_text: row.scripture_text } : prev);
       } catch (_) {}
     }
@@ -1614,18 +1640,18 @@ const MobilePresenter = () => {
     );
   };
 
-  const handleBrowseBook = (book) => {
+  const handleBrowseBook = async (book) => {
     setBrowseSelectedBook(book);
     try {
-      const data = svc.browse('chapters', { bookId: book.book_id }, currentLanguage);
+      const data = await svcProxy.browse('chapters', { bookId: book.book_id }, currentLanguage);
       setBrowseChapters(data || []);
     } catch { setBrowseChapters([]); }
     setBrowseLevel('chapters');
   };
-  const handleBrowseChapter = (chapter) => {
+  const handleBrowseChapter = async (chapter) => {
     setBrowseSelectedChapter(chapter);
     try {
-      const data = svc.browse('verses', { chapterId: chapter.chapter_id }, currentLanguage);
+      const data = await svcProxy.browse('verses', { chapterId: chapter.chapter_id }, currentLanguage);
       setBrowseVerses(data || []);
     } catch { setBrowseVerses([]); }
     setBrowseLevel('verses');
@@ -1662,7 +1688,7 @@ const MobilePresenter = () => {
     setSavedSetlists(prev => prev.filter(s => s.id !== id));
   };
 
-  const toggleTranslation = (verse_id) => {
+  const toggleTranslation = async (verse_id) => {
     const targetLang = currentLanguage === 'en' ? 'tl' : currentLanguage === 'tl' ? 'ceb' : 'en';
     const cacheKey = `${verse_id}_${targetLang}`;
     setExpandedTranslations(prev => {
@@ -1672,7 +1698,7 @@ const MobilePresenter = () => {
     });
     if (!translationCache[cacheKey]) {
       try {
-        const row = svc.getVerse({ verse_id }, targetLang);
+        const row = await svcProxy.getVerse({ verse_id }, targetLang);
         setTranslationCache(c => ({ ...c, [cacheKey]: row?.scripture_text || '(translation unavailable)' }));
       } catch {
         setTranslationCache(c => ({ ...c, [cacheKey]: '(translation unavailable)' }));
@@ -1961,6 +1987,18 @@ const MobilePresenter = () => {
                       aria-label="Swap primary and secondary language"
                     >&#8644;</button>
                   </div>
+                </div>
+                <div className="popover-divider" />
+                <div className="popover-lang-row">
+                  <label className="popover-label">AI Search</label>
+                  <button
+                    className={`popover-ai-toggle${enhancedAI ? ' popover-ai-toggle--on' : ''}`}
+                    onClick={toggleEnhancedAI}
+                    disabled={aiModelStatus === 'loading'}
+                    title={enhancedAI ? 'Full MiniLM semantic search enabled' : 'Using embedding-assisted search (lighter)'}
+                  >
+                    {aiModelStatus === 'loading' ? '⏳ Loading…' : enhancedAI ? '✦ Enhanced' : 'Standard'}
+                  </button>
                 </div>
               </div>
             )}
@@ -3183,9 +3221,9 @@ const MobilePresenter = () => {
                             {chapterSummary.top_topics.map(t => (
                               <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--clickable"
                                 title={t.source === 'topical-guide' ? 'LDS Topical Guide — tap to find related chapters' : `${Math.round((t.score || 0) * 100)}% match`}
-                                onClick={() => {
+                                onClick={async () => {
                                   try {
-                                    const results = svc.searchSermonTopics(t.label, 20);
+                                    const results = await svcProxy.searchSermonTopics(t.label, 20);
                                     setSummaryTopicResults({ label: t.label, results: results || [] });
                                     setSummaryTopicPage(0);
                                     setTimeout(() => summaryTopicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -3277,16 +3315,16 @@ const MobilePresenter = () => {
                                   )}
                                   <ul className="ctx-items-list">
                                     {pageResults.map(r => (
-                                      <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={() => {
+                                      <li key={r.chapter_id} className="ctx-item ctx-item--clickable" onClick={async () => {
                                         setContextLoading(true);
                                         try {
-                                          const verses = svc.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
+                                          const verses = await svcProxy.browse('verses', { chapterId: r.chapter_id }, currentLanguage);
                                           setChapterVerses(Array.isArray(verses) ? verses : []);
-                                          const summary = svc.getChapterSummary(r.chapter_id);
-                                          const footnotes2 = svc.getChapterFootnotes(r.chapter_id);
+                                          const summary = await svcProxy.getChapterSummary(r.chapter_id);
+                                          const footnotes2 = await svcProxy.getChapterFootnotes(r.chapter_id);
                                           setChapterSummary({ ...summary, nabre_footnotes: footnotes2.nabre_footnotes, net_footnotes: footnotes2.net_footnotes });
                                           setScholarExpanded({ nabre: false, net: false });
-                                          const entities = svc.getChapterEntities(r.chapter_id);
+                                          const entities = await svcProxy.getChapterEntities(r.chapter_id);
                                           setChapterEntities(entities);
                                           setSummaryTopicResults(null);
                                           setContextTab('chapter');
@@ -3325,8 +3363,8 @@ const MobilePresenter = () => {
                         {verseTags.labels.slice(0, 4).map(t => (
                           <button key={t.label} className="ctx-doctrine-chip ctx-doctrine-chip--clickable"
                             title={t.source === 'topical-guide' ? 'LDS Topical Guide — tap to explore' : `${Math.round((t.score || 0) * 100)}% match`}
-                            onClick={() => {
-                              const res = svcSearch(t.label, 0, 10, currentLanguage);
+                            onClick={async () => {
+                              const res = await svcProxy.search(t.label, 0, 10, currentLanguage);
                               const results = res.results || [];
                               setTopicResults({ topic: t.label, loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups: groupByVolume(results) });
                               setTimeout(() => topicResultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -3396,8 +3434,8 @@ const MobilePresenter = () => {
                         <div className="ctx-entity-chips">
                           {chapterEntities.people.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--person"
-                              onClick={() => {
-                            const res = svc.searchEntityDisambiguated(p, 'person', liveVerse?.verse_id, null, 0, 10);
+                              onClick={async () => {
+                            const res = await svcProxy.searchEntityDisambiguated(p, 'person', liveVerse?.verse_id, null, 0, 10);
                             const results = res.results || [];
                             const groups = groupByVolume(results);
                             setEntitySearch({ name: p, type: 'person', loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
@@ -3413,8 +3451,8 @@ const MobilePresenter = () => {
                         <div className="ctx-entity-chips">
                           {chapterEntities.places.map(p => (
                             <button key={p} className="ctx-entity-chip ctx-entity-chip--place"
-                              onClick={() => {
-                            const res = svc.searchEntityDisambiguated(p, 'place', liveVerse?.verse_id, null, 0, 10);
+                              onClick={async () => {
+                            const res = await svcProxy.searchEntityDisambiguated(p, 'place', liveVerse?.verse_id, null, 0, 10);
                             const results = res.results || [];
                             const groups = groupByVolume(results);
                             setEntitySearch({ name: p, type: 'place', loading: false, results, total: res.total || 0, page: 0, pageSize: 10, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] });
@@ -3436,8 +3474,8 @@ const MobilePresenter = () => {
                             <span className="ctx-entity-siblings-label">Also see:</span>
                             {entitySearch.siblings.map(s => (
                               <button key={s.entity_id} className="ctx-entity-chip ctx-entity-chip--sibling"
-                                onClick={() => {
-                                  const res = svc.searchEntityDisambiguated(entitySearch.name, entitySearch.type, null, s.entity_id, 0, 10);
+                                onClick={async () => {
+                                  const res = await svcProxy.searchEntityDisambiguated(entitySearch.name, entitySearch.type, null, s.entity_id, 0, 10);
                                   const results = res.results || [];
                                   const groups = groupByVolume(results);
                                   setEntitySearch(prev => ({ ...prev, results, total: res.total || 0, page: 0, groups, entity_id: res.entity_id || null, qualifier: res.qualifier || null, siblings: res.siblings || [] }));
