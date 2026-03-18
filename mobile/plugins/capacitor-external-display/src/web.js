@@ -54,4 +54,9 @@ export class ExternalDisplayWeb extends WebPlugin {
       }
     }
   }
+
+  async openCastSettings() {
+    // Browser/dev fallback has no system cast settings; keep API parity.
+    return { opened: false };
+  }
 }

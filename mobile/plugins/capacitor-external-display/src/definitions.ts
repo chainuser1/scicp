@@ -36,4 +36,10 @@ export interface ExternalDisplayPlugin {
     eventName: 'displayConnected' | 'displayDisconnected',
     listenerFunc: () => void,
   ): Promise<{ remove: () => Promise<void> }>;
+
+  /**
+   * Open Android's system cast picker/settings so users can discover devices.
+   * Returns opened=false on platforms that don't support it.
+   */
+  openCastSettings(): Promise<{ opened: boolean }>;
 }
