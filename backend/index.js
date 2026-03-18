@@ -181,9 +181,10 @@ fastify.get('/health', async () => {
 //    Set PUBLIC_ORIGIN=https://your-domain.com in the environment; falls back
 //    to the request's Host header, which is usually correct on a LAN.
 fastify.get('/config', async (request) => {
+  const proto = request.headers['x-forwarded-proto'] || request.protocol;
   const publicOrigin =
     process.env.PUBLIC_ORIGIN ||
-    `${request.protocol}://${request.hostname}`;
+    `${proto}://${request.hostname}`;
   return { publicOrigin };
 });
 

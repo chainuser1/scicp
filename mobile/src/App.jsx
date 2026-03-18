@@ -10,6 +10,20 @@ import MobilePresenter from './pages/MobilePresenter.jsx';
 const MODE_KEY  = 'scicp.conn_mode';    // 'offline' | 'online'
 const URL_KEY   = 'scicp.server_url';
 
+// Upgrade http:// to https:// for non-local hosts (tunnels/proxies strip TLS)
+function ensureHttps(origin) {
+  if (!origin) return origin;
+  try {
+    const u = new URL(origin);
+    const host = u.hostname;
+    if (u.protocol === 'http:' && host !== 'localhost' && !host.startsWith('127.') && !host.startsWith('192.168.') && !host.startsWith('10.')) {
+      u.protocol = 'https:';
+      return u.origin;
+    }
+  } catch { /* ignore */ }
+  return origin;
+}
+
 export default function App() {
   const [mode, setMode]           = useState(() => localStorage.getItem(MODE_KEY) || null);
   const [ready, setReady]         = useState(false);
@@ -123,7 +137,7 @@ export default function App() {
               const url = new URL(code.data);
               const session = url.searchParams.get('session');
               if (session && session.length >= 4) {
-                const origin = url.origin;
+                const origin = ensureHttps(url.origin);
                 stopCamera();
                 setScannerOpen(false);
                 switchToOnlineRef.current(origin, session.toUpperCase());
@@ -359,7 +373,7 @@ export default function App() {
               if (session && session.length >= 4) {
                 stopCamera();
                 setScannerOpen(false);
-                switchToOnlineRef.current(url.origin, session.toUpperCase());
+                switchToOnlineRef.current(ensureHttps(url.origin), session.toUpperCase());
                 return;
               }
             } catch {
