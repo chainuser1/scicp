@@ -656,12 +656,21 @@ export function getChapterEntities(chapterId) {
   if (!tagsDb) return { people: [], places: [], ready: false };
   
   try {
-    const rows = tagsDb.getRowsByChapterId(chapterId); // (Assuming you missed this line)
+    const rows = tagsDb.exec(
+      'SELECT entities_json, people, places FROM chapter_entities WHERE chapter_id = ?',
+      [chapterId]
+    );
     if (!rows.length || !rows[0].values.length) return { people: [], places: [], ready: true };
-    const jsonStr = rows[0].values[0][0];
-    if (!jsonStr) return { people: [], places: [], ready: true };
-    const j = JSON.parse(jsonStr);
-    return { people: j.people || [], places: j.places || [], ready: true };
+    const [entitiesJson, peopleCsv, placesCsv] = rows[0].values[0];
+    if (entitiesJson) {
+      const j = JSON.parse(entitiesJson);
+      return { people: j.people || [], places: j.places || [], ready: true };
+    }
+    const splitCsv = (val) => String(val || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    return { people: splitCsv(peopleCsv), places: splitCsv(placesCsv), ready: true };
   } catch (e) {
     return { people: [], places: [], ready: false };
   }
