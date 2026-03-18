@@ -2731,6 +2731,30 @@ button,
   cursor: default;
 }
 
+.popover-ai-toggle {
+  padding: 0.3rem 0.65rem;
+  background: var(--surface-3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  font-size: 0.72rem;
+  font-family: 'Inter', sans-serif;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.popover-ai-toggle--on {
+  background: rgba(218,165,32,0.15);
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+.popover-ai-toggle:hover:not(:disabled) {
+  border-color: var(--gold-border);
+}
+.popover-ai-toggle:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .popover-row {
   display: flex;
   gap: 0.4rem;
@@ -4597,6 +4621,16 @@ button,
 }
 .presenter-container--light .popover-swap-btn:hover:not(:disabled) {
   background: rgba(0,0,0,0.06);
+  border-color: rgba(139,58,26,0.3);
+  color: #8b3a1a;
+}
+.presenter-container--light .popover-ai-toggle {
+  border-color: rgba(0,0,0,0.13);
+  color: #9a7b68;
+  background: #ede7dc;
+}
+.presenter-container--light .popover-ai-toggle--on {
+  background: rgba(139,58,26,0.1);
   border-color: rgba(139,58,26,0.3);
   color: #8b3a1a;
 }

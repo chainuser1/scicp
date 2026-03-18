@@ -1,5 +1,6 @@
 package com.scriptures.inview.externaldisplay;
 
+import android.Manifest;
 import android.app.Presentation;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
@@ -20,10 +21,13 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +39,12 @@ import java.util.List;
  * Communication: evaluateJavascript() dispatches 'bridge-message' CustomEvents
  * on the external WebView's window object.
  */
-@CapacitorPlugin(name = "ExternalDisplay")
+@CapacitorPlugin(
+    name = "ExternalDisplay",
+    permissions = {
+        @Permission(strings = { Manifest.permission.CAMERA }, alias = "camera")
+    }
+)
 public class ExternalDisplayPlugin extends Plugin {
 
     private static final String TAG = "ExternalDisplay";
@@ -122,6 +131,37 @@ public class ExternalDisplayPlugin extends Plugin {
             presentation.dispatchBridgeMessage(json);
             call.resolve();
         });
+    }
+
+    @PluginMethod
+    public void checkCameraPermission(PluginCall call) {
+        String state;
+        switch (getPermissionState("camera")) {
+            case GRANTED:  state = "granted";  break;
+            case DENIED:   state = "denied";   break;
+            default:       state = "prompt";   break;
+        }
+        JSObject result = new JSObject();
+        result.put("status", state);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void requestCameraPermission(PluginCall call) {
+        if (getPermissionState("camera") == PermissionState.GRANTED) {
+            JSObject result = new JSObject();
+            result.put("status", "granted");
+            call.resolve(result);
+        } else {
+            requestPermissionForAlias("camera", call, "cameraPermissionCallback");
+        }
+    }
+
+    @PermissionCallback
+    private void cameraPermissionCallback(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("status", getPermissionState("camera") == PermissionState.GRANTED ? "granted" : "denied");
+        call.resolve(result);
     }
 
     @PluginMethod

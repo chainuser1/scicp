@@ -270,6 +270,31 @@ fastify.get('/browse/verses', async (request, reply) => {
   }
 });
 
+// HTTP search endpoint (used by mobile sub-searches in context modals)
+fastify.get('/search', async (request, reply) => {
+  const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10' } = request.query;
+  if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
+  const page = Math.max(0, parseInt(pStr, 10) || 0);
+  const pageSize = Math.min(50, Math.max(1, parseInt(psStr, 10) || 10));
+  const lang = language.toLowerCase().trim();
+  try {
+    if (lang !== 'en') {
+      return searchScriptureInDb(q, page, pageSize, resolveDbAdapter(lang), fastify.log);
+    }
+    const expanded = expandWithSynonyms(q.trim());
+    let fusionResult = multiSourceFusion(q.trim(), expanded.join(' '), pageSize);
+    const results = fusionResult.results.slice(0, pageSize).map(r => {
+      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
+      return clean;
+    });
+    return { results, total: fusionResult.total, page, pageSize, query: q, language: lang };
+  } catch (err) {
+    fastify.log.error({ err }, '/search failed');
+    reply.code(500);
+    return { results: [], total: 0, page, pageSize };
+  }
+});
+
 // ─── Service timing constants ─────────────────────────────────────────────────
 // These are tuned for a church / worship-service environment where:
 //   • WiFi in chapel buildings is often congested and unreliable

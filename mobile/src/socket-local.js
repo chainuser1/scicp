@@ -153,7 +153,7 @@ export function isCasting() {
   return _presentationActive;
 }
 
-function emit(event, payload, ackCallback) {
+async function emit(event, payload, ackCallback) {
   // Handle ack-style calls where the last arg is a callback
   if (typeof payload === 'function') {
     ackCallback = payload;
@@ -168,7 +168,7 @@ function emit(event, payload, ackCallback) {
         return;
       }
       try {
-        const result = svc.search(query, page, pageSize, language);
+        const result = await svc.search(query, page, pageSize, language);
         fire('search-results', { ...result, query, language });
       } catch (err) {
         console.error('socket-local search error:', err);

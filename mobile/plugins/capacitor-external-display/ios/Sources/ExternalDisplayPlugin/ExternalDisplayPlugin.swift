@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WebKit
+import AVFoundation
 import Capacitor
 
 /// Capacitor plugin that detects external displays (AirPlay, HDMI via adapter)
@@ -19,6 +20,8 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stopPresentation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendToDisplay", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openCastSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "checkCameraPermission", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestCameraPermission", returnType: CAPPluginReturnPromise),
     ]
 
     private var externalWindow: UIWindow?
@@ -134,6 +137,35 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
             } else {
                 call.resolve(["opened": false])
             }
+        }
+    }
+
+    @objc func checkCameraPermission(_ call: CAPPluginCall) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        let state: String
+        switch status {
+        case .authorized:
+            state = "granted"
+        case .denied, .restricted:
+            state = "denied"
+        default:
+            state = "prompt"
+        }
+        call.resolve(["status": state])
+    }
+
+    @objc func requestCameraPermission(_ call: CAPPluginCall) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        if status == .authorized {
+            call.resolve(["status": "granted"])
+            return
+        }
+        if status == .denied || status == .restricted {
+            call.resolve(["status": "denied"])
+            return
+        }
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            call.resolve(["status": granted ? "granted" : "denied"])
         }
     }
 
