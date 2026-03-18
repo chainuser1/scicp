@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
-import { useSocketCtx } from '../App';
+import { useSocketCtx } from '../socket-context';
 import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
 const { search: svcSearch } = svc;
