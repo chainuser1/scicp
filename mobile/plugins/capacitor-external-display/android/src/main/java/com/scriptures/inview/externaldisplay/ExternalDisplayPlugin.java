@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.hardware.display.DisplayManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -195,6 +196,23 @@ public class ExternalDisplayPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("opened", false);
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.fromParts("package", getContext().getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(intent);
+            JSObject result = new JSObject();
+            result.put("opened", true);
+            call.resolve(result);
+        } catch (Exception e) {
+            JSObject result = new JSObject();
+            result.put("opened", false);
+            call.resolve(result);
+        }
     }
 
     // ── Display detection ───────────────────────────────────────────────────

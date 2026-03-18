@@ -4,6 +4,7 @@ import { useSocketCtx } from '../socket-context';
 import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
 import { createServiceProxy } from '../scripture-service-proxy';
+import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadStateChange, getDownloadStates } from '../db-manager';
 import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
 import CastingControl from '../components/CastingControl';
 
@@ -286,6 +287,17 @@ const QUICK_TOPICS = [
 const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '\u53E3\u8A9E\u8A33', war: 'Samarenyo Bible' };
 const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
 const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese', war: 'Waray' };
+const LANG_OPTIONS = [
+  { value: 'en',     label: 'English' },
+  { value: 'nrsvue', label: 'English w/ NRSVUE Bible' },
+  { value: 'tl',     label: 'Tagalog' },
+  { value: 'ceb',    label: 'Cebuano' },
+  { value: 'es',     label: 'Espanol' },
+  { value: 'el',     label: 'Greek' },
+  { value: 'ilo',    label: 'Ilocano' },
+  { value: 'ja',     label: 'Japanese' },
+  { value: 'war',    label: 'Waray' },
+];
 function getCitation(language, volumeId, secondaryLanguage) {
   const vid = Number(volumeId);
   if (secondaryLanguage) {
@@ -495,6 +507,7 @@ const MobilePresenter = () => {
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   const [enhancedAI,      setEnhancedAI]      = useState(isEnhancedSearchEnabled());
   const [aiModelStatus,   setAiModelStatus]   = useState(getEmbeddingStatus()); // idle|loading|ready|error
+  const [langDownloads,   setLangDownloads]   = useState(getDownloadStates());
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
   const [ctxTopicHistoryIdx, setCtxTopicHistoryIdx] = useState(-1);
@@ -1193,6 +1206,18 @@ const MobilePresenter = () => {
     }
   };
 
+  // Subscribe to language download state changes
+  useEffect(() => {
+    return onDownloadStateChange(setLangDownloads);
+  }, []);
+
+  // Trigger language download if needed (offline mode only)
+  const ensureLanguageAvailable = useCallback(async (lang) => {
+    if (isOnline || isLanguageAvailable(lang) || isLanguageBundled(lang)) return true;
+    const ok = await downloadLanguage(lang, serverUrl);
+    return ok;
+  }, [isOnline, serverUrl]);
+
   const navigateSegment = direction => {
     if (!liveVerse?.segments) return;
     const limit = liveVerse.segments.length - 1;
@@ -1552,6 +1577,11 @@ const MobilePresenter = () => {
 
   const handleLanguageChange = async e => {
     const lang = e.target.value;
+    // In offline mode, download language DB if not already available
+    if (!isOnline && !isLanguageAvailable(lang)) {
+      const ok = await downloadLanguage(lang, serverUrl);
+      if (!ok) return; // download failed — stay on current language
+    }
     setCurrentLanguage(lang);
     setRelatedVerses([]);   // force re-fetch in new language when modal reopened
     setRelatedConcept(null);
@@ -1589,7 +1619,11 @@ const MobilePresenter = () => {
     }
   };
 
-  const handleSecondaryLanguageChange = (lang) => {
+  const handleSecondaryLanguageChange = async (lang) => {
+    if (lang && !isOnline && !isLanguageAvailable(lang)) {
+      const ok = await downloadLanguage(lang, serverUrl);
+      if (!ok) return;
+    }
     setSecondaryLanguage(lang);
     if (liveVerse) emitGoLiveWithRetry({ verse: liveVerse, theme: themeForVerse(currentTheme, liveVerse), language: currentLanguage, secondaryLanguage: lang || null });
   };
@@ -1598,6 +1632,13 @@ const MobilePresenter = () => {
     if (!secondaryLanguage) return;
     const newPrimary   = secondaryLanguage;
     const newSecondary = currentLanguage;
+    // Ensure both languages are available before swapping
+    if (!isOnline) {
+      if (!isLanguageAvailable(newPrimary)) {
+        const ok = await downloadLanguage(newPrimary, serverUrl);
+        if (!ok) return;
+      }
+    }
     setCurrentLanguage(newPrimary);
     setSecondaryLanguage(newSecondary);
     setExpandedTranslations(new Set());
@@ -1946,16 +1987,14 @@ const MobilePresenter = () => {
                     className="lang-select"
                     value={currentLanguage}
                     onChange={handleLanguageChange}
+                    disabled={Object.values(langDownloads).some(s => s.status === 'downloading')}
                   >
-                    <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
-                    <option value="tl">Tagalog</option>
-                    <option value="ceb">Cebuano</option>
-                    <option value="es">Espanol</option>
-                    <option value="el">Greek</option>
-                    <option value="ilo">Ilocano</option>
-                    <option value="ja">Japanese</option>
-                    <option value="war">Waray</option>
+                    {LANG_OPTIONS.map(({ value, label }) => {
+                      const st = langDownloads[value];
+                      const dl = !isOnline && st && st.status === 'downloading';
+                      const suffix = dl ? ` ⬇ ${st.progress}%` : (!isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '');
+                      return <option key={value} value={value}>{label}{suffix}</option>;
+                    })}
                   </select>
                 </div>
                 <div className="popover-divider" />
@@ -1969,15 +2008,11 @@ const MobilePresenter = () => {
                       onChange={e => handleSecondaryLanguageChange(e.target.value)}
                     >
                       <option value="">Off</option>
-                      <option value="en">English</option>
-                      <option value="nrsvue">English w/ NRSVUE Bible</option>
-                      <option value="tl">Tagalog</option>
-                      <option value="ceb">Cebuano</option>
-                      <option value="es">Espanol</option>
-                      <option value="el">Greek</option>
-                      <option value="ilo">Ilocano</option>
-                      <option value="ja">Japanese</option>
-                      <option value="war">Waray</option>
+                      {LANG_OPTIONS.map(({ value, label }) => {
+                        const st = langDownloads[value];
+                        const suffix = !isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '';
+                        return <option key={value} value={value}>{label}{suffix}</option>;
+                      })}
                     </select>
                     <button
                       className="popover-swap-btn"
@@ -2110,16 +2145,14 @@ const MobilePresenter = () => {
                     className="lang-select lang-select--mobile"
                     value={currentLanguage}
                     onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
+                    disabled={Object.values(langDownloads).some(s => s.status === 'downloading')}
                   >
-                    <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
-                    <option value="tl">Tagalog</option>
-                    <option value="ceb">Cebuano</option>
-                    <option value="es">Espanol</option>
-                    <option value="el">Greek</option>
-                    <option value="ilo">Ilocano</option>
-                    <option value="ja">Japanese</option>
-                    <option value="war">Waray</option>
+                    {LANG_OPTIONS.map(({ value, label }) => {
+                      const st = langDownloads[value];
+                      const dl = !isOnline && st && st.status === 'downloading';
+                      const suffix = dl ? ` ⬇ ${st.progress}%` : (!isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '');
+                      return <option key={value} value={value}>{label}{suffix}</option>;
+                    })}
                   </select>
                 </div>
                 {/* F8 — secondary language */}
@@ -2132,15 +2165,11 @@ const MobilePresenter = () => {
                     style={{ flex: 1 }}
                   >
                     <option value="">Off</option>
-                    <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
-                    <option value="tl">Tagalog</option>
-                    <option value="ceb">Cebuano</option>
-                    <option value="es">Espanol</option>
-                    <option value="el">Greek</option>
-                    <option value="ilo">Ilocano</option>
-                    <option value="ja">Japanese</option>
-                    <option value="war">Waray</option>
+                    {LANG_OPTIONS.map(({ value, label }) => {
+                      const st = langDownloads[value];
+                      const suffix = !isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '';
+                      return <option key={value} value={value}>{label}{suffix}</option>;
+                    })}
                   </select>
                   <button
                     className="popover-swap-btn"

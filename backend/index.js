@@ -1,6 +1,7 @@
 const fastify = require('fastify')({ logger: true });
 const { Server } = require("socket.io");
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { BetterSqliteAdapter } = require('../shared/db-adapter');
 const engine = require('../shared/scripture-engine');
@@ -184,6 +185,37 @@ fastify.get('/config', async (request) => {
     process.env.PUBLIC_ORIGIN ||
     `${request.protocol}://${request.hostname}`;
   return { publicOrigin };
+});
+
+// ── /db/:filename — serve scripture DB files for on-demand language downloads.
+//    Only allows known .db files from the DB_DIR; prevents path traversal.
+const DOWNLOADABLE_DBS = new Set([
+  'tagalog-scriptures-sqlite.db',
+  'cebuano-scriptures-sqlite.db',
+  'spanish-scriptures-sqlite.db',
+  'greek-scriptures-sqlite.db',
+  'ilocano-scriptures-sqlite.db',
+  'japanese-scriptures-sqlite.db',
+  'nrsvue-scriptures-sqlite.db',
+  'waray-scriptures-sqlite.db',
+]);
+fastify.get('/db/:filename', async (request, reply) => {
+  const { filename } = request.params;
+  if (!DOWNLOADABLE_DBS.has(filename)) {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  const filePath = path.join(DB_DIR, filename);
+  try {
+    const stat = fs.statSync(filePath);
+    const stream = fs.createReadStream(filePath);
+    return reply
+      .header('Content-Type', 'application/octet-stream')
+      .header('Content-Length', stat.size)
+      .header('Cache-Control', 'public, max-age=86400')
+      .send(stream);
+  } catch {
+    return reply.code(404).send({ error: 'Not found' });
+  }
 });
 
 fastify.get('/setlists', async (request, reply) => {
