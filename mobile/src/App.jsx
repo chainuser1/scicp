@@ -1,12 +1,9 @@
-import React, { useEffect, useState, useCallback, createContext, useContext, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
+import SocketCtx from './socket-context';
 import MobilePresenter from './pages/MobilePresenter.jsx';
-
-// ── Socket context — provides the active socket + mode to all children ──
-const SocketCtx = createContext(null);
-export function useSocketCtx() { return useContext(SocketCtx); }
 
 const MODE_KEY  = 'scicp.conn_mode';    // 'offline' | 'online'
 const URL_KEY   = 'scicp.server_url';
