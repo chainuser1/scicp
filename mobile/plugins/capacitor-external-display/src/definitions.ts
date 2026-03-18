@@ -42,4 +42,16 @@ export interface ExternalDisplayPlugin {
    * Returns opened=false on platforms that don't support it.
    */
   openCastSettings(): Promise<{ opened: boolean }>;
+
+  /**
+   * Check current camera permission status natively.
+   * Returns 'granted', 'denied', or 'prompt'.
+   */
+  checkCameraPermission(): Promise<{ status: string }>;
+
+  /**
+   * Request camera permission using the native Android/iOS dialog.
+   * Returns 'granted' or 'denied'.
+   */
+  requestCameraPermission(): Promise<{ status: string }>;
 }

@@ -111,6 +111,9 @@ export async function initAllDatabases() {
       const fn = await loadDatabase('footnotes-lds-summaries.db');
       if (fn) databases.set('footnotes', fn);
     } catch (_) {}
+    // NOTE: verse-embeddings.db (~83MB) is NOT loaded at startup.
+    // It's lazy-loaded on first search via loadEmbeddingsDb() to avoid
+    // slow startup and OOM on low-memory mobile devices.
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length}/${entries.length} databases`);
     return databases;
@@ -138,4 +141,25 @@ export function getLoadedLanguages() {
  */
 export function isReady() {
   return databases.size > 0;
+}
+
+let embeddingsPromise = null;
+/**
+ * Lazy-load verse-embeddings.db (~83MB). Called on first search that needs it.
+ * Returns the sql.js Database or null.
+ */
+export async function loadEmbeddingsDb() {
+  if (databases.has('embeddings')) return databases.get('embeddings');
+  if (embeddingsPromise) return embeddingsPromise;
+  embeddingsPromise = (async () => {
+    try {
+      await initEngine();
+      const emb = await loadDatabase('verse-embeddings.db');
+      if (emb) { databases.set('embeddings', emb); return emb; }
+    } catch (err) {
+      console.warn('db-manager: verse-embeddings.db load failed:', err.message);
+    }
+    return null;
+  })();
+  return embeddingsPromise;
 }

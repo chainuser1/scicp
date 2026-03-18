@@ -4,8 +4,10 @@
  * Wraps the shared/scripture-engine functions with SqlJsAdapter instances
  * loaded from db-manager.js. Provides a clean async API for MobilePresenter.
  */
-import { getDb, getLoadedLanguages, initAllDatabases, isReady } from './db-manager';
+import { getDb, getLoadedLanguages, initAllDatabases, isReady, loadEmbeddingsDb } from './db-manager';
 import { SqlJsAdapter } from '@shared/db-adapter';
+import scriptureSynonyms from '@shared/scripture-synonyms.json';
+import { isEnhancedSearchEnabled, semanticSearch as fullSemanticSearch, initPipeline, getStatus as getEmbeddingStatus } from './embedding-engine';
 import {
   segmentVerseText,
   segmentVerseTextDual,
@@ -24,6 +26,105 @@ import {
   LANGUAGE_NAMES,
   VOTD_POOL,
 } from '@shared/scripture-engine';
+
+// ── Synonym expansion (same as backend) ─────────────────────────────────────
+function expandWithSynonyms(query) {
+  const words = query.toLowerCase().split(/\s+/);
+  const expanded = new Set(words);
+  const lowerQuery = query.toLowerCase();
+  for (const key of Object.keys(scriptureSynonyms)) {
+    if (key.includes(' ') && lowerQuery.includes(key)) {
+      for (const syn of scriptureSynonyms[key]) expanded.add(syn);
+    }
+  }
+  for (const w of words) {
+    const stems = [w, w.replace(/s$/, ''), w.replace(/es$/, ''), w.replace(/ed$/, ''),
+                   w.replace(/ing$/, ''), w.replace(/ing$/, 'e'), w.replace(/eth$/, ''),
+                   w.replace(/eth$/, 'e'), w + 's'];
+    for (const stem of stems) {
+      if (scriptureSynonyms[stem]) {
+        for (const syn of scriptureSynonyms[stem]) expanded.add(syn);
+        break;
+      }
+    }
+  }
+  return [...expanded];
+}
+
+// ── Embedding helpers (pseudo-relevance feedback) ──────────────────────────
+function cosineSimilarity(a, b) {
+  let sum = 0.0;
+  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  return sum; // vectors are pre-normalized, so dot product = cosine
+}
+
+/**
+ * Fetch pre-baked embedding vectors for a list of verse IDs.
+ * Returns Map<verse_id, Float32Array(384)>.
+ */
+function fetchEmbeddings(embDb, verseIds) {
+  const map = new Map();
+  if (!embDb) return map;
+  for (const vid of verseIds) {
+    try {
+      const rows = embDb.exec('SELECT embedding FROM verse_embeddings WHERE verse_id = ?', [vid]);
+      if (rows.length && rows[0].values.length) {
+        const blob = rows[0].values[0][0];
+        map.set(vid, new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4));
+      }
+    } catch {}
+  }
+  return map;
+}
+
+/**
+ * Pseudo-relevance feedback: average top-K FTS result embeddings → pseudo-query vector,
+ * then find nearest neighbors among all verse embeddings.
+ */
+function embeddingAssistedSearch(topVerseIds, embDb, adapter, limit = 30) {
+  if (!embDb || topVerseIds.length === 0) return [];
+
+  // Fetch embeddings for top FTS results
+  const seedEmbeddings = fetchEmbeddings(embDb, topVerseIds.slice(0, 8));
+  if (seedEmbeddings.size === 0) return [];
+
+  // Average seed embeddings → pseudo-query vector
+  const dim = 384;
+  const centroid = new Float32Array(dim);
+  for (const vec of seedEmbeddings.values()) {
+    for (let i = 0; i < dim; i++) centroid[i] += vec[i];
+  }
+  const n = seedEmbeddings.size;
+  for (let i = 0; i < dim; i++) centroid[i] /= n;
+  // Normalize
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += centroid[i] * centroid[i];
+  norm = Math.sqrt(norm);
+  if (norm > 0) for (let i = 0; i < dim; i++) centroid[i] /= norm;
+
+  // Scan all embeddings for nearest neighbors
+  const seedSet = new Set(topVerseIds);
+  const allRows = embDb.exec('SELECT verse_id, embedding FROM verse_embeddings');
+  if (!allRows.length) return [];
+
+  const scored = [];
+  for (const [vid, blob] of allRows[0].values) {
+    if (seedSet.has(vid)) continue;
+    const vec = new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+    const sim = cosineSimilarity(centroid, vec);
+    if (sim > 0.5) scored.push({ verse_id: vid, score: sim });
+  }
+  scored.sort((a, b) => b.score - a.score);
+
+  // Hydrate top results with full verse data
+  const stmt = adapter.prepare(
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+  );
+  return scored.slice(0, limit).map(({ verse_id, score }, i) => {
+    const row = stmt.get(verse_id);
+    return row ? { ...row, _source: 'embedding', _embRank: i, similarity_score: +score.toFixed(4) } : null;
+  }).filter(Boolean);
+}
 
 /** Resolve the SqlJsAdapter for a given language code. */
 function resolveAdapter(language) {
@@ -46,7 +147,7 @@ export async function init() {
  * Sources: FTS5 (BM25), Topical Guide, Entity Index, Chapter Summaries
  * Falls back to simple FTS if search-graph.db unavailable.
  */
-export function search(query, page = 0, pageSize = 10, language = 'en') {
+export async function search(query, page = 0, pageSize = 10, language = 'en') {
   const adapter = resolveAdapter(language);
   if (!adapter) return { results: [], total: 0, page, pageSize };
 
@@ -145,6 +246,12 @@ export function search(query, page = 0, pageSize = 10, language = 'en') {
     }
   } catch {}
 
+  // Synonym expansion: expand query terms using scripture-synonyms.json
+  const synonymTerms = expandWithSynonyms(query.trim());
+  const synExpandedQuery = synonymTerms.length > query.trim().split(/\s+/).length
+    ? synonymTerms.join(' ')
+    : null;
+
   // Source 1: FTS5 (BM25)
   const ftsResult = searchScripture(query, 0, 50, adapter, log);
   const ftsRanked = (ftsResult.results || []).map((r, i) => ({
@@ -232,11 +339,43 @@ export function search(query, page = 0, pageSize = 10, language = 'en') {
     } catch {}
   }
 
+  // Source 4: Synonym-expanded FTS search
+  let synRanked = [];
+  if (synExpandedQuery) {
+    try {
+      const synResult = searchScripture(synExpandedQuery, 0, 40, adapter, log);
+      const seen = new Set(ftsRanked.map(r => r.verse_id));
+      synRanked = (synResult.results || []).filter(r => !seen.has(r.verse_id))
+        .map((r, i) => ({ ...r, _source: 'synonym', _synRank: i }));
+    } catch {}
+  }
+
+  // Source 5: Embedding-assisted search
+  // Lazy-loads verse-embeddings.db (~83MB) on first use.
+  // If enhanced AI search is enabled and pipeline is ready, use full MiniLM semantic search.
+  // Otherwise, fall back to pseudo-relevance feedback (average top FTS embeddings).
+  let embRanked = [];
+  let embDb = getDb('embeddings');
+  if (!embDb) {
+    // Trigger lazy load in background for next search (don't block this search)
+    loadEmbeddingsDb().catch(() => {});
+  }
+  if (embDb) {
+    try {
+      if (isEnhancedSearchEnabled() && getEmbeddingStatus() === 'ready') {
+        embRanked = (await fullSemanticSearch(query, embDb, adapter, 30)) || [];
+      } else if (ftsRanked.length >= 3) {
+        const topIds = ftsRanked.slice(0, 8).map(r => r.verse_id);
+        embRanked = embeddingAssistedSearch(topIds, embDb, adapter, 30);
+      }
+    } catch {}
+  }
+
   // ── Reciprocal Rank Fusion (with per-list weights) ──
   const RRF_K = 60;
   const rrfScores = new Map(); // verse_id → { score, row, sources }
-  const allLists = [ftsRanked, phraseRanked, tgRanked, entityRanked];
-  const listWeights = [1, 3, 1, 1]; // phraseRanked gets 3x weight
+  const allLists = [ftsRanked, phraseRanked, tgRanked, entityRanked, synRanked, embRanked];
+  const listWeights = [1, 3, 1, 1, 0.8, 1.2]; // embedding 1.2x (high-quality semantic signal)
 
   for (let li = 0; li < allLists.length; li++) {
     const list = allLists[li];

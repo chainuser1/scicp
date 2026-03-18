@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { ExternalDisplay } from 'capacitor-external-display';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
+import { initAllDatabases } from './db-manager';
 import SocketCtx from './socket-context';
 import MobilePresenter from './pages/MobilePresenter.jsx';
 
@@ -37,6 +38,11 @@ export default function App() {
       });
   }, [mode]);
 
+  // ── Always load local DBs so context modals work in any mode ──
+  useEffect(() => {
+    initAllDatabases().catch(() => {});
+  }, []);
+
   // ── QR scanner ──
   const stopCamera = useCallback(() => {
     scanActiveRef.current = false;
@@ -47,16 +53,21 @@ export default function App() {
 
   const startScanner = useCallback(() => {
     (async () => {
-      // Check camera permission state before opening the scanner overlay
-      if (navigator.permissions) {
-        try {
-          const status = await navigator.permissions.query({ name: 'camera' });
-          if (status.state === 'denied') {
+      // Request camera permission natively before opening the scanner
+      try {
+        const perm = await ExternalDisplay.checkCameraPermission();
+        if (perm.status === 'denied') {
+          setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+          return;
+        }
+        if (perm.status !== 'granted') {
+          const req = await ExternalDisplay.requestCameraPermission();
+          if (req.status !== 'granted') {
             setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
             return;
           }
-        } catch { /* browser may not support querying camera permission — proceed anyway */ }
-      }
+        }
+      } catch { /* web fallback — proceed with getUserMedia */ }
 
       setScannerOpen(true);
       scanActiveRef.current = true;
@@ -163,6 +174,8 @@ export default function App() {
     const cleanUrl = (url || serverUrl).replace(/\/+$/, '');
     try {
       await remoteSocket.init(cleanUrl);
+      // Also init local databases so context modals (summaries, footnotes, entities) work
+      initAllDatabases().catch(() => {});
       localStorage.setItem(MODE_KEY, 'online');
       localStorage.setItem(URL_KEY, cleanUrl);
       setServerUrl(cleanUrl);
@@ -181,13 +194,11 @@ export default function App() {
     setChecksBusy(true);
     try {
       let camera = 'unknown';
-      if (navigator.permissions) {
-        try {
-          const status = await navigator.permissions.query({ name: 'camera' });
-          camera = status.state === 'granted' ? 'ok' : status.state === 'denied' ? 'blocked' : 'pending';
-        } catch {
-          camera = 'unknown';
-        }
+      try {
+        const result = await ExternalDisplay.checkCameraPermission();
+        camera = result.status === 'granted' ? 'ok' : result.status === 'denied' ? 'blocked' : 'pending';
+      } catch {
+        camera = 'unknown';
       }
 
       let cast = 'unavailable';
@@ -223,12 +234,12 @@ export default function App() {
 
   const requestCameraPermission = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach(t => t.stop());
+      const result = await ExternalDisplay.requestCameraPermission();
+      if (result.status !== 'granted') {
+        setError('Camera permission denied. Open device Settings → Apps → Scriptures in View → Permissions.');
+      }
     } catch (err) {
-      setError(err?.name === 'NotAllowedError'
-        ? 'Camera permission denied. Open device Settings → Apps → Scriptures in View → Permissions.'
-        : `Camera check failed: ${err?.message || err}`);
+      setError(`Camera check failed: ${err?.message || err}`);
     } finally {
       runStartupChecks();
     }
@@ -257,17 +268,23 @@ export default function App() {
     scanActiveRef.current = true;
 
     (async () => {
-      // Check camera permission state before opening the scanner overlay
-      if (navigator.permissions) {
-        try {
-          const status = await navigator.permissions.query({ name: 'camera' });
-          if (status.state === 'denied') {
+      // Request camera permission natively before opening the scanner
+      try {
+        const perm = await ExternalDisplay.checkCameraPermission();
+        if (perm.status === 'denied') {
+          setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+          setScannerOpen(false);
+          return;
+        }
+        if (perm.status !== 'granted') {
+          const req = await ExternalDisplay.requestCameraPermission();
+          if (req.status !== 'granted') {
             setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
             setScannerOpen(false);
             return;
           }
-        } catch { /* proceed anyway */ }
-      }
+        }
+      } catch { /* web fallback — proceed with getUserMedia */ }
 
       let jsQR;
       try {
