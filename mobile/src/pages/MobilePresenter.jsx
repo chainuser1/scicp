@@ -399,6 +399,10 @@ const MobilePresenter = () => {
   const [currentPage, setCurrentPage]       = useState(0);
   const searchAppendRef = useRef(false);
   const searchSentinelRef = useRef(null);
+  const totalResultsRef = useRef(0);
+  const currentPageRef = useRef(0);
+  const queryRef = useRef('');
+  const currentLanguageRef = useRef('en');
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
 
@@ -1038,10 +1042,13 @@ const MobilePresenter = () => {
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     // Only call init on first mount or when socket reference actually changes
-    socket.init().catch(err => {
-      console.error('[MobilePresenter] socket.init failed:', err);
-      setConnectionState('error');
-    });
+    // Skip if socket is already connected (e.g. App.jsx already called remoteSocket.init)
+    if (!socket.connected) {
+      socket.init().catch(err => {
+        console.error('[MobilePresenter] socket.init failed:', err);
+        setConnectionState('error');
+      });
+    }
     if (socket.connected) {
       handleConnect();
     }
@@ -1471,26 +1478,33 @@ const MobilePresenter = () => {
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
+  // Keep refs in sync so the IntersectionObserver callback reads fresh values
+  totalResultsRef.current = totalResults;
+  currentPageRef.current = currentPage;
+  queryRef.current = query;
+  currentLanguageRef.current = currentLanguage;
+
   useEffect(() => {
     const root = resultsListRef.current;
     if (!root || !searchSentinelRef.current) return;
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting || searchLoadingRef.current) continue;
-        const tp = Math.ceil(totalResults / PAGE_SIZE);
-        if (currentPage < tp - 1 && query) {
+        const tp = Math.ceil(totalResultsRef.current / PAGE_SIZE);
+        if (currentPageRef.current < tp - 1 && queryRef.current) {
           searchLoadingRef.current = true;
-          const nextPage = currentPage + 1;
+          const nextPage = currentPageRef.current + 1;
           searchAppendRef.current = true;
           setCurrentPage(nextPage);
-          emitWithSession('search', { query, page: nextPage, pageSize: PAGE_SIZE, language: currentLanguage });
+          emitWithSession('search', { query: queryRef.current, page: nextPage, pageSize: PAGE_SIZE, language: currentLanguageRef.current });
           setTimeout(() => { searchLoadingRef.current = false; }, 500);
         }
       }
     }, { root, threshold: 0.1 });
     observer.observe(searchSentinelRef.current);
     return () => observer.disconnect();
-  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results.length]);
 
   const handleCtxTouchStart = (e) => {
     if (contextTab !== 'chapter') return;

@@ -24,6 +24,7 @@ export default function App() {
   const rafRef     = useRef(null);
   const streamRef  = useRef(null);
   const scanActiveRef = useRef(false);
+  const switchToOnlineRef = useRef(null);
 
   // ── Offline init ──
   useEffect(() => {
@@ -111,7 +112,7 @@ export default function App() {
                 const origin = url.origin;
                 stopCamera();
                 setScannerOpen(false);
-                switchToOnline(origin, session.toUpperCase());
+                switchToOnlineRef.current(origin, session.toUpperCase());
                 return;
               }
             } catch {
@@ -120,7 +121,7 @@ export default function App() {
               if (bare.length >= 4 && serverUrl) {
                 stopCamera();
                 setScannerOpen(false);
-                switchToOnline(serverUrl, bare);
+                switchToOnlineRef.current(serverUrl, bare);
                 return;
               }
             }
@@ -130,7 +131,7 @@ export default function App() {
       };
       rafRef.current = requestAnimationFrame(tick);
     })();
-  }, [serverUrl, stopCamera, switchToOnline]);
+  }, [serverUrl, stopCamera]);
 
   // ── Switch mode (hot — keeps MobilePresenter mounted) ──
   const requestModeSwitch = useCallback(() => {
@@ -174,6 +175,7 @@ export default function App() {
       setConnecting(false);
     }
   }, [serverUrl]);
+  switchToOnlineRef.current = switchToOnline;
 
   const runStartupChecks = useCallback(async () => {
     setChecksBusy(true);
@@ -317,7 +319,7 @@ export default function App() {
               if (session && session.length >= 4) {
                 stopCamera();
                 setScannerOpen(false);
-                switchToOnline(url.origin, session.toUpperCase());
+                switchToOnlineRef.current(url.origin, session.toUpperCase());
                 return;
               }
             } catch {
@@ -325,7 +327,7 @@ export default function App() {
               if (bare.length >= 4 && serverUrl) {
                 stopCamera();
                 setScannerOpen(false);
-                switchToOnline(serverUrl, bare);
+                switchToOnlineRef.current(serverUrl, bare);
                 return;
               }
             }
@@ -335,7 +337,7 @@ export default function App() {
       };
       rafRef.current = requestAnimationFrame(tick);
     })();
-  }, [serverUrl, stopCamera, switchToOnline]);
+  }, [serverUrl, stopCamera]);
 
   // ── Already initialized — show presenter + overlays ──
   if (ready && mode) {
