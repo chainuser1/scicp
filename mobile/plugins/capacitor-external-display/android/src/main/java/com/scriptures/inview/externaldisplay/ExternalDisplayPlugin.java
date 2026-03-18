@@ -141,7 +141,7 @@ public class ExternalDisplayPlugin extends Plugin {
         }
 
         try {
-            Intent wifiDisplayIntent = new Intent(Settings.ACTION_WIFI_DISPLAY_SETTINGS);
+            Intent wifiDisplayIntent = new Intent("android.settings.WIFI_DISPLAY_SETTINGS");
             wifiDisplayIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getActivity().startActivity(wifiDisplayIntent);
             JSObject result = new JSObject();
