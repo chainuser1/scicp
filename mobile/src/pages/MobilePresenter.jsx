@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ExternalDisplay } from 'capacitor-external-display';
 import { useSocketCtx } from '../App';
 import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
@@ -408,6 +409,9 @@ const MobilePresenter = () => {
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);
+  const [readinessOpen, setReadinessOpen]     = useState(false);
+  const [readinessBusy, setReadinessBusy]     = useState(false);
+  const [readiness, setReadiness]             = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -657,6 +661,83 @@ const MobilePresenter = () => {
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
   const PAGE_SIZE = 4; // 4 results/batch on mobile — thumb-friendly glide navigation
   const emitWithSession = (event, payload = {}) => socket.emit(event, { ...payload, sessionId });
+
+  const runReadinessChecks = useCallback(async () => {
+    setReadinessBusy(true);
+    try {
+      let camera = 'unknown';
+      if (navigator.permissions) {
+        try {
+          const status = await navigator.permissions.query({ name: 'camera' });
+          camera = status.state === 'granted' ? 'ok' : status.state === 'denied' ? 'blocked' : 'pending';
+        } catch {
+          camera = 'unknown';
+        }
+      }
+
+      let cast = 'unavailable';
+      try { cast = (await isDisplayAvailable()) ? 'ok' : 'pending'; } catch { cast = 'unavailable'; }
+
+      let online = isOnline ? 'offline' : 'local';
+      if (isOnline) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4500);
+          const base = String(serverUrl || '').replace(/\/+$/, '');
+          if (base) {
+            const res = await fetch(`${base}/health`, { signal: controller.signal });
+            online = res.ok ? 'ok' : 'offline';
+          }
+          clearTimeout(timer);
+        } catch {
+          online = 'offline';
+        }
+      }
+
+      setReadiness({ camera, cast, online });
+    } finally {
+      setReadinessBusy(false);
+    }
+  }, [isOnline, serverUrl]);
+
+  const requestCameraPermission = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(t => t.stop());
+    } catch {
+      showToast('Camera permission denied or unavailable');
+    } finally {
+      runReadinessChecks();
+    }
+  }, [runReadinessChecks]);
+
+  const openCastSetup = useCallback(async () => {
+    try { await ExternalDisplay.openCastSettings(); } catch { /* ignore */ }
+    setTimeout(() => { runReadinessChecks(); }, 1200);
+  }, [runReadinessChecks]);
+
+  useEffect(() => {
+    if (readinessOpen) runReadinessChecks();
+  }, [readinessOpen, runReadinessChecks]);
+
+  // When casting starts, re-push current presenter state so the external display
+  // immediately reflects the active verse/theme instead of waiting for next action.
+  useEffect(() => {
+    const syncCastDisplay = () => {
+      socket.emit('update-theme', { theme: currentTheme, sessionId });
+      if (isCustomLive && (customText || customSubtext)) {
+        socket.emit('go-custom', { text: customText, subtext: customSubtext, theme: currentTheme, sessionId });
+        return;
+      }
+      if (liveVerse) {
+        socket.emit('update-verse', { verse: liveVerse, sessionId });
+        return;
+      }
+      socket.emit('clear-screen', { sessionId });
+    };
+    window.addEventListener('scicp-cast-started', syncCastDisplay);
+    return () => window.removeEventListener('scicp-cast-started', syncCastDisplay);
+  }, [socket, sessionId, currentTheme, isCustomLive, customText, customSubtext, liveVerse]);
 
   const showToast = (msg) => {
     setToastMsg(msg);
@@ -2055,6 +2136,9 @@ const MobilePresenter = () => {
                   <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
                     <IconInfo /> Help
                   </button>
+                  <button className="theme-btn" onClick={() => { setReadinessOpen(true); setMobileMenuOpen(false); }}>
+                    ✅ Checks
+                  </button>
                 </div>
               </div>
 
@@ -2096,6 +2180,38 @@ const MobilePresenter = () => {
           {connectionState !== 'connecting' && !isOnline && (
             <button className="mobile-conn-banner-btn" onClick={retryConnection}>Retry</button>
           )}
+        </div>
+      )}
+
+      {readinessOpen && (
+        <div className="ready-panel-backdrop" role="dialog" aria-label="Permissions and connectivity checks">
+          <div className="ready-panel">
+            <div className="ready-panel-header">
+              <strong>Permissions &amp; Connectivity</strong>
+              <button className="ready-panel-close" onClick={() => setReadinessOpen(false)}>✕</button>
+            </div>
+            <div className="ready-panel-body">
+              <div className="ready-item">
+                <span>📷 Camera (QR scanner)</span>
+                <span className={`startup-badge startup-badge--${readiness.camera}`}>{readiness.camera}</span>
+              </div>
+              <div className="ready-item">
+                <span>📺 Cast display</span>
+                <span className={`startup-badge startup-badge--${readiness.cast}`}>{readiness.cast}</span>
+              </div>
+              <div className="ready-item">
+                <span>{isOnline ? '🌐 Online API' : '📱 Offline mode'}</span>
+                <span className={`startup-badge startup-badge--${readiness.online}`}>{readiness.online}</span>
+              </div>
+              <div className="ready-panel-actions">
+                <button className="theme-btn" onClick={requestCameraPermission}>Allow Camera</button>
+                <button className="theme-btn" onClick={openCastSetup}>Open Cast Setup</button>
+                <button className="theme-btn" onClick={runReadinessChecks} disabled={readinessBusy}>
+                  {readinessBusy ? 'Checking…' : 'Refresh'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

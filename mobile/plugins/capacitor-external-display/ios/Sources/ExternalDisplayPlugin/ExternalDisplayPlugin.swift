@@ -18,6 +18,7 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "startPresentation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopPresentation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendToDisplay", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openCastSettings", returnType: CAPPluginReturnPromise),
     ]
 
     private var externalWindow: UIWindow?
@@ -116,6 +117,22 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
                 } else {
                     call.resolve()
                 }
+            }
+        }
+    }
+
+    @objc func openCastSettings(_ call: CAPPluginCall) {
+        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
+            call.resolve(["opened": false])
+            return
+        }
+        DispatchQueue.main.async {
+            if UIApplication.shared.canOpenURL(settingsURL) {
+                UIApplication.shared.open(settingsURL, options: [:]) { ok in
+                    call.resolve(["opened": ok])
+                }
+            } else {
+                call.resolve(["opened": false])
             }
         }
     }

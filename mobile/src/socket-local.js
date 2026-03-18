@@ -40,6 +40,17 @@ function supportsWebPresentation() {
   return typeof window !== 'undefined' && typeof window.PresentationRequest === 'function';
 }
 
+function candidateClientUrls(clientUrl) {
+  const urls = new Set();
+  if (clientUrl) urls.add(clientUrl);
+  try {
+    urls.add(new URL('client-display.html', window.location.href.replace(/^capacitor:\/\//, 'http://')).toString());
+  } catch { /* ignore */ }
+  urls.add('http://localhost/client-display.html');
+  urls.add('https://localhost/client-display.html');
+  return [...urls].filter(Boolean);
+}
+
 async function sendToDisplay(message) {
   if (_presentationActive) {
     if (_castMode === 'native') {
@@ -63,13 +74,16 @@ async function sendToDisplay(message) {
 
 /** Start presenting on an external display. Called by CastingControl. */
 export async function startCasting(clientUrl) {
-  try {
-    await ExternalDisplay.startPresentation({ url: clientUrl });
-    _presentationActive = true;
-    _castMode = 'native';
-    return true;
-  } catch (err) {
-    console.warn('startCasting failed:', err);
+  const nativeUrls = candidateClientUrls(clientUrl);
+  for (const url of nativeUrls) {
+    try {
+      await ExternalDisplay.startPresentation({ url });
+      _presentationActive = true;
+      _castMode = 'native';
+      return true;
+    } catch (err) {
+      console.warn(`startCasting failed for ${url}:`, err);
+    }
   }
 
   if (!supportsWebPresentation()) return false;

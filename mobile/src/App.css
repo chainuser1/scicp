@@ -7338,6 +7338,74 @@ button, [role="button"] {
 }
 .mode-connect-btn:disabled { opacity: 0.4; cursor: default; }
 
+.startup-readiness {
+  margin-top: 10px;
+  width: 100%;
+  max-width: 340px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+}
+.startup-readiness-title {
+  font-size: 0.82rem;
+  color: #c9a84c;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.startup-readiness-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #c6c0b4;
+  margin: 5px 0;
+}
+.startup-readiness-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.startup-readiness-actions .mode-connect-btn {
+  flex: 1;
+  padding: 7px 8px;
+  font-size: 0.74rem;
+}
+.startup-badge {
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 8px;
+  letter-spacing: .03em;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #d0c9bb;
+}
+.startup-badge--ok {
+  color: #7bf0b2;
+  border-color: rgba(123,240,178,0.5);
+  background: rgba(123,240,178,0.12);
+}
+.startup-badge--pending,
+.startup-badge--checking,
+.startup-badge--unknown {
+  color: #ffd27a;
+  border-color: rgba(255,210,122,0.5);
+  background: rgba(255,210,122,0.12);
+}
+.startup-badge--blocked,
+.startup-badge--offline,
+.startup-badge--unavailable {
+  color: #ff9f9f;
+  border-color: rgba(255,159,159,0.5);
+  background: rgba(255,159,159,0.12);
+}
+.startup-badge--local {
+  color: #9ad1ff;
+  border-color: rgba(154,209,255,0.5);
+  background: rgba(154,209,255,0.12);
+}
+
 /* Mode-switch overlay (floats above the presenter) */
 .mode-screen--overlay {
   position: fixed;
@@ -7365,6 +7433,58 @@ button, [role="button"] {
   background: rgba(201,168,76,0.12) !important;
 }
 .mode-card--active .mode-card-label { color: #c9a84c; }
+
+.ready-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.ready-panel {
+  width: min(460px, 100%);
+  background: #111219;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.ready-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  color: #e8e0d0;
+}
+.ready-panel-close {
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 1rem;
+  cursor: pointer;
+}
+.ready-panel-body {
+  padding: 12px;
+}
+.ready-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 0.88rem;
+  color: #d8d1c1;
+}
+.ready-panel-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ready-panel-actions .theme-btn {
+  flex: 1;
+}
 
 /* ── QR Scanner overlay ── */
 .qr-scan-overlay {

@@ -10,7 +10,7 @@
  *   Steps: Android quick settings → Cast/Screen Cast → select your receiver
  *   (AirServer, Miracast TV, Chromecast, etc.) → then tap Cast here.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { startCasting, stopCasting, isDisplayAvailable, isCasting } from '../socket-local';
 
@@ -25,9 +25,10 @@ export default function CastingControl({ className = '', compact = false }) {
   const [available, setAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
   const [showHint, setShowHint] = useState(false);
+  const pendingAutoStartRef = useRef(false);
   const getClientUrl = () => {
-    const base = window.location.origin.replace('capacitor://', 'http://');
-    return `${base}/client-display.html`;
+    const href = window.location.href.replace(/^capacitor:\/\//, 'http://');
+    return new URL('client-display.html', href).toString();
   };
 
   // Poll for display availability
@@ -38,12 +39,23 @@ export default function CastingControl({ className = '', compact = false }) {
       const avail = await isDisplayAvailable(getClientUrl());
       if (mounted) setAvailable(avail);
     };
+    setCasting(isCasting());
     check();
 
     const pollInterval = setInterval(check, 2000);
 
-    const onConnect = ExternalDisplay.addListener('displayConnected', () => {
-      if (mounted) { setAvailable(true); setShowHint(false); }
+    const onConnect = ExternalDisplay.addListener('displayConnected', async () => {
+      if (!mounted) return;
+      setAvailable(true);
+      setShowHint(false);
+      if (pendingAutoStartRef.current && !isCasting()) {
+        const success = await startCasting(getClientUrl());
+        if (success) {
+          setCasting(true);
+          pendingAutoStartRef.current = false;
+          setTimeout(() => window.dispatchEvent(new CustomEvent('scicp-cast-started')), 900);
+        }
+      }
     });
     const onDisconnect = ExternalDisplay.addListener('displayDisconnected', () => {
       if (mounted) {
@@ -63,10 +75,13 @@ export default function CastingControl({ className = '', compact = false }) {
   const handleToggle = useCallback(async () => {
     if (casting) {
       await stopCasting();
+      pendingAutoStartRef.current = false;
       setCasting(false);
       return;
     }
     if (!available) {
+      pendingAutoStartRef.current = true;
+      try { await ExternalDisplay.openCastSettings(); } catch { /* ignore */ }
       setShowHint(h => !h);
       return;
     }
@@ -75,6 +90,8 @@ export default function CastingControl({ className = '', compact = false }) {
     const success = await startCasting(clientUrl);
     if (success) {
       setCasting(true);
+      // Give external WebView time to load before sending state sync payloads.
+      setTimeout(() => window.dispatchEvent(new CustomEvent('scicp-cast-started')), 900);
     } else {
       setAvailable(false);
       setShowHint(true);
@@ -109,8 +126,8 @@ export default function CastingControl({ className = '', compact = false }) {
             <li>Swipe down twice → tap <strong>"Cast"</strong> or <strong>"Screen Cast"</strong></li>
             <li>Select your TV or <strong>AirServer</strong> from the list</li>
             <li>Wait for the connection to establish</li>
-            <li>Return here — the Cast button turns gold when ready</li>
-            <li>Tap Cast → scripture shows on the TV</li>
+            <li>Return here — casting will auto-start when display is detected</li>
+            <li>If needed, tap Cast again to start manually</li>
           </ol>
           <p className="cast-hint-note">Works with Miracast TVs and AirServer. Polls every 2 seconds — activates automatically once connected.</p>
         </div>

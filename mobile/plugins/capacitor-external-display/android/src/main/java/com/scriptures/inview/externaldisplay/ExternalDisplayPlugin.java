@@ -1,15 +1,20 @@
 package com.scriptures.inview.externaldisplay;
 
 import android.app.Presentation;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
+import android.content.Intent;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -19,6 +24,9 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Capacitor plugin that detects external displays (HDMI, Miracast, Chromecast)
@@ -109,14 +117,44 @@ public class ExternalDisplayPlugin extends Plugin {
         }
 
         String json = message.toString();
-        // Escape for JS injection
-        String escaped = json.replace("\\", "\\\\").replace("'", "\\'");
-        String js = "window.dispatchEvent(new CustomEvent('bridge-message',{detail:" + escaped + "}));";
 
         getActivity().runOnUiThread(() -> {
-            presentation.getWebView().evaluateJavascript(js, null);
+            presentation.dispatchBridgeMessage(json);
             call.resolve();
         });
+    }
+
+    @PluginMethod
+    public void openCastSettings(PluginCall call) {
+        try {
+            Intent castIntent = new Intent(Settings.ACTION_CAST_SETTINGS);
+            castIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(castIntent);
+            JSObject result = new JSObject();
+            result.put("opened", true);
+            call.resolve(result);
+            return;
+        } catch (ActivityNotFoundException e) {
+            Log.w(TAG, "ACTION_CAST_SETTINGS unavailable", e);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to open cast settings", e);
+        }
+
+        try {
+            Intent wifiDisplayIntent = new Intent(Settings.ACTION_WIFI_DISPLAY_SETTINGS);
+            wifiDisplayIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(wifiDisplayIntent);
+            JSObject result = new JSObject();
+            result.put("opened", true);
+            call.resolve(result);
+            return;
+        } catch (Exception e) {
+            Log.w(TAG, "ACTION_WIFI_DISPLAY_SETTINGS unavailable", e);
+        }
+
+        JSObject result = new JSObject();
+        result.put("opened", false);
+        call.resolve(result);
     }
 
     // ── Display detection ───────────────────────────────────────────────────
@@ -211,6 +249,8 @@ public class ExternalDisplayPlugin extends Plugin {
     private static class ExternalPresentation extends Presentation {
         private WebView webView;
         private final String url;
+        private boolean pageReady = false;
+        private final List<String> pendingMessages = new ArrayList<>();
 
         ExternalPresentation(Context context, Display display, String url) {
             super(context, display);
@@ -227,8 +267,23 @@ public class ExternalDisplayPlugin extends Plugin {
             settings.setDomStorageEnabled(true);
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setAllowFileAccess(true);
+            settings.setAllowContentAccess(true);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-            webView.setWebViewClient(new WebViewClient());
+            webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String loadedUrl) {
+                    pageReady = true;
+                    flushPendingMessages();
+                    Log.d(TAG, "External display page ready: " + loadedUrl);
+                }
+
+                @Override
+                public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                    super.onReceivedError(view, request, error);
+                    Log.w(TAG, "External display load error: " + error);
+                }
+            });
             webView.setWebChromeClient(new WebChromeClient());
 
             setContentView(webView);
@@ -241,6 +296,25 @@ public class ExternalDisplayPlugin extends Plugin {
 
         WebView getWebView() {
             return webView;
+        }
+
+        void dispatchBridgeMessage(String json) {
+            if (webView == null) return;
+            String escaped = json.replace("\\", "\\\\").replace("'", "\\'");
+            String js = "window.dispatchEvent(new CustomEvent('bridge-message',{detail:" + escaped + "}));";
+            if (!pageReady) {
+                pendingMessages.add(js);
+                return;
+            }
+            webView.evaluateJavascript(js, null);
+        }
+
+        private void flushPendingMessages() {
+            if (webView == null || pendingMessages.isEmpty()) return;
+            for (String js : pendingMessages) {
+                webView.evaluateJavascript(js, null);
+            }
+            pendingMessages.clear();
         }
     }
 }
