@@ -1,4 +1,4 @@
-const { parseScriptureReference, searchScripture, segmentVerseText, fastify, registerSocketHandlers } = require('../index');
+const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, expandWithSynonyms, fastify, registerSocketHandlers } = require('../index');
 const { getVerseOfTheDay } = require('../../shared/scripture-engine');
 const Database = require('better-sqlite3');
 
@@ -476,6 +476,188 @@ describe('Backend API Tests', () => {
     test('GET /verse/1/translation?language=xx returns 400', async () => {
       const res = await server.inject({ method: 'GET', url: '/verse/1/translation?language=xx' });
       expect(res.statusCode).toBe(400);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  NEW TESTS — routes served by the real fastify instance from backend/index
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('/search HTTP endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /search?q=love returns results with pagination shape', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=love' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+      expect(body).toHaveProperty('total');
+      expect(body).toHaveProperty('page');
+      expect(body).toHaveProperty('pageSize');
+      expect(Array.isArray(body.results)).toBe(true);
+    });
+
+    test('GET /search without q returns 400', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('error');
+    });
+
+    test('GET /search?q=John+3:16 returns results (exact ref)', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=John+3:16' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body.results)).toBe(true);
+      expect(body.total).toBeGreaterThanOrEqual(0);
+    });
+
+    test('GET /search?q=love&language=en&page=0&pageSize=5 respects pagination', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=love&language=en&page=0&pageSize=5' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.pageSize).toBe(5);
+      expect(body.page).toBe(0);
+      expect(body.results.length).toBeLessThanOrEqual(5);
+    });
+  });
+
+  describe('/chapter/:id/summary endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /chapter/1/summary returns gracefully', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/chapter/1/summary' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('chapter_id', 1);
+      expect(body).toHaveProperty('summary_text');
+      expect(body).toHaveProperty('key_verses');
+    });
+
+    test('GET /chapter/99999/summary returns graceful response for missing chapter', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/chapter/99999/summary' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('chapter_id', 99999);
+      expect(Array.isArray(body.key_verses)).toBe(true);
+    });
+  });
+
+  describe('/verse/:id/summary endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /verse/1/summary returns gracefully', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/1/summary' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verse_id', 1);
+      expect(body).toHaveProperty('summary');
+      expect(body).toHaveProperty('cross_references');
+    });
+  });
+
+  describe('/verse/:id/tags endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /verse/1/tags returns gracefully', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/1/tags' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verse_id', 1);
+      expect(body).toHaveProperty('pov');
+      expect(body).toHaveProperty('labels');
+    });
+  });
+
+  describe('/verse/:id/related endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /verse/1/related returns results shape', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/1/related' });
+      expect(res.statusCode).toBeLessThan(500);
+      const body = JSON.parse(res.payload);
+      if (res.statusCode === 200) {
+        expect(body).toHaveProperty('results');
+        expect(Array.isArray(body.results)).toBe(true);
+      }
+    });
+  });
+
+  describe('/entity/search endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /entity/search?name=Moses&type=person returns results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/entity/search?name=Moses&type=person' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+      expect(Array.isArray(body.results)).toBe(true);
+    });
+
+    test('GET /entity/search without name returns 400', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/entity/search' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('error');
+    });
+  });
+
+  describe('/sermon-search endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /sermon-search?q=faith returns results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/sermon-search?q=faith' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+      expect(Array.isArray(body.results)).toBe(true);
+    });
+
+    test('GET /sermon-search without q returns 400', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/sermon-search' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('error');
+    });
+  });
+
+  describe('segmentVerseTextDual function', () => {
+    test('handles two texts of different lengths', () => {
+      const primary = 'One two three four five six seven eight nine ten eleven twelve';
+      const secondary = 'Short text';
+      const result = segmentVerseTextDual(primary, secondary, 5);
+      expect(result).toHaveProperty('primarySegments');
+      expect(result).toHaveProperty('secondarySegments');
+      expect(result.primarySegments.length).toBe(result.secondarySegments.length);
+      expect(result.primarySegments.length).toBeGreaterThan(1);
+    });
+
+    test('handles null/undefined inputs', () => {
+      const result = segmentVerseTextDual(null, undefined);
+      expect(result).toHaveProperty('primarySegments');
+      expect(result).toHaveProperty('secondarySegments');
+      expect(result.primarySegments).toEqual([]);
+      expect(result.secondarySegments).toEqual([]);
+    });
+  });
+
+  describe('expandWithSynonyms function', () => {
+    test("'love' expands to include charity/affection-related terms", () => {
+      const expanded = expandWithSynonyms('love');
+      expect(expanded).toContain('love');
+      expect(expanded.length).toBeGreaterThan(1);
+      expect(expanded).toEqual(expect.arrayContaining(['charity']));
+    });
+
+    test('empty string returns array with empty string', () => {
+      const expanded = expandWithSynonyms('');
+      expect(Array.isArray(expanded)).toBe(true);
+      expect(expanded).toEqual(['']);
+    });
+
+    test('unknown word returns just the word itself', () => {
+      const expanded = expandWithSynonyms('xyzzyplugh');
+      expect(expanded).toEqual(['xyzzyplugh']);
     });
   });
 });

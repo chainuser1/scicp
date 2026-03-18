@@ -10,6 +10,15 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, '../shared'),
     },
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/__tests__/setup.js',
+    include: ['src/**/*.test.{js,jsx}'],
+    alias: {
+      '@shared': path.resolve(__dirname, '../shared'),
+    },
+  },
   build: {
     commonjsOptions: {
       // The shared/ directory uses CommonJS (module.exports).
