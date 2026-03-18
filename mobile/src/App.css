@@ -47,6 +47,8 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
+  background: #0a0a0f;
+  color: #f0ece0;
 }
 /* #root must fill the full viewport height so that:
    - .presenter-container (height:100%) locks to the screen on mobile
