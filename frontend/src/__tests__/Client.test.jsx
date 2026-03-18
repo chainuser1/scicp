@@ -134,7 +134,6 @@ describe('Client component', () => {
     renderClient();
     // The component calls socket.emit('create-client-session', ...) on connect
     // or directly if already connected. Check that emit was attempted.
-    const emitCalls = socket.emit.mock.calls.map(c => c[0]);
     // May or may not have been called depending on timing, just verify no crash
     expect(document.querySelector('.client-view')).toBeTruthy();
     socket.connected = false;

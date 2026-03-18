@@ -13,11 +13,20 @@ const DEST = resolve(__dirname, '../public/assets/db');
 mkdirSync(DEST, { recursive: true });
 
 const EXCLUDE = new Set([
-  'verse-embeddings.db',   // replaced by search-graph.db (kNN + clusters)
+  'verse-embeddings.db',   // lazy-loaded on first semantic search
   'verse-graph.db',        // backend-only (source for search-graph.db prebake)
   'concept-embeddings.db', // backend-only (semantic concept expansion)
   'scriptures-en.db',      // empty placeholder
   'scriptures.db',         // empty placeholder
+  // Non-English scripture DBs — downloaded on demand from server
+  'tagalog-scriptures-sqlite.db',
+  'cebuano-scriptures-sqlite.db',
+  'spanish-scriptures-sqlite.db',
+  'greek-scriptures-sqlite.db',
+  'ilocano-scriptures-sqlite.db',
+  'japanese-scriptures-sqlite.db',
+  'nrsvue-scriptures-sqlite.db',
+  'waray-scriptures-sqlite.db',
 ]);
 
 const dbFiles = readdirSync(SRC).filter(f => f.endsWith('.db') && !EXCLUDE.has(f));
