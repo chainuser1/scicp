@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
+import { App as CapApp } from '@capacitor/app';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
 import { initAllDatabases } from './db-manager';
@@ -57,13 +58,15 @@ export default function App() {
       try {
         const perm = await ExternalDisplay.checkCameraPermission();
         if (perm.status === 'denied') {
-          setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+          // Permanently denied — open app settings directly
+          setError('Camera permission is blocked. Opening app settings so you can enable it.');
+          await ExternalDisplay.openAppSettings();
           return;
         }
         if (perm.status !== 'granted') {
           const req = await ExternalDisplay.requestCameraPermission();
           if (req.status !== 'granted') {
-            setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+            setError('Camera permission is required for QR scanning. Tap "Allow Camera" to grant it.');
             return;
           }
         }
@@ -232,11 +235,30 @@ export default function App() {
     if (!mode && !ready) runStartupChecks();
   }, [mode, ready, runStartupChecks]);
 
+  // Re-check permissions when app resumes (e.g. returning from Android Settings)
+  useEffect(() => {
+    const listener = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) runStartupChecks();
+    });
+    return () => { listener.then(l => l.remove()); };
+  }, [runStartupChecks]);
+
   const requestCameraPermission = useCallback(async () => {
     try {
+      // Check if already permanently denied
+      const check = await ExternalDisplay.checkCameraPermission();
+      if (check.status === 'denied') {
+        // Permanently denied — must open app settings
+        await ExternalDisplay.openAppSettings();
+        // Re-check after user returns from settings
+        setTimeout(() => runStartupChecks(), 1500);
+        return;
+      }
       const result = await ExternalDisplay.requestCameraPermission();
       if (result.status !== 'granted') {
-        setError('Camera permission denied. Open device Settings → Apps → Scriptures in View → Permissions.');
+        // User denied — open app settings as fallback
+        await ExternalDisplay.openAppSettings();
+        setTimeout(() => runStartupChecks(), 1500);
       }
     } catch (err) {
       setError(`Camera check failed: ${err?.message || err}`);
@@ -272,14 +294,15 @@ export default function App() {
       try {
         const perm = await ExternalDisplay.checkCameraPermission();
         if (perm.status === 'denied') {
-          setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+          setError('Camera permission is blocked. Opening app settings so you can enable it.');
+          await ExternalDisplay.openAppSettings();
           setScannerOpen(false);
           return;
         }
         if (perm.status !== 'granted') {
           const req = await ExternalDisplay.requestCameraPermission();
           if (req.status !== 'granted') {
-            setError('Camera permission was denied. To use the QR scanner, open your device Settings → Apps → Scriptures in View → Permissions and enable Camera.');
+            setError('Camera permission is required for QR scanning. Tap "Allow Camera" to grant it.');
             setScannerOpen(false);
             return;
           }
@@ -535,7 +558,9 @@ export default function App() {
           <span className={`startup-badge startup-badge--${startupChecks.online}`}>{startupChecks.online}</span>
         </div>
         <div className="startup-readiness-actions">
-          <button className="mode-connect-btn" onClick={requestCameraPermission}>Allow Camera</button>
+          <button className="mode-connect-btn" onClick={requestCameraPermission}>
+            {startupChecks.camera === 'blocked' ? 'Open Settings' : startupChecks.camera === 'ok' ? '✓ Camera OK' : 'Allow Camera'}
+          </button>
           <button className="mode-connect-btn" onClick={openCastSetup}>Open Cast Setup</button>
           <button className="mode-connect-btn" onClick={runStartupChecks} disabled={checksBusy}>{checksBusy ? 'Checking…' : 'Refresh'}</button>
         </div>

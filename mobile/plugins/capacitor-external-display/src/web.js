@@ -60,6 +60,11 @@ export class ExternalDisplayWeb extends WebPlugin {
     return { opened: false };
   }
 
+  async openAppSettings() {
+    // No-op in browser; native-only
+    return { opened: false };
+  }
+
   async checkCameraPermission() {
     // In browser, check via Permissions API or assume prompt
     if (navigator.permissions) {
