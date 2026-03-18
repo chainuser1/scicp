@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, createContext, useContext, useRef } from 'react';
-import { socket as localSocket } from './socket-local';
+import { ExternalDisplay } from 'capacitor-external-display';
+import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
 import MobilePresenter from './pages/MobilePresenter.jsx';
 
@@ -19,6 +20,8 @@ export default function App() {
   const [scannerOpen, setScannerOpen] = useState(false);
   // Hot mode-switch: shows an overlay *over* MobilePresenter without unmounting it
   const [modeSwitchOpen, setModeSwitchOpen] = useState(false);
+  const [startupChecks, setStartupChecks] = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
+  const [checksBusy, setChecksBusy] = useState(false);
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
   const rafRef     = useRef(null);
@@ -174,6 +177,68 @@ export default function App() {
       setConnecting(false);
     }
   }, [serverUrl]);
+
+  const runStartupChecks = useCallback(async () => {
+    setChecksBusy(true);
+    try {
+      let camera = 'unknown';
+      if (navigator.permissions) {
+        try {
+          const status = await navigator.permissions.query({ name: 'camera' });
+          camera = status.state === 'granted' ? 'ok' : status.state === 'denied' ? 'blocked' : 'pending';
+        } catch {
+          camera = 'unknown';
+        }
+      }
+
+      let cast = 'unavailable';
+      try {
+        cast = (await isDisplayAvailable()) ? 'ok' : 'pending';
+      } catch {
+        cast = 'unavailable';
+      }
+
+      let online = 'offline';
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4500);
+        const base = String(serverUrl || '').replace(/\/+$/, '');
+        if (base) {
+          const res = await fetch(`${base}/health`, { signal: controller.signal });
+          online = res.ok ? 'ok' : 'offline';
+        }
+        clearTimeout(timer);
+      } catch {
+        online = 'offline';
+      }
+
+      setStartupChecks({ camera, cast, online });
+    } finally {
+      setChecksBusy(false);
+    }
+  }, [serverUrl]);
+
+  useEffect(() => {
+    if (!mode && !ready) runStartupChecks();
+  }, [mode, ready, runStartupChecks]);
+
+  const requestCameraPermission = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach(t => t.stop());
+    } catch (err) {
+      setError(err?.name === 'NotAllowedError'
+        ? 'Camera permission denied. Open device Settings → Apps → Scriptures in View → Permissions.'
+        : `Camera check failed: ${err?.message || err}`);
+    } finally {
+      runStartupChecks();
+    }
+  }, [runStartupChecks]);
+
+  const openCastSetup = useCallback(async () => {
+    try { await ExternalDisplay.openCastSettings(); } catch { /* ignore */ }
+    setTimeout(() => { runStartupChecks(); }, 1200);
+  }, [runStartupChecks]);
 
   // Context value
   const ctxValue = React.useMemo(() => ({
@@ -439,6 +504,26 @@ export default function App() {
           </button>
         </div>
       </details>
+      <div className="startup-readiness">
+        <div className="startup-readiness-title">Permissions &amp; Connectivity</div>
+        <div className="startup-readiness-row">
+          <span>📷 Camera (QR)</span>
+          <span className={`startup-badge startup-badge--${startupChecks.camera}`}>{startupChecks.camera}</span>
+        </div>
+        <div className="startup-readiness-row">
+          <span>📺 Cast display</span>
+          <span className={`startup-badge startup-badge--${startupChecks.cast}`}>{startupChecks.cast}</span>
+        </div>
+        <div className="startup-readiness-row">
+          <span>🌐 Server reachability</span>
+          <span className={`startup-badge startup-badge--${startupChecks.online}`}>{startupChecks.online}</span>
+        </div>
+        <div className="startup-readiness-actions">
+          <button className="mode-connect-btn" onClick={requestCameraPermission}>Allow Camera</button>
+          <button className="mode-connect-btn" onClick={openCastSetup}>Open Cast Setup</button>
+          <button className="mode-connect-btn" onClick={runStartupChecks} disabled={checksBusy}>{checksBusy ? 'Checking…' : 'Refresh'}</button>
+        </div>
+      </div>
     </div>
   );
 }
