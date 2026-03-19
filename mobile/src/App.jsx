@@ -7,6 +7,7 @@ import { initAllDatabases } from './db-manager';
 import { requestNotificationPermission } from './notify';
 import SocketCtx from './socket-context';
 import MobilePresenter from './pages/MobilePresenter.jsx';
+import ScriptureReader from './pages/ScriptureReader.jsx';
 
 const MODE_KEY  = 'scicp.conn_mode';    // 'offline' | 'online'
 const URL_KEY   = 'scicp.server_url';
@@ -52,6 +53,14 @@ export default function App() {
         console.error('Failed to initialize databases:', err);
         setError(err.message || 'Failed to load scripture databases.');
       });
+  }, [mode]);
+
+  // ── Reader mode init (DBs only, no socket) ──
+  useEffect(() => {
+    if (mode !== 'reader') return;
+    initAllDatabases()
+      .then(() => setReady(true))
+      .catch(err => setError(err.message || 'Failed to load scripture databases.'));
   }, [mode]);
 
   // ── Always load local DBs so context modals work in any mode ──
@@ -513,14 +522,19 @@ export default function App() {
     );
   }
 
-  // ── Loading (offline init) ──
-  if (mode === 'offline' && !ready) {
+  // ── Loading (offline/reader init) ──
+  if ((mode === 'offline' || mode === 'reader') && !ready) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
         minHeight: '100vh', background: '#0a0a0f', color: '#c9a84c', fontFamily: 'sans-serif' }}>
         <p>Loading scriptures...</p>
       </div>
     );
+  }
+
+  // ── Reader mode ──
+  if (mode === 'reader' && ready) {
+    return <ScriptureReader onExit={() => { setMode(null); setReady(false); try { localStorage.removeItem('scicp.conn_mode'); } catch {} }} />;
   }
 
   // ── Mode selection screen ──
@@ -541,6 +555,12 @@ export default function App() {
           <span className="mode-card-icon">📷</span>
           <span className="mode-card-label">Scan TV QR Code</span>
           <span className="mode-card-desc">Scan the QR code on the TV to connect and present remotely over the internet.</span>
+        </button>
+
+        <button className="mode-card mode-card--reader" onClick={() => { try { localStorage.setItem(MODE_KEY, 'reader'); } catch {} setMode('reader'); }}>
+          <span className="mode-card-icon">📖</span>
+          <span className="mode-card-label">Read Scriptures</span>
+          <span className="mode-card-desc">Personal reading — search, browse by book and chapter, adjust font size. No screen required.</span>
         </button>
       </div>
 
