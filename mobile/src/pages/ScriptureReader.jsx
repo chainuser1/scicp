@@ -148,6 +148,9 @@ export default function ScriptureReader({ onExit }) {
   const lhObj       = useMemo(() => LINE_HEIGHTS.find(l => l.id === lineHeight) || LINE_HEIGHTS[1], [lineHeight]);
   const ffObj       = useMemo(() => FONT_FAMILIES.find(f => f.id === fontFamily) || FONT_FAMILIES[0], [fontFamily]);
   const currentCh   = allChapters[chapterIdx] || null;
+  const bookIdx     = useMemo(() => books.findIndex(b => b.book_id === currentBook?.book_id), [books, currentBook]);
+  const isFirstChapter = chapterIdx === 0 && bookIdx <= 0;
+  const isLastChapter  = chapterIdx >= allChapters.length - 1 && bookIdx >= books.length - 1;
 
   const cssVars = {
     '--rd-bg':      themeObj.bg,
@@ -252,10 +255,24 @@ export default function ScriptureReader({ onExit }) {
 
   const goChapter = useCallback((delta) => {
     const next = chapterIdx + delta;
-    if (next < 0 || next >= allChapters.length) return;
-    loadChapter(currentBook, allChapters, next, null);
-    setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
-  }, [chapterIdx, allChapters, currentBook, loadChapter]);
+    if (next >= 0 && next < allChapters.length) {
+      // Normal navigation within the same book
+      loadChapter(currentBook, allChapters, next, null);
+      setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
+      return;
+    }
+    // Cross-book boundary: find adjacent book
+    const bookIdx = books.findIndex(b => b.book_id === currentBook?.book_id);
+    const adjBook = books[bookIdx + delta];
+    if (!adjBook) return; // already at absolute start/end
+    try {
+      const chs = svc.browse('chapters', { bookId: adjBook.book_id }, lang) || [];
+      if (!chs.length) return;
+      const targetIdx = delta > 0 ? 0 : chs.length - 1;
+      loadChapter(adjBook, chs, targetIdx, null);
+      setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
+    } catch { /* ignore */ }
+  }, [chapterIdx, allChapters, currentBook, books, lang, loadChapter]);
 
   // ── Toolbar auto-hide ─────────────────────────────────────────────────────
   const handleScroll = useCallback(() => {
@@ -521,7 +538,7 @@ export default function ScriptureReader({ onExit }) {
             <button
               className="rd-tb-nav-btn"
               onClick={() => goChapter(-1)}
-              disabled={chapterIdx === 0}
+              disabled={isFirstChapter}
               aria-label="Previous chapter"
             >‹‹</button>
 
@@ -540,7 +557,7 @@ export default function ScriptureReader({ onExit }) {
             <button
               className="rd-tb-nav-btn"
               onClick={() => goChapter(1)}
-              disabled={chapterIdx >= allChapters.length - 1}
+              disabled={isLastChapter}
               aria-label="Next chapter"
             >››</button>
 
@@ -625,17 +642,17 @@ export default function ScriptureReader({ onExit }) {
                   <button
                     className="rd-ch-nav-btn"
                     onClick={() => goChapter(-1)}
-                    disabled={chapterIdx === 0}
+                    disabled={isFirstChapter}
                   >
-                    ← {allChapters[chapterIdx - 1] ? `Ch. ${allChapters[chapterIdx - 1].chapter_number}` : 'Prev'}
+                    ← {chapterIdx > 0 ? `Ch. ${allChapters[chapterIdx - 1].chapter_number}` : books[bookIdx - 1]?.book_title || 'Prev'}
                   </button>
                   <span className="rd-ch-nav-dot" />
                   <button
                     className="rd-ch-nav-btn"
                     onClick={() => goChapter(1)}
-                    disabled={chapterIdx >= allChapters.length - 1}
+                    disabled={isLastChapter}
                   >
-                    {allChapters[chapterIdx + 1] ? `Ch. ${allChapters[chapterIdx + 1].chapter_number}` : 'Next'} →
+                    {chapterIdx < allChapters.length - 1 ? `Ch. ${allChapters[chapterIdx + 1].chapter_number}` : books[bookIdx + 1]?.book_title || 'Next'} →
                   </button>
                 </div>
               </div>
