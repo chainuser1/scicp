@@ -18,4 +18,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Hot mode-switch: reload presenter URL preserving state via sessionStorage.
   // newMode: { mode: 'offline' } or { mode: 'online', serverUrl: '...' }
   switchConnectionMode: (newMode) => ipcRenderer.invoke('switch-connection-mode', newMode),
+
+  // Auto-updater events — forward from main process to renderer
+  onUpdateStatus: (cb) => {
+    ipcRenderer.on('update-status', (_e, data) => cb(data));
+  },
+  onUpdateDownloadProgress: (cb) => {
+    ipcRenderer.on('update-download-progress', (_e, data) => cb(data));
+  },
 });

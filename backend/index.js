@@ -1854,6 +1854,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         liveVerse: null,
         highlightedText: '',
         presenterSocketId: null,
+        label: '',
         // Stable hex token issued when a presenter first claims the slot.
         // Persists across socket reconnects so the same browser tab can always
         // reclaim its own session even after a network blip.
@@ -2165,7 +2166,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       }
       // Tell the joining socket it's in the session (include pinSet so the
       // presenter UI can show the correct lock state on reconnect)
-      socket.emit('session-joined', { sessionId: activeSessionId, pinSet: !!state.pinHash });
+      socket.emit('session-joined', { sessionId: activeSessionId, pinSet: !!state.pinHash, label: state.label || '' });
       if (state.theme) socket.emit('update-theme', state.theme);
       if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
       if (state.customMode) socket.emit('custom-text', { ...state.customMode, theme: state.theme });
@@ -2194,7 +2195,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           });
         }
       }
-      return { sessionId: activeSessionId, pinSet: !!state.pinHash, presenterToken: state.presenterToken };
+      return { sessionId: activeSessionId, pinSet: !!state.pinHash, presenterToken: state.presenterToken, label: state.label || '' };
     };
 
     const leaveActiveSession = () => {
@@ -2237,8 +2238,11 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
-      socket.emit('session-created', { sessionId: joined.sessionId, presenterToken: joined.presenterToken });
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken });
+      // Store label if provided
+      const label = String((payload && payload.label) || '').trim().slice(0, 40);
+      if (label) getSessionState(joined.sessionId).label = label;
+      socket.emit('session-created', { sessionId: joined.sessionId, presenterToken: joined.presenterToken, label });
+      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken, label });
     });
 
     // The Client display (e.g. a TV) calls this to create a named session that
@@ -2358,11 +2362,18 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         if (typeof callback === 'function') callback({ ok: false, ...error });
         return;
       }
+      // Persist label if presenter supplies one and the session has none yet
+      if (role === 'presenter' && payload && payload.label) {
+        const state = getSessionState(joined.sessionId);
+        if (!state.label) state.label = String(payload.label).trim().slice(0, 40);
+        joined.label = state.label;
+      }
       if (typeof callback === 'function') callback({
         ok: true,
         sessionId: joined.sessionId,
         pinSet: joined.pinSet,
         presenterToken: joined.presenterToken || null,
+        label: joined.label || '',
       });
     });
 

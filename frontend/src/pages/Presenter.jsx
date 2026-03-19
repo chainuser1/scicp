@@ -479,6 +479,9 @@ const Presenter = () => {
     try { if (window.matchMedia('(prefers-color-scheme: light)').matches) return themes.light; } catch { /* ignore */ }
     return themes.dark;
   });
+  const [presenterUiMode, setPresenterUiMode] = useState(() => {
+    try { return localStorage.getItem('scicp.presenter_ui_mode') || 'dark'; } catch { return 'dark'; }
+  });
   const PRESENTER_HISTORY_KEY = 'scicp.presenter_history_v1';
   const [history, setHistory] = useState(() => {
     try {
@@ -503,6 +506,8 @@ const Presenter = () => {
   const [langPopover,  setLangPopover]      = useState(false);
   const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
+  const [sessionLabel, setSessionLabel]     = useState('');
+  const [sessionLabelInput, setSessionLabelInput] = useState('');
   const [tvSessionInput, setTvSessionInput] = useState('');
   const [scannerOpen, setScannerOpen]       = useState(false);
   const [sessionMessage, setSessionMessage] = useState('Creating session...');
@@ -774,6 +779,7 @@ const Presenter = () => {
   const [autoAdvanceSec, setAutoAdvanceSec]   = useState(5);
   const autoAdvanceTimer                       = useRef(null);
   const [electronDisplayCount, setElectronDisplayCount] = useState(0);
+  const [updateProgress, setUpdateProgress]   = useState(null);  // null | { percent, status }
   const mainPanelRef    = useRef(null);
   const searchDebounce  = useRef(null); // debounce timer for search socket emits
   const adjacentAbortRef = useRef(null); // cancels in-flight fetchAdjacent when a newer one fires
@@ -846,6 +852,17 @@ const Presenter = () => {
     if (window.electronAPI?.getDisplays) {
       window.electronAPI.getDisplays().then(d => setElectronDisplayCount(d.length));
     }
+    if (window.electronAPI?.onUpdateStatus) {
+      window.electronAPI.onUpdateStatus((data) => {
+        if (data.status === 'available') setUpdateProgress({ percent: 0, status: 'available', version: data.version });
+        if (data.status === 'downloaded') setUpdateProgress(prev => ({ ...prev, percent: 100, status: 'downloaded' }));
+      });
+    }
+    if (window.electronAPI?.onUpdateDownloadProgress) {
+      window.electronAPI.onUpdateDownloadProgress((data) => {
+        setUpdateProgress(prev => ({ ...prev, percent: data.percent, status: 'downloading' }));
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -875,6 +892,7 @@ const Presenter = () => {
     const savedToken = (() => { try { return window.sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
     const payload = { sessionId: normalized, role: 'presenter', presenterToken: savedToken };
     if (pin) payload.pin = pin;
+    if (sessionLabelInput.trim()) payload.label = sessionLabelInput.trim();
     socket.emit('join-session', payload, (response) => {
       if (response?.requiresPin) {
         setPendingPinSession(normalized);
@@ -894,6 +912,8 @@ const Presenter = () => {
         setPendingPinSession('');
         setSessionPinActive(!!response.pinSet);
         setSessionId(response.sessionId);
+        if (response.label !== undefined) setSessionLabel(response.label || '');
+        setSessionLabelInput('');
         setTvSessionInput('');
         setSessionMessage(`Connected — session ${response.sessionId}`);
         setSessionPopover(false);
@@ -979,6 +999,7 @@ const Presenter = () => {
       setSessionId(data.sessionId);
       setTvSessionInput(data.sessionId);
       setSessionMessage(`Session ${data.sessionId} ready`);
+      if (data.label !== undefined) setSessionLabel(data.label || '');
       if (data.pinSet !== undefined) setSessionPinActive(!!data.pinSet);
       setHighlightedText('');
       setSessionPopover(false);
@@ -989,6 +1010,8 @@ const Presenter = () => {
     const handleSessionLeft = () => {
       setSessionId('');
       setTvSessionInput('');
+      setSessionLabel('');
+      setSessionLabelInput('');
       setSessionMessage('You left the session');
       try {
         window.sessionStorage.removeItem(PRESENTER_LAST_SESSION_KEY);
@@ -1918,7 +1941,7 @@ const Presenter = () => {
 
   /* ── Render ── */
   return (
-    <div className={`presenter-container ${presenterThemeClass}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* Phase 1: Presenter takeover alert — unobtrusive amber banner */}
       {takeoverAlert && (
@@ -1990,10 +2013,30 @@ const Presenter = () => {
           <span className="hdr-title">Scripture</span>
           {isRemoteMode && sessionId && (
             <span className="hdr-session-badge" title={`Online session: ${sessionId}`}>
-              🌐 {sessionId}
+              🌐 {sessionLabel ? `${sessionLabel} · ${sessionId}` : sessionId}
             </span>
           )}
         </div>
+
+        {/* Auto-update progress bar — Electron only, shown during download */}
+        {isElectronApp && updateProgress && (
+          <div className="hdr-update-bar" title={
+            updateProgress.status === 'available'   ? `Update v${updateProgress.version} available — downloading…` :
+            updateProgress.status === 'downloading' ? `Downloading update… ${updateProgress.percent}%` :
+            'Update downloaded — restart when ready'
+          }>
+            {updateProgress.status === 'downloaded' ? (
+              <span className="hdr-update-label">⬆ Update ready</span>
+            ) : (
+              <>
+                <span className="hdr-update-label">⬇ {updateProgress.percent}%</span>
+                <div className="hdr-update-progress">
+                  <div className="hdr-update-fill" style={{ width: `${updateProgress.percent}%` }} />
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Live verse summary */}
         <div className="hdr-center">
@@ -2054,12 +2097,26 @@ const Presenter = () => {
             {sessionPopover && (
               <div className="hdr-session-popover">
                 <div className="popover-label">
-                  {sessionId ? `Session ${sessionId}` : 'Connect to TV'}
+                  {sessionId ? `Session ${sessionId}${sessionLabel ? ` · ${sessionLabel}` : ''}` : 'Connect to TV'}
                 </div>
                 {sessionId && (
                   <div className="idle-viewer-count" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
                     <span className={`idle-viewer-dot ${viewerCount > 0 ? 'idle-viewer-dot--live' : ''}`} />
                     {viewerCount === 0 ? 'No screens connected' : viewerCount === 1 ? '1 screen connected' : `${viewerCount} screens connected`}
+                  </div>
+                )}
+                {/* Room label (optional) */}
+                {!sessionId && (
+                  <div className="popover-row" style={{ marginBottom: '0.3rem' }}>
+                    <input
+                      type="text"
+                      className="popover-input"
+                      maxLength={40}
+                      value={sessionLabelInput}
+                      onChange={e => setSessionLabelInput(e.target.value)}
+                      placeholder="Room name (optional)"
+                      aria-label="Room label"
+                    />
                   </div>
                 )}
                 {/* Scan QR — primary action */}
@@ -2180,6 +2237,22 @@ const Presenter = () => {
             )}
           </div>
 
+          {/* Presenter UI dark/light mode toggle */}
+          <HdrBtn
+            onClick={() => {
+              const next = presenterUiMode === 'dark' ? 'light' : 'dark';
+              setPresenterUiMode(next);
+              try { localStorage.setItem('scicp.presenter_ui_mode', next); } catch { /* ignore */ }
+            }}
+            label={presenterUiMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={presenterUiMode === 'dark' ? 'Switch presenter to light mode' : 'Switch presenter to dark mode'}
+          >
+            {presenterUiMode === 'dark'
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            }
+          </HdrBtn>
+
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
             <HdrBtn onClick={() => setThemePopover(o => !o)} active={themePopover} label="Theme" title="Change theme">
@@ -2205,6 +2278,22 @@ const Presenter = () => {
                 >
                   {currentTheme.force_animations ? 'Animations: Forced On' : 'Animations: Auto (Respect OS)'}
                 </button>
+                <div className="popover-divider" />
+                <div className="popover-label">Verse Transition</div>
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  {[
+                    { value: 'crossfade',  label: '⊙ Fade' },
+                    { value: 'slide-up',   label: '↑ Slide' },
+                    { value: 'fade-black', label: '◼ Black' },
+                    { value: 'cut',        label: '⚡ Cut' },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
+                      onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
+                    >{label}</button>
+                  ))}
+                </div>
                 <div className="popover-divider" />
                 <div className="popover-label">Custom background</div>
                 <div className="popover-row">
@@ -3095,6 +3184,20 @@ const Presenter = () => {
                 >
                   {currentTheme.force_animations ? 'Animations: Forced On' : 'Animations: Auto (Respect OS)'}
                 </button>
+              </div>
+              <div className="theme-buttons" style={{ marginTop: '0.4rem' }}>
+                {[
+                  { value: 'crossfade',  label: '⊙ Fade' },
+                  { value: 'slide-up',   label: '↑ Slide' },
+                  { value: 'fade-black', label: '◼ Black' },
+                  { value: 'cut',        label: '⚡ Cut' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
+                    onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
+                  >{label}</button>
+                ))}
               </div>
               {/* Live preview tile */}
               <div className="theme-preview-tile" style={{

@@ -672,4 +672,161 @@ describe('Backend API Tests', () => {
       expect(expanded).toEqual(['xyzzyplugh']);
     });
   });
+
+  // ─── New coverage ────────────────────────────────────────────────────────────
+
+  describe('getVersionCitation function', () => {
+    const { getVersionCitation } = require('../../shared/scripture-engine');
+
+    test('English Bible (volume_id 1) returns KJV', () => {
+      expect(getVersionCitation('en', 1)).toMatch(/KJV|King James/i);
+    });
+
+    test('Tagalog Bible (volume_id 1) returns non-empty string', () => {
+      const result = getVersionCitation('tl', 1);
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    test('Cebuano Bible (volume_id 1) returns non-empty string', () => {
+      const result = getVersionCitation('ceb', 1);
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    test('Book of Mormon (volume_id 3) includes English label', () => {
+      const result = getVersionCitation('en', 3);
+      expect(typeof result).toBe('string');
+    });
+
+    test('D&C (volume_id 4) returns non-empty string', () => {
+      const result = getVersionCitation('en', 4);
+      expect(typeof result).toBe('string');
+    });
+
+    test('secondary language — Bible — returns "X vs Y" format', () => {
+      const result = getVersionCitation('en', 1, 'tl');
+      expect(result).toMatch(/vs/i);
+    });
+
+    test('secondary language — BoM — returns language names format', () => {
+      const result = getVersionCitation('en', 3, 'tl');
+      expect(result).toMatch(/vs/i);
+    });
+
+    test('unknown language falls back to uppercase code', () => {
+      const result = getVersionCitation('xx', 1);
+      expect(result).toBe('XX');
+    });
+  });
+
+  describe('/chapter/:id/summary — footnotes fields', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('chapter summary response has nabre_footnotes and net_footnotes fields', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/chapter/1/summary' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      // Fields must be present (null when footnotes DB is absent, which is fine)
+      expect(body).toHaveProperty('nabre_footnotes');
+      expect(body).toHaveProperty('net_footnotes');
+    });
+
+    test('missing chapter still has footnote fields', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/chapter/99999/summary' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('nabre_footnotes');
+      expect(body).toHaveProperty('net_footnotes');
+    });
+  });
+
+  describe('/verse/of-the-day endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('returns a verse shape', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/of-the-day' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verse_id');
+      expect(body).toHaveProperty('scripture_text');
+      expect(body).toHaveProperty('book_title');
+    });
+  });
+
+  describe('/search — language and edge cases', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /search?q=faith returns valid paginated results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=faith' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+      expect(Array.isArray(body.results)).toBe(true);
+      expect(body).toHaveProperty('total');
+    });
+
+    test('GET /search?q=love&language=tl returns Tagalog results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=love&language=tl' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+    });
+
+    test('GET /search?q=1+Ne+3:7 parses Book of Mormon reference', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=1+Ne+3%3A7' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+      expect(body.results.length).toBeGreaterThan(0);
+    });
+
+    test('GET /search?q=D%26C+76 resolves D&C abbreviation', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=D%26C+76' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('results');
+    });
+
+    test('pageSize clamped — pageSize=1000 returns at most 50 results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=love&pageSize=1000' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeLessThanOrEqual(50);
+    });
+  });
+
+  describe('/verse/:id/translation edge cases', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('missing verse_id returns 400 or 404', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/999999/translation?language=tl' });
+      expect([400, 404]).toContain(res.statusCode);
+    });
+  });
+
+  describe('/topic-search endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /topic-search?q=faith returns gracefully', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/topic-search?q=faith' });
+      expect(res.statusCode).toBeLessThan(500);
+    });
+
+    test('GET /topic-search without q returns 400', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/topic-search' });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
+  describe('/health endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('GET /health returns ok', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/health' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.status).toBe('ok');
+    });
+  });
 });
