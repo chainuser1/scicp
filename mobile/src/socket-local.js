@@ -42,12 +42,15 @@ function supportsWebPresentation() {
 
 function candidateClientUrls(clientUrl) {
   const urls = new Set();
+  // On Capacitor/Android, assets are accessible via file:// — try this first
+  if (window.Capacitor?.isNativePlatform?.()) {
+    urls.add('file:///android_asset/public/client-display.html');
+  }
   if (clientUrl) urls.add(clientUrl);
   try {
     urls.add(new URL('client-display.html', window.location.href.replace(/^capacitor:\/\//, 'http://')).toString());
   } catch { /* ignore */ }
   urls.add('http://localhost/client-display.html');
-  urls.add('https://localhost/client-display.html');
   return [...urls].filter(Boolean);
 }
 
