@@ -13,9 +13,8 @@ const DEST = resolve(__dirname, '../public/assets/db');
 mkdirSync(DEST, { recursive: true });
 
 const EXCLUDE = new Set([
-  'verse-embeddings.db',   // lazy-loaded on first semantic search
-  'verse-graph.db',        // backend-only (source for search-graph.db prebake)
-  'concept-embeddings.db', // backend-only (semantic concept expansion)
+  'verse-graph.db',        // backend-only (raw source for search-graph.db prebake)
+  'concept-embeddings.db', // backend-only (semantic concept expansion — not used by mobile)
   'scriptures-en.db',      // empty placeholder
   'scriptures.db',         // empty placeholder
   // Non-English scripture DBs — downloaded on demand from server
