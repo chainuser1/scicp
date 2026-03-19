@@ -8,6 +8,7 @@ import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadSta
 import { notify, cancelNotification } from '../notify';
 import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
 import CastingControl from '../components/CastingControl';
+import SimplePresenter from '../components/SimplePresenter';
 
 function groupByVolume(results) {
   const m = new Map();
@@ -676,6 +677,7 @@ const MobilePresenter = () => {
   const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
   const [presenterUiMode, setPresenterUiMode] = useState(() => { try { return localStorage.getItem('scicp.presenter_ui_mode') || 'dark'; } catch { return 'dark'; } });
+  const [simpleMode, setSimpleMode]           = useState(() => { try { return localStorage.getItem('scicp.simple_mode') === 'true'; } catch { return false; } });
   const [autoAdvance, setAutoAdvance]         = useState(false);
   const [autoAdvanceSec, setAutoAdvanceSec]   = useState(5);
   const autoAdvanceTimer                       = useRef(null);
@@ -1932,6 +1934,33 @@ const MobilePresenter = () => {
     return null;
   }, [langDownloads]);
 
+  const toggleSimpleMode = (val) => {
+    setSimpleMode(val);
+    try { localStorage.setItem('scicp.simple_mode', val ? 'true' : 'false'); } catch { /* ignore */ }
+  };
+
+  // ── Simple Mode early return ──
+  if (simpleMode) {
+    return (
+      <SimplePresenter
+        query={query}
+        setQuery={setQuery}
+        results={results}
+        handleSearch={handleSearch}
+        goLiveDirectly={goLiveDirectly}
+        liveVerse={liveVerse}
+        onClear={() => { emitWithSession('clear-screen'); setLiveVerse(null); }}
+        isOnline={isOnline}
+        connectionState={connectionState}
+        sessionJoined={sessionJoined}
+        isCastingActive={isCasting()}
+        lanServerUrl={lanServerUrl}
+        onOpenAdvanced={() => toggleSimpleMode(false)}
+        currentLanguage={currentLanguage}
+      />
+    );
+  }
+
   return (
     <>
     {/* ── PIN entry modal ── */}
@@ -2313,6 +2342,16 @@ const MobilePresenter = () => {
                       }}
                     >{mode === 'dark' ? '☽ Dark' : '☀ Light'}</button>
                   ))}
+                </div>
+                <div className="mobile-menu-divider" style={{ margin: '10px 0' }} />
+                <div className="sp-mode-toggle">
+                  <div>
+                    <div className="sp-mode-toggle-label">Simple Mode</div>
+                    <div className="sp-mode-toggle-sub">Bigger, cleaner view — tap a verse to show it</div>
+                  </div>
+                  <button className="sp-mode-btn" onClick={() => { toggleSimpleMode(true); setMobileMenuOpen(false); }}>
+                    Switch to Simple
+                  </button>
                 </div>
                 <div className="popover-row" style={{ marginTop: '0.4rem' }}>
                   <input
