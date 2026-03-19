@@ -8709,27 +8709,42 @@ button, [role="button"] {
 /* The prose — continuous text reading */
 .rd-prose {
   padding: 20px 22px 8px;
-  text-align: justify;
-  /* hyphens: auto; — disabled: causes weird splits on scripture proper nouns */
 }
 .rd-verse {
-  display: inline;
+  display: block;
+  padding: 4px 0 6px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+  position: relative;
 }
 .rd-verse--bkd {
-  /* bookmarked verses get a subtle left indicator — but inline, so we use box-shadow */
+  border-left: 3px solid var(--rd-accent);
+  padding-left: 10px;
+  margin-left: -13px;
+}
+/* "Found" verse — golden pulse animation after search navigation */
+.rd-verse--found {
+  animation: rd-found-pulse 2.6s ease-out forwards;
+}
+@keyframes rd-found-pulse {
+  0%   { background: transparent; }
+  8%   { background: rgba(201, 168, 76, 0.28); box-shadow: 0 0 0 3px rgba(201,168,76,0.18), 0 0 24px rgba(201,168,76,0.15); border-radius: 6px; }
+  30%  { background: rgba(201, 168, 76, 0.22); }
+  70%  { background: rgba(201, 168, 76, 0.10); }
+  100% { background: transparent; box-shadow: none; }
 }
 .rd-vnum {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 0.6em;
+  font-size: 0.62em;
   font-weight: 700;
   color: var(--rd-accent);
   vertical-align: super;
   cursor: pointer;
-  margin-right: 2px;
+  margin-right: 3px;
   user-select: none;
-  opacity: 0.8;
-  /* makes it easier to tap on mobile */
+  opacity: 0.85;
   padding: 0 3px;
+  -webkit-tap-highlight-color: transparent;
 }
 .rd-vnum:active { opacity: 1; }
 .rd-bk-mark {
