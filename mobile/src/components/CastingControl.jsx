@@ -27,6 +27,9 @@ export default function CastingControl({ className = '', compact = false }) {
   const [showHint, setShowHint] = useState(false);
   const pendingAutoStartRef = useRef(false);
   const getClientUrl = () => {
+    if (window.Capacitor?.isNativePlatform?.()) {
+      return 'file:///android_asset/public/client-display.html';
+    }
     const href = window.location.href.replace(/^capacitor:\/\//, 'http://');
     return new URL('client-display.html', href).toString();
   };
