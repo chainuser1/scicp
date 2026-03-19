@@ -161,6 +161,13 @@ export async function search(query, page = 0, pageSize = 10, language = 'en') {
   const sgDb = getDb('searchgraph');
   const tgRaw = getDb('tg');
 
+  // Step 1: Exact scripture reference → direct lookup (e.g. "Alma 2:3", "John 3:16")
+  const ref = parseScriptureReference(query.trim());
+  if (ref) {
+    const direct = searchScripture(query.trim(), page, pageSize, adapter, log);
+    if (direct.total > 0) return { ...direct, page, pageSize };
+  }
+
   // If no search graph, use legacy TG-first + FTS fallback
   if (!sgDb) {
     const words = query.trim().split(/\s+/);
