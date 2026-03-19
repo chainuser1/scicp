@@ -39,3 +39,4 @@ vite
 
 # Scraper caches
 resources/db/*_cache.json
+release.keystore

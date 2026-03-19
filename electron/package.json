@@ -1,8 +1,8 @@
 {
   "name": "scicp-electron",
-  "version": "2.3.0",
+  "version": "1.0.0",
   "private": true,
-  "description": "Electron desktop app \u2014 self-contained native deps",
+  "description": "Electron desktop app — self-contained native deps",
   "main": "main.js",
   "scripts": {
     "postinstall": "electron-rebuild"
