@@ -135,6 +135,9 @@ export default function ScriptureReader({ onExit }) {
   const lhObj     = useMemo(() => LINE_HEIGHTS.find(l => l.id === lineHeight) || LINE_HEIGHTS[1], [lineHeight]);
   const ffObj     = useMemo(() => FONT_FAMILIES.find(f => f.id === fontFamily) || FONT_FAMILIES[0], [fontFamily]);
   const currentCh = allChapters[chapterIdx] || null;
+  const bookIdx   = useMemo(() => books.findIndex(b => b.book_id === currentBook?.book_id), [books, currentBook]);
+  const isFirstChapter = chapterIdx === 0 && bookIdx <= 0;
+  const isLastChapter  = chapterIdx >= allChapters.length - 1 && bookIdx >= books.length - 1;
 
   const cssVars = {
     '--rd-bg':      themeObj.bg,
@@ -236,12 +239,25 @@ export default function ScriptureReader({ onExit }) {
     } catch { /* ignore */ }
   }, [lastRead, books, lang, loadChapter]);
 
-  const goChapter = useCallback((delta) => {
+  const goChapter = useCallback(async (delta) => {
     const next = chapterIdx + delta;
-    if (next < 0 || next >= allChapters.length) return;
-    loadChapter(currentBook, allChapters, next, null);
-    setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
-  }, [chapterIdx, allChapters, currentBook, loadChapter]);
+    if (next >= 0 && next < allChapters.length) {
+      // Normal within-book navigation
+      loadChapter(currentBook, allChapters, next, null);
+      setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
+      return;
+    }
+    // Cross-book boundary
+    const adjBook = books[bookIdx + delta];
+    if (!adjBook) return;
+    try {
+      const chs = await api(`/browse/chapters?book_id=${adjBook.book_id}&language=${lang}`);
+      const chapters = Array.isArray(chs) ? chs : [];
+      if (!chapters.length) return;
+      loadChapter(adjBook, chapters, delta > 0 ? 0 : chapters.length - 1, null);
+      setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, 80);
+    } catch { /* ignore */ }
+  }, [chapterIdx, allChapters, currentBook, books, bookIdx, lang, loadChapter]);
 
   // ── Toolbar auto-hide ─────────────────────────────────────────────────────
   const handleScroll = useCallback(() => {
@@ -479,12 +495,12 @@ export default function ScriptureReader({ onExit }) {
         <div className="rd-chapter-root">
           <div className={`rd-toolbar${toolbarVisible ? '' : ' rd-toolbar--hidden'}`}>
             <button className="rd-tb-back" onClick={() => { setScreen('home'); setToolbarVisible(true); }}>‹</button>
-            <button className="rd-tb-nav-btn" onClick={() => goChapter(-1)} disabled={chapterIdx === 0} aria-label="Previous chapter">‹‹</button>
+            <button className="rd-tb-nav-btn" onClick={() => goChapter(-1)} disabled={isFirstChapter} aria-label="Previous chapter">‹‹</button>
             <button className="rd-tb-title" onClick={revealToolbar}>
               <span className="rd-tb-book">{currentBook?.book_title}</span>
               {currentCh && <span className="rd-tb-ch">Ch. {currentCh.chapter_number}{allChapters.length > 1 && <span className="rd-tb-total"> / {allChapters.length}</span>}</span>}
             </button>
-            <button className="rd-tb-nav-btn" onClick={() => goChapter(1)} disabled={chapterIdx >= allChapters.length - 1} aria-label="Next chapter">››</button>
+            <button className="rd-tb-nav-btn" onClick={() => goChapter(1)} disabled={isLastChapter} aria-label="Next chapter">››</button>
             <div className="rd-tb-right">
               <button className="rd-tb-btn" title="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
               <button className="rd-tb-btn" onClick={() => setSettingsOpen(true)}>Aa</button>
@@ -542,12 +558,12 @@ export default function ScriptureReader({ onExit }) {
                 </button>
                 <div className="rd-end-divider" />
                 <div className="rd-ch-nav">
-                  <button className="rd-ch-nav-btn" onClick={() => goChapter(-1)} disabled={chapterIdx === 0}>
-                    ← {allChapters[chapterIdx - 1] ? `Ch. ${allChapters[chapterIdx - 1].chapter_number}` : 'Prev'}
+                  <button className="rd-ch-nav-btn" onClick={() => goChapter(-1)} disabled={isFirstChapter}>
+                    ← {chapterIdx > 0 ? `Ch. ${allChapters[chapterIdx - 1].chapter_number}` : books[bookIdx - 1]?.book_title || 'Prev'}
                   </button>
                   <span className="rd-ch-nav-dot" />
-                  <button className="rd-ch-nav-btn" onClick={() => goChapter(1)} disabled={chapterIdx >= allChapters.length - 1}>
-                    {allChapters[chapterIdx + 1] ? `Ch. ${allChapters[chapterIdx + 1].chapter_number}` : 'Next'} →
+                  <button className="rd-ch-nav-btn" onClick={() => goChapter(1)} disabled={isLastChapter}>
+                    {chapterIdx < allChapters.length - 1 ? `Ch. ${allChapters[chapterIdx + 1].chapter_number}` : books[bookIdx + 1]?.book_title || 'Next'} →
                   </button>
                 </div>
               </div>
