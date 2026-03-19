@@ -305,22 +305,87 @@ fastify.get('/browse/verses', async (request, reply) => {
 
 // HTTP search endpoint (used by mobile sub-searches in context modals)
 fastify.get('/search', async (request, reply) => {
-  const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10' } = request.query;
+  const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10', contextVerseId: cvidStr } = request.query;
   if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
-  const page = Math.max(0, parseInt(pStr, 10) || 0);
+  const page     = Math.max(0, parseInt(pStr, 10) || 0);
   const pageSize = Math.min(50, Math.max(1, parseInt(psStr, 10) || 10));
-  const lang = language.toLowerCase().trim();
+  const lang     = language.toLowerCase().trim();
+  const contextVerseId = cvidStr ? (Number(cvidStr) || null) : null;
   try {
+    // Non-English: basic FTS only
     if (lang !== 'en') {
       return searchScriptureInDb(q, page, pageSize, resolveDbAdapter(lang), fastify.log);
     }
+
+    // Step 1: Exact scripture reference → direct lookup
+    const ref = engine.parseScriptureReference(q);
+    if (ref) {
+      const refResult = searchScripture(q, page, pageSize, dba, fastify.log);
+      if (refResult.total > 0) {
+        return { results: refResult.results, total: refResult.total, page, pageSize, query: q, language: lang };
+      }
+    }
+
+    // Step 2: Embed query once
+    let qvec = null;
+    if (embeddingsReady && embeddingPipe) {
+      try {
+        const out = await embeddingPipe(q.trim(), { pooling: 'mean', normalize: true });
+        qvec = new Float32Array(out.data);
+      } catch {}
+    }
+
+    // Step 3: Synonym expansion + Step 4: Multi-source RRF fusion
     const expanded = expandWithSynonyms(q.trim());
     let fusionResult = multiSourceFusion(q.trim(), expanded.join(' '), pageSize);
-    const results = fusionResult.results.slice(0, pageSize).map(r => {
+
+    // Step 5: Sigmoid confidence gate → concept expansion
+    const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
+    const confidence = sigmoidConfidence(topBm25, fusionResult.total);
+    if (confidence < 0.6 && qvec && conceptCache.length) {
+      const topN = confidence < 0.3 ? 5 : 3;
+      const concepts = await expandWithConcepts(q.trim(), topN, qvec);
+      for (const c of concepts) {
+        const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
+        for (const r of cFusion.results) {
+          if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
+            r._rrfScore = (r._rrfScore || 0) * c.score;
+            fusionResult.results.push(r);
+          }
+        }
+      }
+      fusionResult.total = fusionResult.results.length;
+    }
+
+    let { results, total } = fusionResult;
+
+    // Step 6: MMR diversity reranking
+    if (results.length > 1 && qvec) {
+      results = mmrRerank(results, qvec, 0.7, Math.min(pageSize * 3, 60));
+      results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? 0).toFixed(4) }));
+    }
+
+    // Step 7: Semantic fallback
+    if (total < 5 && qvec) {
+      const excludeIds = new Set(results.map(r => r.verse_id));
+      const sem = await semanticSearch(q.trim(), 0, pageSize - results.length, excludeIds, qvec);
+      if (sem && sem.results.length > 0) {
+        results = [...results, ...sem.results];
+        total = total + sem.total;
+      }
+    }
+
+    // Step 8: Context-aware boosting
+    if (contextVerseId) {
+      results = contextBoost(results, contextVerseId);
+      results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+    }
+
+    const finalResults = results.slice(page * pageSize, page * pageSize + pageSize).map(r => {
       const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
       return clean;
     });
-    return { results, total: fusionResult.total, page, pageSize, query: q, language: lang };
+    return { results: finalResults, total, page, pageSize, query: q, language: lang };
   } catch (err) {
     fastify.log.error({ err }, '/search failed');
     reply.code(500);
