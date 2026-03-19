@@ -5,6 +5,7 @@ import { isDisplayAvailable, isCasting } from '../socket-local';
 import * as svc from '../scripture-service';
 import { createServiceProxy } from '../scripture-service-proxy';
 import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadStateChange, getDownloadStates } from '../db-manager';
+import { notify, cancelNotification } from '../notify';
 import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
 import CastingControl from '../components/CastingControl';
 
@@ -1206,9 +1207,34 @@ const MobilePresenter = () => {
     }
   };
 
-  // Subscribe to language download state changes
+  // Subscribe to language download state changes — fire toasts + Android notifications
+  const prevDownloadRef = useRef({});
+  const DOWNLOAD_NOTIF_ID = 50001; // stable ID so progress updates replace the same notification
   useEffect(() => {
-    return onDownloadStateChange(setLangDownloads);
+    return onDownloadStateChange((newStates) => {
+      const prev = prevDownloadRef.current;
+      for (const [lang, st] of Object.entries(newStates)) {
+        const name = LANGUAGE_NAMES[lang] || lang;
+        const prevStatus = prev[lang]?.status;
+        if (prevStatus !== 'downloading' && st.status === 'downloading') {
+          showToast(`⬇ Downloading ${name}…`);
+          notify('Downloading Scriptures', `${name} — 0%`, { id: DOWNLOAD_NOTIF_ID, ongoing: true });
+        } else if (prevStatus === 'downloading' && st.status === 'downloading' && st.progress !== prev[lang]?.progress) {
+          // Progress update — replace the ongoing notification
+          notify('Downloading Scriptures', `${name} — ${st.progress}%`, { id: DOWNLOAD_NOTIF_ID, ongoing: true });
+        } else if (prevStatus === 'downloading' && st.status === 'ready') {
+          showToast(`✅ ${name} downloaded`);
+          cancelNotification(DOWNLOAD_NOTIF_ID);
+          notify('Download Complete', `${name} scriptures are ready`, { id: DOWNLOAD_NOTIF_ID + 1 });
+        } else if (prevStatus === 'downloading' && st.status === 'error') {
+          showToast(`❌ ${name} download failed`);
+          cancelNotification(DOWNLOAD_NOTIF_ID);
+          notify('Download Failed', `${name} scriptures could not be downloaded`, { id: DOWNLOAD_NOTIF_ID + 2 });
+        }
+      }
+      prevDownloadRef.current = newStates;
+      setLangDownloads(newStates);
+    });
   }, []);
 
   // Trigger language download if needed (offline mode only)
@@ -1869,29 +1895,19 @@ const MobilePresenter = () => {
   /* ── Render ── */
   const hasLiveActionBar = Boolean(staged || liveVerse);
 
+  // Active language download toast info
+  const activeDownload = useMemo(() => {
+    for (const [code, st] of Object.entries(langDownloads)) {
+      if (st.status === 'downloading') {
+        const name = LANG_OPTIONS.find(l => l.value === code)?.label || code;
+        return { code, name, progress: st.progress };
+      }
+    }
+    return null;
+  }, [langDownloads]);
+
   return (
     <>
-    {/* ── Online session bar ── */}
-    {isOnline && !sessionJoined && (
-      <div className="online-session-bar">
-        <div className="online-session-bar-inner">
-          <span className={`online-conn-dot online-conn-dot--${connectionState}`} />
-          <input
-            type="text"
-            className="online-session-input"
-            placeholder="Session code"
-            value={sessionInput}
-            onChange={e => setSessionInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && joinSession()}
-            maxLength={24}
-          />
-          <button className="online-session-join-btn" onClick={() => joinSession()} disabled={!sessionInput.trim()}>Join</button>
-          <button className="online-session-back-btn" onClick={switchMode} title="Back to mode selection">⚙</button>
-        </div>
-        {sessionMessage && <p className="online-session-msg">{sessionMessage}</p>}
-      </div>
-    )}
-
     {/* ── PIN entry modal ── */}
     {pinEntryOpen && (
       <div className="pin-modal-backdrop" onClick={() => setPinEntryOpen(false)}>
@@ -1915,7 +1931,39 @@ const MobilePresenter = () => {
       </div>
     )}
 
+    {/* ── Language download toast ── */}
+    {activeDownload && (
+      <div className="lang-download-toast">
+        <span className="lang-download-toast-spinner" />
+        <span>Downloading {activeDownload.name}… {activeDownload.progress}%</span>
+        <div className="lang-download-toast-bar">
+          <div className="lang-download-toast-fill" style={{ width: `${activeDownload.progress}%` }} />
+        </div>
+      </div>
+    )}
+
     <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+
+      {/* ── Online session bar (inside container so it participates in flex layout) ── */}
+      {isOnline && !sessionJoined && (
+        <div className="online-session-bar">
+          <div className="online-session-bar-inner">
+            <span className={`online-conn-dot online-conn-dot--${connectionState}`} />
+            <input
+              type="text"
+              className="online-session-input"
+              placeholder="Session code"
+              value={sessionInput}
+              onChange={e => setSessionInput(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && joinSession()}
+              maxLength={24}
+            />
+            <button className="online-session-join-btn" onClick={() => joinSession()} disabled={!sessionInput.trim()}>Join</button>
+            <button className="online-session-back-btn" onClick={switchMode} title="Back to mode selection">⚙</button>
+          </div>
+          {sessionMessage && <p className="online-session-msg">{sessionMessage}</p>}
+        </div>
+      )}
 
       {/* ════════════════════════════════════════
           COMMAND BAR HEADER

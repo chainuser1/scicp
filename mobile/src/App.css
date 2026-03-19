@@ -4200,6 +4200,21 @@ button,
     margin-left: 0.25rem;
     position: relative;
   }
+  /* Allow brand to shrink so right controls stay on-screen */
+  .hdr-brand {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  /* Hide wordmark when session badge is present — emblem is sufficient */
+  .hdr-brand:has(.hdr-session-badge) .hdr-title {
+    display: none;
+  }
+  .hdr-session-badge {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* Compact live badge — dot only, no text */
@@ -7583,6 +7598,7 @@ button, [role="button"] {
   background: #0e0e14;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   padding: 10px 12px 8px;
+  flex-shrink: 0;
 }
 .online-session-bar-inner {
   display: flex;
@@ -7722,19 +7738,16 @@ button, [role="button"] {
 /* ═══════════════════════════════════════════════════════════════════
    LIGHT THEME OVERRIDES — mode screen + online elements
    ═══════════════════════════════════════════════════════════════════ */
-.presenter-container--light .online-session-bar,
-.presenter-container--light ~ .online-session-bar {
+.presenter-container--light .online-session-bar {
   background: #f5f0e8;
   border-bottom-color: rgba(0,0,0,0.1);
 }
-.presenter-container--light .online-session-input,
-.presenter-container--light ~ .online-session-bar .online-session-input {
+.presenter-container--light .online-session-input {
   background: rgba(0,0,0,0.04);
   border-color: rgba(0,0,0,0.15);
   color: #1a1a1a;
 }
-.presenter-container--light .online-session-back-btn,
-.presenter-container--light ~ .online-session-bar .online-session-back-btn {
+.presenter-container--light .online-session-back-btn {
   background: rgba(0,0,0,0.04);
   border-color: rgba(0,0,0,0.12);
   color: #666;
@@ -7752,4 +7765,47 @@ button, [role="button"] {
   background: rgba(0,0,0,0.04);
   border-color: rgba(0,0,0,0.15);
   color: #1a1a1a;
+}
+
+/* ── Language download toast ── */
+.lang-download-toast {
+  position: fixed;
+  top: env(safe-area-inset-top, 0);
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(20, 20, 30, 0.92);
+  backdrop-filter: blur(8px);
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  flex-wrap: wrap;
+}
+.lang-download-toast-spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #6cb4ff;
+  border-radius: 50%;
+  animation: dl-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes dl-spin { to { transform: rotate(360deg); } }
+.lang-download-toast-bar {
+  flex: 1 1 100%;
+  height: 3px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.lang-download-toast-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a9eff, #6cb4ff);
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }

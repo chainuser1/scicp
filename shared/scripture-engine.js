@@ -263,7 +263,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
 
   const results = db.prepare(`
     SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
-           scripture_text, verse_title, verse_id
+           scripture_text, verse_title, verse_id, volume_id
     FROM scriptures
     WHERE ${clauses.join(' AND ')}
     ORDER BY verse_id
@@ -287,7 +287,8 @@ const searchScripture = (input, page = 0, pageSize = 10, db, log = null) => {
         scripture_text,
         verse_title,
         verse_short_title,
-        verse_id
+        verse_id,
+        volume_id
     FROM
         scriptures
     WHERE
@@ -342,7 +343,7 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, db, log = null) => 
       const total = countRow?.total ?? 0;
       const rows  = db.prepare(`
         SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
-               scripture_text, verse_title, verse_short_title, verse_id
+               scripture_text, verse_title, verse_short_title, verse_id, volume_id
         FROM scriptures
         WHERE LOWER(book_title) = LOWER(?) AND chapter_number = ?
         ${ref.verse !== null ? 'AND verse_number = ?' : ''}
@@ -365,7 +366,7 @@ const searchScriptureInDb = (input, page = 0, pageSize = 10, db, log = null) => 
         `).get(...(ref.verse !== null ? [bookId, ref.chapter, ref.verse] : [bookId, ref.chapter]))?.total ?? 0;
         const fbRows = db.prepare(`
           SELECT book_id, chapter_id, book_title, chapter_number, verse_number,
-                 scripture_text, verse_title, verse_short_title, verse_id
+                 scripture_text, verse_title, verse_short_title, verse_id, volume_id
           FROM scriptures
           WHERE book_id = ? AND chapter_number = ?
           ${ref.verse !== null ? 'AND verse_number = ?' : ''}
@@ -410,7 +411,7 @@ const topicSearch = (query, page = 0, pageSize = 10, tgDb, scriptureDb) => {
     ).all(topic.id, pageSize, offset).map(r => r.verse_id);
 
     const stmt = scriptureDb.prepare(
-      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, volume_id FROM scriptures WHERE verse_id = ?'
     );
     const results = verseIds
       .map(vid => stmt.get(vid))
@@ -609,10 +610,61 @@ function isVerseInComeFollowMeGroup(row, group) {
   return false;
 }
 
-// Minimal weekly block override (can be expanded as full CFM calendars are added)
+// 2026 Come Follow Me — Old Testament + Pearl of Great Price
+// Week 1 starts Dec 29, 2025 (Mon). Week numbers are ISO-style (week of year).
 const CFM_2026_OT_WEEKLY_BLOCKS = {
-  // Mar 9–15, 2026
-  11: { book: 'Genesis', chapterStart: 37, chapterEnd: 41, label: 'Genesis 37–41' },
+  1:  { book: 'Moses',    chapterStart: 1, chapterEnd: 1,   label: 'Moses 1' },
+  2:  { book: 'Moses',    chapterStart: 1, chapterEnd: 1,   label: 'Moses 1; Abraham 3' },          // intro week
+  3:  { book: 'Abraham',  chapterStart: 3, chapterEnd: 5,   label: 'Abraham 3–5' },
+  4:  { book: 'Genesis',  chapterStart: 1, chapterEnd: 2,   label: 'Genesis 1–2; Moses 2–3' },
+  5:  { book: 'Genesis',  chapterStart: 3, chapterEnd: 4,   label: 'Genesis 3–4; Moses 4–5' },
+  6:  { book: 'Moses',    chapterStart: 5, chapterEnd: 7,   label: 'Moses 5–7' },
+  7:  { book: 'Moses',    chapterStart: 8, chapterEnd: 8,   label: 'Moses 8; Genesis 5–6' },
+  8:  { book: 'Genesis',  chapterStart: 6, chapterEnd: 10,  label: 'Genesis 6–10; Moses 8' },
+  9:  { book: 'Genesis',  chapterStart: 11, chapterEnd: 14, label: 'Genesis 11–14' },
+  10: { book: 'Genesis',  chapterStart: 15, chapterEnd: 19, label: 'Genesis 15–19' },
+  11: { book: 'Genesis',  chapterStart: 20, chapterEnd: 23, label: 'Genesis 20–23' },
+  12: { book: 'Genesis',  chapterStart: 24, chapterEnd: 27, label: 'Genesis 24–27' },
+  13: { book: 'Genesis',  chapterStart: 28, chapterEnd: 31, label: 'Genesis 28–31' },
+  14: { book: 'Genesis',  chapterStart: 32, chapterEnd: 36, label: 'Genesis 32–36' },
+  15: { book: 'Genesis',  chapterStart: 37, chapterEnd: 41, label: 'Genesis 37–41' },
+  16: { book: 'Genesis',  chapterStart: 42, chapterEnd: 50, label: 'Genesis 42–50' },
+  17: { book: 'Exodus',   chapterStart: 1, chapterEnd: 6,   label: 'Exodus 1–6' },
+  18: { book: 'Exodus',   chapterStart: 7, chapterEnd: 13,  label: 'Exodus 7–13' },
+  19: { book: 'Exodus',   chapterStart: 14, chapterEnd: 17, label: 'Exodus 14–17' },
+  20: { book: 'Exodus',   chapterStart: 18, chapterEnd: 20, label: 'Exodus 18–20' },
+  21: { book: 'Exodus',   chapterStart: 21, chapterEnd: 24, label: 'Exodus 21–24' },
+  22: { book: 'Exodus',   chapterStart: 25, chapterEnd: 31, label: 'Exodus 25–31' },
+  23: { book: 'Exodus',   chapterStart: 32, chapterEnd: 34, label: 'Exodus 32–34' },
+  24: { book: 'Exodus',   chapterStart: 35, chapterEnd: 40, label: 'Exodus 35–40; Leviticus 1' },
+  25: { book: 'Leviticus', chapterStart: 1, chapterEnd: 15, label: 'Leviticus 1–15' },
+  26: { book: 'Leviticus', chapterStart: 16, chapterEnd: 27, label: 'Leviticus 16–27' },
+  27: { book: 'Numbers',  chapterStart: 1, chapterEnd: 21,  label: 'Numbers 1–21' },
+  28: { book: 'Numbers',  chapterStart: 22, chapterEnd: 36, label: 'Numbers 22–36; Deuteronomy 1–4' },
+  29: { book: 'Deuteronomy', chapterStart: 5, chapterEnd: 16, label: 'Deuteronomy 5–16' },
+  30: { book: 'Deuteronomy', chapterStart: 17, chapterEnd: 34, label: 'Deuteronomy 17–34' },
+  31: { book: 'Joshua',   chapterStart: 1, chapterEnd: 12,  label: 'Joshua 1–12' },
+  32: { book: 'Joshua',   chapterStart: 13, chapterEnd: 24, label: 'Joshua 13–24; Judges 1–6' },
+  33: { book: 'Judges',   chapterStart: 1, chapterEnd: 16,  label: 'Judges 1–16' },
+  34: { book: 'Ruth',     chapterStart: 1, chapterEnd: 4,   label: 'Ruth; 1 Samuel 1–3' },
+  35: { book: '1 Samuel', chapterStart: 1, chapterEnd: 15,  label: '1 Samuel 1–15' },
+  36: { book: '1 Samuel', chapterStart: 16, chapterEnd: 31, label: '1 Samuel 16–31' },
+  37: { book: '2 Samuel', chapterStart: 1, chapterEnd: 24,  label: '2 Samuel 1–24' },
+  38: { book: '1 Kings',  chapterStart: 1, chapterEnd: 11,  label: '1 Kings 1–11' },
+  39: { book: '1 Kings',  chapterStart: 12, chapterEnd: 22, label: '1 Kings 12–22; 2 Kings 1–2' },
+  40: { book: '2 Kings',  chapterStart: 1, chapterEnd: 25,  label: '2 Kings 1–25' },
+  41: { book: 'Ezra',     chapterStart: 1, chapterEnd: 10,  label: 'Ezra 1–10; Nehemiah 1–13' },
+  42: { book: 'Esther',   chapterStart: 1, chapterEnd: 10,  label: 'Esther 1–10' },
+  43: { book: 'Job',      chapterStart: 1, chapterEnd: 42,  label: 'Job 1–42' },
+  44: { book: 'Psalms',   chapterStart: 1, chapterEnd: 75,  label: 'Psalms 1–75' },
+  45: { book: 'Psalms',   chapterStart: 76, chapterEnd: 150, label: 'Psalms 76–150' },
+  46: { book: 'Proverbs', chapterStart: 1, chapterEnd: 31,  label: 'Proverbs; Ecclesiastes' },
+  47: { book: 'Song of Solomon', chapterStart: 1, chapterEnd: 8, label: 'Song of Solomon; Isaiah 1–5' },
+  48: { book: 'Isaiah',   chapterStart: 1, chapterEnd: 12,  label: 'Isaiah 1–12' },
+  49: { book: 'Isaiah',   chapterStart: 13, chapterEnd: 35, label: 'Isaiah 13–35' },
+  50: { book: 'Isaiah',   chapterStart: 36, chapterEnd: 66, label: 'Isaiah 36–66' },
+  51: { book: 'Jeremiah', chapterStart: 1, chapterEnd: 33,  label: 'Jeremiah 1–33; Lamentations' },
+  52: { book: 'Ezekiel',  chapterStart: 1, chapterEnd: 48,  label: 'Ezekiel; Daniel; Minor Prophets' },
 };
 
 function getComeFollowMeWeeklyBlock(year, group, weekNumber) {
@@ -635,18 +687,24 @@ function getVerseIdsForWeeklyBlock(db, block) {
 }
 
 // ── Verse of the Day ────────────────────────────────────────────────────────
+// Picks a different verse each day from the Come Follow Me weekly block.
+// Each day within the same week gets a unique verse; new week → new block.
 function getVerseOfTheDay(db, now = new Date()) {
-  const start = Date.UTC(now.getUTCFullYear(), 0, 0);
+  const year = now.getUTCFullYear();
+  const start = Date.UTC(year, 0, 0);
   const dayOfYear = Math.floor(
-    (Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
+    (Date.UTC(year, now.getUTCMonth(), now.getUTCDate()) - start) / 86400000
   );
   const weekOfYear = Math.floor((dayOfYear - 1) / 7);
   const weekNumber = weekOfYear + 1;
-  const cfmGroup = getComeFollowMeGroupForYear(now.getUTCFullYear());
-  const weeklyBlock = getComeFollowMeWeeklyBlock(now.getUTCFullYear(), cfmGroup, weekNumber);
+  const dayOfWeek = now.getUTCDay(); // 0=Sun … 6=Sat
+  const cfmGroup = getComeFollowMeGroupForYear(year);
+  const weeklyBlock = getComeFollowMeWeeklyBlock(year, cfmGroup, weekNumber);
 
   const LCG_A = 1664525, LCG_C = 1013904223, MOD = 2 ** 32;
-  const weekSeed = ((LCG_A * (weekOfYear + now.getUTCFullYear()) + LCG_C) % MOD + MOD) % MOD;
+  // Week seed determines the starting offset; day seed shifts within the pool
+  const weekSeed = ((LCG_A * (weekOfYear + year) + LCG_C) % MOD + MOD) % MOD;
+  const daySeed = ((LCG_A * (dayOfYear + year * 366) + LCG_C) % MOD + MOD) % MOD;
 
   // Build CFM-year candidate pool from curated ids.
   const placeholders = VOTD_POOL.map(() => '?').join(',');
@@ -660,10 +718,21 @@ function getVerseOfTheDay(db, now = new Date()) {
     .map(r => r.verse_id);
 
   const weeklyBlockPool = getVerseIdsForWeeklyBlock(db, weeklyBlock);
-  const activePool = weeklyBlockPool.length
-    ? weeklyBlockPool
-    : (cfmPool.length ? cfmPool : VOTD_POOL);
-  const poolId = activePool[weekSeed % activePool.length];
+
+  let activePool, poolId;
+  if (weeklyBlockPool.length) {
+    // CFM block available — pick a unique verse for each day of the week.
+    // Stride through the pool using weekSeed as base offset + dayOfWeek as step.
+    activePool = weeklyBlockPool;
+    const baseIdx = weekSeed % activePool.length;
+    // Use a secondary stride so each day lands on a different verse
+    const stride = Math.max(1, Math.floor(activePool.length / 7));
+    poolId = activePool[(baseIdx + dayOfWeek * stride + daySeed) % activePool.length];
+  } else {
+    // No CFM block — use cfmPool or full VOTD_POOL with daily rotation
+    activePool = cfmPool.length ? cfmPool : VOTD_POOL;
+    poolId = activePool[daySeed % activePool.length];
+  }
 
   const verse = db.prepare(`
     SELECT book_id, book_title, chapter_id, chapter_number, verse_number,
@@ -682,15 +751,14 @@ function getVerseOfTheDay(db, now = new Date()) {
     };
   }
 
-  // Fallback — random verse from full canon
+  // Fallback — deterministic verse from full canon
   const countRow = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get();
   const total    = countRow?.total || 41995;
-  const fallbackSeed = ((LCG_A * (dayOfYear + 1) + LCG_C) % MOD + MOD) % MOD;
   const fallback = db.prepare(`
     SELECT book_id, book_title, chapter_id, chapter_number, verse_number,
            scripture_text, verse_title, verse_id, volume_id
     FROM scriptures WHERE verse_id = ?
-  `).get((fallbackSeed % total) + 1);
+  `).get((daySeed % total) + 1);
 
   if (!fallback) return null;
   return {
