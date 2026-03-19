@@ -97,6 +97,7 @@ export default function MobileClient() {
   // textVisible drives the only animation: a gentle opacity crossfade
   // on the text layer. The backdrop box never moves or disappears.
   const [textVisible, setTextVisible]         = useState(false);
+  const [overlayActive, setOverlayActive]     = useState(false);
   const [displayVerse, setDisplayVerse]       = useState(null);
   const [highlightedText, setHighlightedText] = useState('');
   const [fontsReady, setFontsReady]           = useState(false);
@@ -185,18 +186,23 @@ export default function MobileClient() {
       setCustomData(null);
       const newBg = data.theme?.background_url;
       if (newBg) crossfadeBackground(newBg);
-      // Step 1 — fade text out
+      const mode = data.theme?.transition_mode || 'crossfade';
+      // Step 1 — fade out (+ raise overlay for fade-black)
       setTextVisible(false);
+      if (mode === 'fade-black') setOverlayActive(true);
       setTimeout(() => {
         // Step 2 — swap content while invisible
         setVerse(data);
         setDisplayVerse(data);
         setIsIdle(false);
-        // Step 3 — fade text back in after DOM commit
+        // Step 3 — fade back in (+ lower overlay)
         requestAnimationFrame(() =>
-          requestAnimationFrame(() => setTextVisible(true))
+          requestAnimationFrame(() => {
+            setTextVisible(true);
+            if (mode === 'fade-black') setOverlayActive(false);
+          })
         );
-      }, TEXT_FADE_MS);
+      }, mode === 'cut' ? 0 : TEXT_FADE_MS);
     };
 
     const handleTheme = (theme) => {
@@ -450,6 +456,8 @@ export default function MobileClient() {
     'Pearl of Great Price':   'volume-pgp',
   };
   const volumeClass = VOLUME_CLASS_MAP[verse?.volume_title] || '';
+  const transitionMode = verse?.theme?.transition_mode || 'crossfade';
+  const transitionClass = transitionMode !== 'crossfade' ? ` verse-text-transition--${transitionMode}` : '';
 
   const viewClass = [
     'client-view',
@@ -486,6 +494,9 @@ export default function MobileClient() {
         <div className="client-bg-prev" style={{ backgroundImage: prevBgUrl }} aria-hidden="true" />
       )}
 
+      {/* Fade-to-black overlay */}
+      <div className={`trans-overlay${overlayActive ? ' trans-overlay--active' : ''}`} aria-hidden="true" />
+
       {isIdle && (
         <div className="client-idle-state" aria-live="polite" aria-label="Waiting for scripture">
           <div className="idle-cross" aria-hidden="true">
@@ -501,7 +512,7 @@ export default function MobileClient() {
       {!isIdle && customData && (
         <div className="verse-content">
           <div className="verse-backdrop custom-text-backdrop">
-            <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
+            <div className={`verse-text-body${transitionClass}${textVisible ? ' verse-text-visible' : ''}`}>
               <p className="custom-text-main">{customData.text}</p>
               {customData.subtext && <p className="custom-text-sub">{customData.subtext}</p>}
             </div>
@@ -514,7 +525,7 @@ export default function MobileClient() {
           <div className="verse-backdrop">
             {/* verse-text-body is the ONLY thing that fades.
                 The backdrop box itself never animates. */}
-            <div className={`verse-text-body${textVisible ? ' verse-text-visible' : ''}`}>
+            <div className={`verse-text-body${transitionClass}${textVisible ? ' verse-text-visible' : ''}`}>
               <p>{renderHighlightedText()}</p>
               {/* F8 — secondary language text (paired segment when dual-seg active) */}
               {(verse.secondary_segments?.[verse.currentSegment] || verse.secondary_text) && (

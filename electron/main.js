@@ -385,6 +385,9 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-available', (info) => {
+    if (presenterWin && !presenterWin.isDestroyed()) {
+      presenterWin.webContents.send('update-status', { status: 'available', version: info.version });
+    }
     if (process.platform === 'linux' && process.env.APPIMAGE) {
       dialog.showMessageBox({
         type: 'info',
@@ -423,9 +426,20 @@ function setupAutoUpdater() {
 
   autoUpdater.on('download-progress', (progress) => {
     console.log(`Auto-updater: downloading ${Math.round(progress.percent)}%`);
+    if (presenterWin && !presenterWin.isDestroyed()) {
+      presenterWin.webContents.send('update-download-progress', {
+        percent: Math.round(progress.percent),
+        bytesPerSecond: progress.bytesPerSecond,
+        transferred: progress.transferred,
+        total: progress.total,
+      });
+    }
   });
 
   autoUpdater.on('update-downloaded', () => {
+    if (presenterWin && !presenterWin.isDestroyed()) {
+      presenterWin.webContents.send('update-status', { status: 'downloaded' });
+    }
     dialog.showMessageBox({
       type: 'info',
       title: 'Update Ready',
