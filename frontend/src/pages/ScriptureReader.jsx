@@ -380,7 +380,9 @@ export default function ScriptureReader({ onExit }) {
       {screen === 'home' && (
         <div className="rd-home">
           <div className="rd-home-bar">
-            <button className="rd-back" onClick={onExit}>‹</button>
+            <button className="rd-back" onClick={onExit}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
             <span className="rd-home-title">Read Scriptures</span>
             <button className="rd-settings-btn" onClick={() => setSettingsOpen(true)}>Aa</button>
           </div>
@@ -477,16 +479,16 @@ export default function ScriptureReader({ onExit }) {
         <div className="rd-chapter-root">
           <div className={`rd-toolbar${toolbarVisible ? '' : ' rd-toolbar--hidden'}`}>
             <button className="rd-tb-back" onClick={() => { setScreen('home'); setToolbarVisible(true); }}>‹</button>
+            <button className="rd-tb-nav-btn" onClick={() => goChapter(-1)} disabled={chapterIdx === 0} aria-label="Previous chapter">‹‹</button>
             <button className="rd-tb-title" onClick={revealToolbar}>
               <span className="rd-tb-book">{currentBook?.book_title}</span>
               {currentCh && <span className="rd-tb-ch">Ch. {currentCh.chapter_number}{allChapters.length > 1 && <span className="rd-tb-total"> / {allChapters.length}</span>}</span>}
             </button>
+            <button className="rd-tb-nav-btn" onClick={() => goChapter(1)} disabled={chapterIdx >= allChapters.length - 1} aria-label="Next chapter">››</button>
             <div className="rd-tb-right">
               <button className="rd-tb-btn" title="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
-              <select className="rd-tb-lang" value={lang} onChange={e => saveLang(e.target.value)}>
-                {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
               <button className="rd-tb-btn" onClick={() => setSettingsOpen(true)}>Aa</button>
+              <button className="rd-tb-exit" onClick={onExit} title="Exit Reader">✕</button>
             </div>
           </div>
 
