@@ -393,6 +393,15 @@ export default function ScriptureReader({ onExit }) {
             {query && <button className="rd-search-clear" onClick={() => { setQuery(''); setSearchResults([]); }}>✕</button>}
           </div>
 
+          {/* Quick-topic chips — same topics as presenter */}
+          {!query && (
+            <div className="rd-quick-topics">
+              {['faith','prayer','hope','charity','repentance','grace','atonement','service','covenant','eternal life','holy ghost','resurrection','obedience','trials','gratitude'].map(t => (
+                <button key={t} className="rd-qtopic" onClick={() => { setQuery(t); setSearchPage(0); doSearch(t, 0, false); }}>{t}</button>
+              ))}
+            </div>
+          )}
+
           {(query || searchResults.length > 0) ? (
             <div className="rd-home-scroll">
               {searching && <div className="rd-hint">Searching…</div>}
@@ -460,6 +469,7 @@ export default function ScriptureReader({ onExit }) {
               {currentCh && <span className="rd-tb-ch">Ch. {currentCh.chapter_number}{allChapters.length > 1 && <span className="rd-tb-total"> / {allChapters.length}</span>}</span>}
             </button>
             <div className="rd-tb-right">
+              <button className="rd-tb-btn" title="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
               <select className="rd-tb-lang" value={lang} onChange={e => saveLang(e.target.value)}>
                 {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
               </select>
