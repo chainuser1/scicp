@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
 import Presenter from './pages/Presenter';
 import Client from './pages/Client';
 import About from './pages/About';
@@ -7,6 +7,7 @@ import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Download from './pages/Download';
+import ScriptureReader from './pages/ScriptureReader';
 import './App.css';
 import Footer from './components/Footer';
 
@@ -98,6 +99,11 @@ function Home() {
             <span className="home-card-label">Offline Downloads</span>
             <span className="home-card-desc">Get desktop and mobile apps<br />for offline church use</span>
           </Link>
+          <Link to="/reader" className="home-card home-card--reader">
+            <span className="home-card-icon">📖</span>
+            <span className="home-card-label">Read Scriptures</span>
+            <span className="home-card-desc">Personal reading — browse by chapter,<br />highlight, bookmark, and explore context</span>
+          </Link>
         </nav>
       </main>
 
@@ -124,11 +130,17 @@ function Home() {
   );
 }
 
+function ReaderPage() {
+  const navigate = useNavigate();
+  return <ScriptureReader onExit={() => navigate('/')} />;
+}
+
 function App() {
   return (
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/reader" element={<ReaderPage />} />
         <Route path="/presenter" element={<Presenter />} />
         <Route path="/client" element={<Client />} />
         <Route path="/about" element={<About />} />
