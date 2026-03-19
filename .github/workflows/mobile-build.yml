@@ -68,28 +68,57 @@ jobs:
             cp "$SRC" "$d/ic_launcher_foreground.png"
           done
 
-      - name: Build Android APK (debug, installable)
+      - name: Decode Android signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/release.keystore
+            echo "KEYSTORE_AVAILABLE=true" >> $GITHUB_ENV
+          else
+            echo "KEYSTORE_AVAILABLE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build Android APK
         working-directory: mobile/android
-        run: ./gradlew assembleDebug
+        env:
+          KEYSTORE_AVAILABLE: ${{ env.KEYSTORE_AVAILABLE }}
+          KEYSTORE_STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_STORE_PASS }}
+          KEYSTORE_KEY_ALIAS: ${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_KEY_PASS: ${{ secrets.ANDROID_KEYSTORE_KEY_PASS }}
+        run: |
+          if [ "$KEYSTORE_AVAILABLE" = "true" ]; then
+            ./gradlew assembleRelease \
+              -Pandroid.injected.signing.store.file="$(pwd)/app/release.keystore" \
+              -Pandroid.injected.signing.store.password="$KEYSTORE_STORE_PASS" \
+              -Pandroid.injected.signing.key.alias="$KEYSTORE_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$KEYSTORE_KEY_PASS"
+          else
+            ./gradlew assembleDebug
+          fi
 
       - name: Version-stamp APK filename
         run: |
-          SRC="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
-          DST="mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk"
+          if [ "$KEYSTORE_AVAILABLE" = "true" ]; then
+            SRC="mobile/android/app/build/outputs/apk/release/app-release.apk"
+          else
+            SRC="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          fi
+          DST="mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk"
           cp "$SRC" "$DST"
 
       - name: Upload APK
         uses: actions/upload-artifact@v5
         with:
           name: scriptures-in-view-android-apk-${{ env.ARTIFACT_SUFFIX }}
-          path: mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk
+          path: mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk
           if-no-files-found: warn
 
       - name: Publish Android APK to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: mobile/android/app/build/outputs/apk/debug/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android-debug.apk
+          files: mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk
           fail_on_unmatched_files: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
