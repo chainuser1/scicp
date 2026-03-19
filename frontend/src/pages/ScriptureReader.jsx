@@ -125,9 +125,10 @@ export default function ScriptureReader({ onExit }) {
   const [searchPage,    setSearchPage]    = useState(0);
   const debounceRef = useRef(null);
 
-  // Scroll-to-verse
-  const scrollToRef = useRef(null);
-  const verseEls    = useRef({});
+  // Scroll-to-verse + found animation
+  const scrollToRef  = useRef(null);
+  const verseEls     = useRef({});
+  const [foundVerse, setFoundVerse] = useState(null); // verse_id to animate as "found"
 
   // Derived
   const themeObj  = useMemo(() => THEMES.find(t => t.id === theme) || THEMES[0], [theme]);
@@ -190,12 +191,18 @@ export default function ScriptureReader({ onExit }) {
     setLoadingChapter(false);
   }, [lang]);
 
-  // Scroll-to-anchor after render
+  // Scroll-to-anchor after render + "found" pulse animation
   useEffect(() => {
     if (!scrollToRef.current || !chapterVerses.length) return;
+    const target = scrollToRef.current;
     const tid = setTimeout(() => {
-      const el = verseEls.current[scrollToRef.current];
-      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); scrollToRef.current = null; }
+      const el = verseEls.current[target];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFoundVerse(target);
+        setTimeout(() => setFoundVerse(null), 2800);
+        scrollToRef.current = null;
+      }
     }, 250);
     return () => clearTimeout(tid);
   }, [chapterVerses]);
@@ -385,6 +392,7 @@ export default function ScriptureReader({ onExit }) {
               type="search"
               value={query}
               onChange={handleQueryChange}
+              onKeyDown={e => { if (e.key === 'Enter' && searchResults.length > 0) { e.preventDefault(); openVerseInReader(searchResults[0]); } }}
               placeholder="Topic, name, or reference (John 3:16)…"
               autoCorrect="off"
               autoComplete="off"
@@ -489,12 +497,13 @@ export default function ScriptureReader({ onExit }) {
                   const hlId  = highlights[verse.verse_id];
                   const hlObj = hlId ? HIGHLIGHT_COLORS.find(c => c.id === hlId) : null;
                   const bkd   = bookmarks.has(verse.verse_id);
+                  const found = foundVerse === verse.verse_id;
                   return (
-                    <span
+                    <p
                       key={verse.verse_id}
                       ref={el => { if (el) verseEls.current[verse.verse_id] = el; }}
-                      className={`rd-verse${bkd ? ' rd-verse--bkd' : ''}`}
-                      style={hlObj ? { background: hlObj.css, borderRadius: '3px', padding: '1px 0' } : {}}
+                      className={`rd-verse${bkd ? ' rd-verse--bkd' : ''}${found ? ' rd-verse--found' : ''}`}
+                      style={hlObj ? { background: hlObj.css } : {}}
                       onMouseDown={() => startLp(verse)}
                       onMouseUp={cancelLp}
                       onMouseLeave={cancelLp}
@@ -509,8 +518,8 @@ export default function ScriptureReader({ onExit }) {
                         {bkd && <span className="rd-bk-mark">🔖</span>}
                         {verse.verse_number}
                       </sup>
-                      {verse.scripture_text}{' '}
-                    </span>
+                      {verse.scripture_text}
+                    </p>
                   );
                 })}
               </div>
