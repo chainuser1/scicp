@@ -54,4 +54,21 @@ export interface ExternalDisplayPlugin {
    * Returns 'granted' or 'denied'.
    */
   requestCameraPermission(): Promise<{ status: string }>;
+
+  /**
+   * Start a local HTTP server (NanoHTTPD) serving client-display.html
+   * from APK assets with SSE for live verse updates. Last-resort offline
+   * casting for TV browsers (e.g. Sony Bravia) that can't use Presentation API.
+   */
+  startLocalServer(options?: { port?: number }): Promise<{ url: string; ip: string; port: number }>;
+
+  /**
+   * Stop the local HTTP server.
+   */
+  stopLocalServer(): Promise<void>;
+
+  /**
+   * Get the current local server URL, or running=false if not started.
+   */
+  getLocalServerUrl(): Promise<{ running: boolean; url?: string; ip?: string; port?: number }>;
 }
