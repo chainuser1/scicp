@@ -332,6 +332,8 @@ const MobilePresenter = () => {
   const PRESENTER_TOKEN_KEY      = 'scicp.presenter_token';
   const PRESENTER_LAST_SESSION   = 'scicp.last_session';
   const [sessionId, setSessionId]           = useState('LOCAL');
+  const [sessionLabel, setSessionLabel]     = useState('');
+  const [sessionLabelInput, setSessionLabelInput] = useState('');
   const [sessionInput, setSessionInput]     = useState('');
   const [sessionMessage, setSessionMessage] = useState('');
   const [sessionJoined, setSessionJoined]   = useState(!isOnline); // offline starts joined
@@ -432,6 +434,8 @@ const MobilePresenter = () => {
   const [readinessBusy, setReadinessBusy]     = useState(false);
   const [readiness, setReadiness]             = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
   const [lanServerUrl, setLanServerUrl]       = useState(null);
+  const [takeoverAlert, setTakeoverAlert]     = useState(false);
+  const [evictedAlert, setEvictedAlert]       = useState(false);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -671,6 +675,7 @@ const MobilePresenter = () => {
   const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
   const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
+  const [presenterUiMode, setPresenterUiMode] = useState(() => { try { return localStorage.getItem('scicp.presenter_ui_mode') || 'dark'; } catch { return 'dark'; } });
   const [autoAdvance, setAutoAdvance]         = useState(false);
   const [autoAdvanceSec, setAutoAdvanceSec]   = useState(5);
   const autoAdvanceTimer                       = useRef(null);
@@ -803,6 +808,7 @@ const MobilePresenter = () => {
     const savedToken = (() => { try { return sessionStorage.getItem(PRESENTER_TOKEN_KEY) || ''; } catch { return ''; } })();
     const payload = { sessionId: normalized, role: 'presenter', presenterToken: savedToken };
     if (pin) payload.pin = pin;
+    if (sessionLabelInput.trim()) payload.label = sessionLabelInput.trim();
     socket.emit('join-session', payload, (response) => {
       if (response?.requiresPin) {
         setPendingPinSession(normalized);
@@ -819,6 +825,8 @@ const MobilePresenter = () => {
       if (response?.ok && response.sessionId) {
         setPinEntryOpen(false);
         setSessionId(response.sessionId);
+        if (response.label !== undefined) setSessionLabel(response.label || '');
+        setSessionLabelInput('');
         setSessionInput('');
         setSessionMessage(`Connected — ${response.sessionId}`);
         setSessionJoined(true);
@@ -837,6 +845,8 @@ const MobilePresenter = () => {
   const leaveSession = () => {
     socket.emit('leave-session', {}, () => {
       setSessionId('LOCAL');
+      setSessionLabel('');
+      setSessionLabelInput('');
       setSessionJoined(false);
       setSessionMessage('Disconnected');
       setLiveVerse(null);
@@ -892,13 +902,13 @@ const MobilePresenter = () => {
     };
     const onDisconnect = () => setConnectionState('disconnected');
     const onReconnecting = () => setConnectionState('reconnecting');
-    const onTakeover = () => {
-      showToast('⚠️ Another presenter is trying to join');
-    };
+    const onTakeover = () => setTakeoverAlert(true);
+    const onEvicted  = () => { setEvictedAlert(true); setTakeoverAlert(false); };
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('reconnect_attempt', onReconnecting);
     socket.on('presenter-takeover-attempt', onTakeover);
+    socket.on('presenter-evicted', onEvicted);
 
     // Subscribe to queue size changes
     const unsubQueue = socket.onQueueChange?.(count => setQueuedCount(count));
@@ -908,6 +918,7 @@ const MobilePresenter = () => {
       socket.off('disconnect', onDisconnect);
       socket.off('reconnect_attempt', onReconnecting);
       socket.off('presenter-takeover-attempt', onTakeover);
+      socket.off('presenter-evicted', onEvicted);
       if (unsubQueue) unsubQueue();
     };
   }, [isOnline]);
@@ -1957,7 +1968,7 @@ const MobilePresenter = () => {
       </div>
     )}
 
-    <div className={`presenter-container ${presenterThemeClass}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* ── Online session bar (inside container so it participates in flex layout) ── */}
       {isOnline && !sessionJoined && (
@@ -1976,6 +1987,16 @@ const MobilePresenter = () => {
             <button className="online-session-join-btn" onClick={() => joinSession()} disabled={!sessionInput.trim()}>Join</button>
             <button className="online-session-back-btn" onClick={switchMode} title="Back to mode selection">⚙</button>
           </div>
+          <div className="online-session-bar-inner" style={{ marginTop: '0.3rem' }}>
+            <input
+              type="text"
+              className="online-session-input"
+              placeholder="Room name (optional)"
+              value={sessionLabelInput}
+              onChange={e => setSessionLabelInput(e.target.value)}
+              maxLength={40}
+            />
+          </div>
           {sessionMessage && <p className="online-session-msg">{sessionMessage}</p>}
         </div>
       )}
@@ -1991,7 +2012,7 @@ const MobilePresenter = () => {
           <span className="hdr-title">Scripture</span>
           {isOnline && sessionJoined && (
             <span className="hdr-session-badge" title={`Session: ${sessionId}\nServer: ${serverUrl}`}>
-              🌐 {sessionId}
+              🌐 {sessionLabel ? `${sessionLabel} · ${sessionId}` : sessionId}
             </span>
           )}
         </div>
@@ -2255,7 +2276,7 @@ const MobilePresenter = () => {
 
               {/* Theme */}
               <div className="mobile-menu-section">
-                <div className="mobile-menu-label">Theme</div>
+                <div className="mobile-menu-label">Screen Theme</div>
                 <div className="mobile-menu-row">
                   {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme }) => (
                     <button
@@ -2263,6 +2284,34 @@ const MobilePresenter = () => {
                       className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
                       onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
                     >{label}</button>
+                  ))}
+                </div>
+                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Verse Transition</div>
+                <div className="mobile-menu-row" style={{ flexWrap: 'wrap' }}>
+                  {[
+                    { value: 'crossfade',  label: '⊙ Fade' },
+                    { value: 'slide-up',   label: '↑ Slide' },
+                    { value: 'fade-black', label: '◼ Black' },
+                    { value: 'cut',        label: '⚡ Cut' },
+                  ].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
+                      onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
+                    >{label}</button>
+                  ))}
+                </div>
+                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>App Appearance</div>
+                <div className="mobile-menu-row">
+                  {['dark', 'light'].map(mode => (
+                    <button
+                      key={mode}
+                      className={`theme-btn${presenterUiMode === mode ? ' active' : ''}`}
+                      onClick={() => {
+                        setPresenterUiMode(mode);
+                        try { localStorage.setItem('scicp.presenter_ui_mode', mode); } catch { /* ignore */ }
+                      }}
+                    >{mode === 'dark' ? '☽ Dark' : '☀ Light'}</button>
                   ))}
                 </div>
                 <div className="popover-row" style={{ marginTop: '0.4rem' }}>
@@ -3046,6 +3095,19 @@ const MobilePresenter = () => {
         </section>
 
       </main>
+      {/* Presenter takeover / eviction alerts */}
+      {takeoverAlert && (
+        <div className="presenter-takeover-alert" role="alert" aria-live="assertive">
+          ⚠️ Another device is trying to take over this session.
+          <button className="presenter-takeover-dismiss" onClick={() => setTakeoverAlert(false)}>✕</button>
+        </div>
+      )}
+      {evictedAlert && (
+        <div className="presenter-takeover-alert presenter-evicted-alert" role="alert" aria-live="assertive">
+          ⛔ You have been removed — another presenter took over this session.
+          <button className="presenter-takeover-dismiss" onClick={() => setEvictedAlert(false)}>✕</button>
+        </div>
+      )}
       {/* Toast notification */}
       {toastMsg && (
         <div className="presenter-toast" role="status" aria-live="polite">

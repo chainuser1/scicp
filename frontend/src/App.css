@@ -1024,11 +1024,43 @@ button,
   opacity: 1;
 }
 
+/* ── Slide-up transition ── */
+.verse-text-body.verse-text-transition--slide-up {
+  transform: translateY(28px);
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.verse-text-body.verse-text-transition--slide-up.verse-text-visible {
+  transform: translateY(0);
+}
+
+/* ── Instant cut — no animation ── */
+.verse-text-body.verse-text-transition--cut {
+  transition: none !important;
+}
+.verse-text-body.verse-text-transition--cut.verse-text-visible {
+  opacity: 1;
+}
+
+/* ── Fade-to-black overlay ── */
+.trans-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 80;
+  transition: opacity 0.35s ease;
+}
+.trans-overlay--active {
+  opacity: 1;
+}
+
 /* Reduced motion — swap instantly, no fade */
 .client-view.reduce-motion-auto .verse-text-body,
 .client-view.reduce-motion-auto .verse-text-body.verse-text-visible {
   opacity: 1 !important;
   transition: none !important;
+  transform: none !important;
 }
 .client-view.reduce-motion-auto .verse-caption {
   animation: none !important;
@@ -1464,6 +1496,37 @@ button,
   margin-left: 6px;
   white-space: nowrap;
   font-family: monospace;
+}
+
+/* ── Auto-update progress bar (Electron) ── */
+.hdr-update-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  background: rgba(255, 180, 0, 0.08);
+  border: 1px solid rgba(255, 180, 0, 0.25);
+  border-radius: 8px;
+  font-size: 0.65rem;
+  color: #ffd770;
+  white-space: nowrap;
+  cursor: default;
+}
+.hdr-update-label {
+  font-family: monospace;
+}
+.hdr-update-progress {
+  width: 80px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hdr-update-fill {
+  height: 100%;
+  background: #ffd770;
+  border-radius: 2px;
+  transition: width 0.4s ease;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2059,6 +2122,75 @@ button,
   --text-primary: #f0ece0;
   --text-secondary: #a09880;
   --text-dim: #5a5468;
+}
+
+/* ── Presenter UI mode — controls ONLY the operator panel, not client display ── */
+.presenter-ui--light .presenter-header,
+.presenter-ui--light .presenter-sidebar,
+.presenter-ui--light .presenter-search-panel,
+.presenter-ui--light .presenter-main,
+.presenter-ui--light .search-drawer,
+.presenter-ui--light .hdr-theme-popover,
+.presenter-ui--light .hdr-lang-popover,
+.presenter-ui--light .hdr-session-popover,
+.presenter-ui--light .context-panel {
+  --obsidian: #f4f1ec;
+  --surface: #ffffff;
+  --surface-2: #f0ebe2;
+  --surface-3: #e6ddd0;
+  --text-primary: #1a1208;
+  --text-secondary: #5c4a38;
+  --text-dim: #8a7060;
+  --gold: #7a3318;
+  --gold-light: #9b4020;
+  --gold-border: rgba(122, 51, 24, 0.25);
+  --gold-dim: rgba(122, 51, 24, 0.07);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.presenter-ui--light .presenter-header {
+  background: #ffffff;
+  border-bottom-color: rgba(122, 51, 24, 0.15);
+}
+
+.presenter-ui--light .hdr-btn {
+  color: var(--text-secondary);
+}
+.presenter-ui--light .hdr-btn:hover {
+  background: rgba(122, 51, 24, 0.08);
+  color: var(--gold);
+}
+.presenter-ui--light .hdr-btn--active {
+  background: rgba(122, 51, 24, 0.12);
+  color: var(--gold);
+}
+
+.presenter-ui--light .search-input {
+  background: #f4f1ec;
+  border-color: rgba(122, 51, 24, 0.2);
+  color: var(--text-primary);
+}
+.presenter-ui--light .search-input::placeholder { color: var(--text-dim); }
+.presenter-ui--light .search-input:focus { border-color: var(--gold); }
+
+.presenter-ui--light .verse-card {
+  background: #faf8f5;
+  border-color: rgba(122, 51, 24, 0.12);
+}
+.presenter-ui--light .verse-card:hover {
+  border-color: rgba(122, 51, 24, 0.3);
+  background: #fff;
+}
+.presenter-ui--light .verse-card--staged { border-color: rgba(122, 51, 24, 0.4); }
+.presenter-ui--light .verse-card--live   { border-color: var(--gold); }
+
+.presenter-ui--light .hdr-no-verse,
+.presenter-ui--light .hdr-verse-ref { color: var(--text-secondary); }
+
+.presenter-ui--light .presenter-toast {
+  background: #1a1208;
+  color: #f0ece0;
 }
 
 /* Gold crown line across the very top */
