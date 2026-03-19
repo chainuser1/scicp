@@ -8349,7 +8349,7 @@ button, [role="button"] {
 .rd-search-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 13px 40px 13px 44px;
+  padding: 13px 52px 13px 44px;
   background: var(--rd-surface);
   border: 1.5px solid var(--rd-border);
   border-radius: 12px;
@@ -8376,7 +8376,29 @@ button, [role="button"] {
   color: var(--rd-dim);
   font-size: 0.75rem;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
+
+/* Go/send arrow button — appears when results are ready */
+.rd-search-go {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-30%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--rd-accent);
+  border: none;
+  border-radius: 50%;
+  color: var(--rd-bg);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.12s;
+}
+.rd-search-go:active { opacity: 0.75; }
 
 /* Quick-topic chips */
 .rd-quick-topics {
