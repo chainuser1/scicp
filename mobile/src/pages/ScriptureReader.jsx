@@ -399,7 +399,9 @@ export default function ScriptureReader({ onExit }) {
 
           {/* Top bar */}
           <div className="rd-home-bar">
-            <button className="rd-back" onClick={onExit} aria-label="Exit">‹</button>
+            <button className="rd-back" onClick={onExit} aria-label="Exit Reader">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
             <span className="rd-home-title">Scriptures</span>
             <button className="rd-settings-btn" onClick={() => setSettingsOpen(true)} aria-label="Reading settings">Aa</button>
           </div>
@@ -512,7 +514,18 @@ export default function ScriptureReader({ onExit }) {
 
           {/* Auto-hiding top toolbar */}
           <div className={`rd-toolbar${toolbarVisible ? '' : ' rd-toolbar--hidden'}`}>
-            <button className="rd-tb-back" onClick={() => { setScreen('home'); setToolbarVisible(true); }}>‹</button>
+            {/* Left: back to reader home */}
+            <button className="rd-tb-back" onClick={() => { setScreen('home'); setToolbarVisible(true); }} aria-label="Books">‹</button>
+
+            {/* Prev chapter */}
+            <button
+              className="rd-tb-nav-btn"
+              onClick={() => goChapter(-1)}
+              disabled={chapterIdx === 0}
+              aria-label="Previous chapter"
+            >‹‹</button>
+
+            {/* Book + chapter title (tapping reveals toolbar) */}
             <button className="rd-tb-title" onClick={revealToolbar}>
               <span className="rd-tb-book">{currentBook?.book_title}</span>
               {currentCh && (
@@ -522,12 +535,20 @@ export default function ScriptureReader({ onExit }) {
                 </span>
               )}
             </button>
+
+            {/* Next chapter */}
+            <button
+              className="rd-tb-nav-btn"
+              onClick={() => goChapter(1)}
+              disabled={chapterIdx >= allChapters.length - 1}
+              aria-label="Next chapter"
+            >››</button>
+
+            {/* Right actions: search + settings + exit */}
             <div className="rd-tb-right">
               <button className="rd-tb-btn" aria-label="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
-              <select className="rd-tb-lang" value={lang} onChange={e => saveLang(e.target.value)} aria-label="Language">
-                {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
               <button className="rd-tb-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">Aa</button>
+              <button className="rd-tb-exit" onClick={onExit} aria-label="Exit Reader">✕</button>
             </div>
           </div>
 
