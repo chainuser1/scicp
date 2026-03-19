@@ -156,6 +156,33 @@ export function isCasting() {
   return _presentationActive;
 }
 
+/** Start local HTTP server for LAN casting (last-resort offline fallback). */
+export async function startLocalServer(port = 8080) {
+  try {
+    return await ExternalDisplay.startLocalServer({ port });
+  } catch (e) {
+    console.warn('startLocalServer failed:', e);
+    return null;
+  }
+}
+
+/** Stop local HTTP server. */
+export async function stopLocalServer() {
+  try {
+    await ExternalDisplay.stopLocalServer();
+  } catch { /* ignore */ }
+}
+
+/** Get current local server URL or null if not running. */
+export async function getLocalServerUrl() {
+  try {
+    const result = await ExternalDisplay.getLocalServerUrl();
+    return result.running ? result.url : null;
+  } catch {
+    return null;
+  }
+}
+
 async function emit(event, payload, ackCallback) {
   // Handle ack-style calls where the last arg is a callback
   if (typeof payload === 'function') {
