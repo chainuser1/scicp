@@ -29,8 +29,16 @@ import com.getcapacitor.JSObject;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import fi.iki.elonen.NanoHTTPD;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -61,6 +69,7 @@ public class ExternalDisplayPlugin extends Plugin {
     private DisplayManager displayManager;
     private ExternalPresentation presentation;
     private DisplayManager.DisplayListener displayListener;
+    private LocalDisplayServer localServer;
 
     @Override
     public void load() {
@@ -130,12 +139,18 @@ public class ExternalDisplayPlugin extends Plugin {
             return;
         }
 
-        if (presentation == null || presentation.getWebView() == null) {
-            call.reject("No active presentation");
-            return;
+        String json = message.toString();
+
+        // Push to local SSE server (TV browsers) if running
+        if (localServer != null && localServer.isAlive()) {
+            localServer.pushEvent(json);
         }
 
-        String json = message.toString();
+        if (presentation == null || presentation.getWebView() == null) {
+            // No active presentation WebView — but SSE push already done above
+            call.resolve();
+            return;
+        }
 
         getActivity().runOnUiThread(() -> {
             presentation.dispatchBridgeMessage(json);
@@ -300,6 +315,176 @@ public class ExternalDisplayPlugin extends Plugin {
         displayManager.registerDisplayListener(displayListener, null);
     }
 
+    @PluginMethod
+    public void startLocalServer(PluginCall call) {
+        int port = call.getInt("port", 8080);
+        try {
+            if (localServer != null && localServer.isAlive()) {
+                localServer.stop();
+            }
+            localServer = new LocalDisplayServer(getContext(), port);
+            localServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
+            String ip = getLocalIpAddress();
+            JSObject result = new JSObject();
+            result.put("url", "http://" + ip + ":" + port + "/client-display.html");
+            result.put("ip", ip);
+            result.put("port", port);
+            call.resolve(result);
+        } catch (IOException e) {
+            call.reject("Failed to start local server: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void stopLocalServer(PluginCall call) {
+        if (localServer != null) {
+            localServer.stop();
+            localServer = null;
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getLocalServerUrl(PluginCall call) {
+        if (localServer != null && localServer.isAlive()) {
+            String ip = getLocalIpAddress();
+            int port = localServer.getListeningPort();
+            JSObject result = new JSObject();
+            result.put("url", "http://" + ip + ":" + port + "/client-display.html");
+            result.put("ip", ip);
+            result.put("port", port);
+            result.put("running", true);
+            call.resolve(result);
+        } else {
+            JSObject result = new JSObject();
+            result.put("running", false);
+            call.resolve(result);
+        }
+    }
+
+    private String getLocalIpAddress() {
+        try {
+            List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
+            for (NetworkInterface iface : interfaces) {
+                List<InetAddress> addrs = Collections.list(iface.getInetAddresses());
+                for (InetAddress addr : addrs) {
+                    if (!addr.isLoopbackAddress() && addr.getHostAddress().contains(".")) {
+                        return addr.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not get local IP: " + e.getMessage());
+        }
+        return "127.0.0.1";
+    }
+
+    // ── Local HTTP server (NanoHTTPD) ────────────────────────────────────────
+
+    private static class LocalDisplayServer extends NanoHTTPD {
+        private final android.content.Context context;
+        private final CopyOnWriteArrayList<SSESession> sseSessions = new CopyOnWriteArrayList<>();
+        private String lastEvent = null;
+
+        LocalDisplayServer(android.content.Context context, int port) {
+            super(port);
+            this.context = context;
+        }
+
+        void pushEvent(String json) {
+            lastEvent = json;
+            for (SSESession session : sseSessions) {
+                session.push(json);
+            }
+        }
+
+        @Override
+        public Response serve(IHTTPSession session) {
+            String uri = session.getUri();
+            if (uri.equals("/events")) {
+                return serveSSE(session);
+            }
+            return serveAsset(uri);
+        }
+
+        private Response serveSSE(IHTTPSession session) {
+            SSESession sseSession = new SSESession();
+            sseSessions.add(sseSession);
+            // Send last known state immediately so TV gets current verse on connect
+            if (lastEvent != null) sseSession.push(lastEvent);
+            Response response = newChunkedResponse(Response.Status.OK, "text/event-stream", sseSession.getStream());
+            response.addHeader("Cache-Control", "no-cache");
+            response.addHeader("Access-Control-Allow-Origin", "*");
+            response.addHeader("Connection", "keep-alive");
+            response.addHeader("X-Accel-Buffering", "no");
+            sseSession.setOnClose(() -> sseSessions.remove(sseSession));
+            return response;
+        }
+
+        private Response serveAsset(String uri) {
+            if (uri.equals("/") || uri.isEmpty()) uri = "/index.html";
+            // Strip query string
+            int q = uri.indexOf('?');
+            if (q >= 0) uri = uri.substring(0, q);
+            String assetPath = "public" + uri;
+            try {
+                AssetManager am = context.getAssets();
+                InputStream is = am.open(assetPath);
+                String mime = getMimeType(uri);
+                Response r = newFixedLengthResponse(Response.Status.OK, mime, is, -1);
+                r.addHeader("Access-Control-Allow-Origin", "*");
+                return r;
+            } catch (IOException e) {
+                Log.w("LocalDisplayServer", "Asset not found: " + assetPath);
+                return newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not found: " + uri);
+            }
+        }
+
+        private String getMimeType(String path) {
+            if (path.endsWith(".html")) return "text/html";
+            if (path.endsWith(".js")) return "application/javascript";
+            if (path.endsWith(".css")) return "text/css";
+            if (path.endsWith(".json")) return "application/json";
+            if (path.endsWith(".svg")) return "image/svg+xml";
+            if (path.endsWith(".png")) return "image/png";
+            if (path.endsWith(".woff2")) return "font/woff2";
+            if (path.endsWith(".woff")) return "font/woff";
+            if (path.endsWith(".wasm")) return "application/wasm";
+            return "application/octet-stream";
+        }
+    }
+
+    // SSE session wrapper — pipes events to a PipedInputStream/PipedOutputStream pair
+    private static class SSESession {
+        private final java.io.PipedOutputStream out;
+        private final java.io.PipedInputStream in;
+        private Runnable onClose;
+
+        SSESession() {
+            out = new java.io.PipedOutputStream();
+            java.io.PipedInputStream tmp;
+            try {
+                tmp = new java.io.PipedInputStream(out);
+            } catch (IOException e) {
+                tmp = new java.io.PipedInputStream();
+            }
+            in = tmp;
+        }
+
+        void push(String json) {
+            try {
+                String msg = "data: " + json + "\n\n";
+                out.write(msg.getBytes("UTF-8"));
+                out.flush();
+            } catch (IOException e) {
+                if (onClose != null) onClose.run();
+            }
+        }
+
+        java.io.InputStream getStream() { return in; }
+        void setOnClose(Runnable r) { this.onClose = r; }
+    }
+
     @Override
     protected void handleOnDestroy() {
         if (displayManager != null && displayListener != null) {
@@ -308,6 +493,10 @@ public class ExternalDisplayPlugin extends Plugin {
         if (presentation != null) {
             presentation.dismiss();
             presentation = null;
+        }
+        if (localServer != null) {
+            localServer.stop();
+            localServer = null;
         }
     }
 

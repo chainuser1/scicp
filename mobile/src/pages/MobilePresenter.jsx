@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { useSocketCtx } from '../socket-context';
-import { isDisplayAvailable, isCasting } from '../socket-local';
+import { isDisplayAvailable, isCasting, startLocalServer, stopLocalServer, getLocalServerUrl } from '../socket-local';
 import * as svc from '../scripture-service';
 import { createServiceProxy } from '../scripture-service-proxy';
 import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadStateChange, getDownloadStates } from '../db-manager';
@@ -431,6 +431,7 @@ const MobilePresenter = () => {
   const [readinessOpen, setReadinessOpen]     = useState(false);
   const [readinessBusy, setReadinessBusy]     = useState(false);
   const [readiness, setReadiness]             = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
+  const [lanServerUrl, setLanServerUrl]       = useState(null);
   const [tourOpen, setTourOpen]             = useState(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -706,6 +707,20 @@ const MobilePresenter = () => {
 
       let cast = 'unavailable';
       try { cast = (await isDisplayAvailable()) ? 'ok' : 'pending'; } catch { cast = 'unavailable'; }
+
+      // Last-resort offline casting: start local HTTP server so TV browsers
+      // (e.g. Sony Bravia) can open client-display.html directly on the LAN.
+      if (!isOnline) {
+        try {
+          const existing = await getLocalServerUrl();
+          if (existing) {
+            setLanServerUrl(existing);
+          } else {
+            const srv = await startLocalServer(8080);
+            if (srv?.url) setLanServerUrl(srv.url);
+          }
+        } catch { /* ignore — server is optional fallback only */ }
+      }
 
       let online = isOnline ? 'offline' : 'local';
       if (isOnline) {
@@ -2012,6 +2027,14 @@ const MobilePresenter = () => {
 
           {/* Cast to external display */}
           <CastingControl compact={false} />
+
+          {/* LAN server URL — last resort for TV browsers (offline only) */}
+          {lanServerUrl && (
+            <div className="lan-server-banner" title="Open this URL in your TV browser to display scriptures">
+              <span className="lan-server-label">📺 TV Browser:</span>
+              <span className="lan-server-url">{lanServerUrl}</span>
+            </div>
+          )}
 
           {/* F8 — Language & secondary language popover */}
           <div className="hdr-lang-wrap">

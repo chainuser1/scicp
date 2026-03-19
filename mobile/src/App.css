@@ -7809,3 +7809,30 @@ button, [role="button"] {
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+
+/* ── LAN server banner (offline TV casting fallback) ──────────────────── */
+.lan-server-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(201, 168, 76, 0.12);
+  border: 1px solid rgba(201, 168, 76, 0.35);
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.72rem;
+  max-width: 320px;
+  overflow: hidden;
+}
+.lan-server-label {
+  color: #c9a84c;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.lan-server-url {
+  color: #e0d4a8;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
