@@ -8304,12 +8304,18 @@ button, [role="button"] {
   background: none;
   border: none;
   color: var(--rd-dim);
-  font-size: 1.7rem;
-  line-height: 1;
-  padding: 0 4px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   cursor: pointer;
   flex-shrink: 0;
+  border-radius: 8px;
+  transition: color 0.15s, background 0.15s;
 }
+.rd-back:hover { color: var(--rd-fg); background: var(--rd-surface); }
 .rd-back:active { color: var(--rd-fg); }
 .rd-home-title {
   flex: 1;
@@ -8697,6 +8703,36 @@ button, [role="button"] {
   cursor: pointer;
 }
 .rd-tb-btn:active { opacity: 0.7; }
+.rd-tb-nav-btn {
+  background: none;
+  border: none;
+  color: var(--rd-dim);
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 5px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.rd-tb-nav-btn:hover { color: var(--rd-accent); background: var(--rd-surface); }
+.rd-tb-nav-btn:active { color: var(--rd-fg); }
+.rd-tb-nav-btn:disabled { opacity: 0.2; cursor: default; }
+.rd-tb-exit {
+  background: none;
+  border: none;
+  color: var(--rd-dim);
+  font-size: 1rem;
+  font-weight: 700;
+  padding: 5px 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+}
+.rd-tb-exit:hover { color: var(--rd-fg); background: var(--rd-surface); }
+.rd-tb-exit:active { opacity: 0.6; }
 
 /* Chapter scrollable body */
 .rd-scroll {
