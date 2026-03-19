@@ -7567,7 +7567,7 @@ button, [role="button"] {
 .rd-search-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 13px 40px 13px 44px;
+  padding: 13px 52px 13px 44px;
   background: var(--rd-surface);
   border: 1.5px solid var(--rd-border);
   border-radius: 12px;
@@ -7596,7 +7596,28 @@ button, [role="button"] {
   cursor: pointer;
 }
 
-/* Quick-topic chips */
+/* Go/send arrow button — appears when results are ready */
+.rd-search-go {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-30%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--rd-accent);
+  border: none;
+  border-radius: 50%;
+  color: var(--rd-bg);
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.rd-search-go:hover { opacity: 0.88; transform: translateY(-30%) scale(1.07); }
+.rd-search-go:active { transform: translateY(-30%) scale(0.94); }
+
+
 .rd-quick-topics {
   display: flex;
   flex-wrap: wrap;
