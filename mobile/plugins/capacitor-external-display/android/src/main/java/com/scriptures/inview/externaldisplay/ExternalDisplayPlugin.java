@@ -14,14 +14,23 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 import android.view.WindowManager;
+import android.content.res.AssetManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.webkit.WebViewAssetLoader;
+
 import com.getcapacitor.JSObject;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -328,7 +337,41 @@ public class ExternalDisplayPlugin extends Plugin {
             settings.setAllowContentAccess(true);
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
+            // Serve APK web assets (assets/public/) via http://localhost/
+            WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
+                .setDomain("localhost")
+                .setHttpAllowed(true)
+                .addPathHandler("/", path -> {
+                    try {
+                        AssetManager am = getContext().getAssets();
+                        InputStream is = am.open("public" + path);
+                        Map<String, String> headers = new HashMap<>();
+                        headers.put("Access-Control-Allow-Origin", "*");
+                        String mime = "application/octet-stream";
+                        if (path.endsWith(".html")) mime = "text/html";
+                        else if (path.endsWith(".js")) mime = "application/javascript";
+                        else if (path.endsWith(".css")) mime = "text/css";
+                        else if (path.endsWith(".json")) mime = "application/json";
+                        else if (path.endsWith(".svg")) mime = "image/svg+xml";
+                        else if (path.endsWith(".png")) mime = "image/png";
+                        else if (path.endsWith(".woff2")) mime = "font/woff2";
+                        else if (path.endsWith(".woff")) mime = "font/woff";
+                        else if (path.endsWith(".wasm")) mime = "application/wasm";
+                        return new WebResourceResponse(mime, "utf-8", 200, "OK", headers, is);
+                    } catch (IOException e) {
+                        Log.w(TAG, "Asset not found: public" + path);
+                        return null;
+                    }
+                })
+                .build();
+
             webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    WebResourceResponse res = assetLoader.shouldInterceptRequest(request.getUrl());
+                    return res != null ? res : super.shouldInterceptRequest(view, request);
+                }
+
                 @Override
                 public void onPageFinished(WebView view, String loadedUrl) {
                     pageReady = true;
