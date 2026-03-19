@@ -8,12 +8,17 @@
 // if the network drops — no extra SW work required for that use-case.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'siv-client-v1';
+const CACHE_NAME = 'siv-v2';
 
-// Resources to pre-cache on install (Client page shell + key fonts)
+// Resources to pre-cache on install
 const PRECACHE_URLS = [
-  '/client',
+  '/',
   '/index.html',
+  '/presenter',
+  '/client',
+  '/manifest.json',
+  '/emblem-512.png',
+  '/emblem.svg',
 ];
 
 // ── Install: pre-cache shell ──────────────────────────────────────────────────
