@@ -3,5 +3,11 @@
   "appName": "Scriptures in View",
   "webDir": "dist",
   "server": {},
-  "plugins": {}
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_notification",
+      "iconColor": "#C9A84C",
+      "sound": null
+    }
+  }
 }

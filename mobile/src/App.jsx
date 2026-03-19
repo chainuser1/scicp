@@ -4,6 +4,7 @@ import { App as CapApp } from '@capacitor/app';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
 import { initAllDatabases } from './db-manager';
+import { requestNotificationPermission } from './notify';
 import SocketCtx from './socket-context';
 import MobilePresenter from './pages/MobilePresenter.jsx';
 
@@ -240,6 +241,9 @@ export default function App() {
       }
 
       setStartupChecks({ camera, cast, online });
+
+      // Pre-request notification permission (for download progress notifications)
+      requestNotificationPermission().catch(() => {});
     } finally {
       setChecksBusy(false);
     }
@@ -493,6 +497,18 @@ export default function App() {
           </div>
           <p className="qr-scan-hint">Point your camera at the QR code on the TV screen</p>
         </div>
+      </div>
+    );
+  }
+
+  // ── Connecting overlay (after QR scan or manual connect) ──
+  if (connecting) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100vh', background: '#0a0a0f', color: '#c9a84c', fontFamily: 'sans-serif', gap: 16 }}>
+        <div className="lang-download-toast-spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+        <p style={{ fontSize: '1.1rem', margin: 0 }}>Connecting to server…</p>
+        <p style={{ fontSize: '0.8rem', color: '#888', margin: 0 }}>{serverUrl}</p>
       </div>
     );
   }

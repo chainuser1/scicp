@@ -106,15 +106,27 @@ describe('Backend API Tests', () => {
       if (db) db.close();
     });
 
-    test('2026 week 11 uses Genesis 37–41 weekly block', () => {
+    test('2026 week 11 uses Genesis 20–23 weekly block', () => {
       const v = getVerseOfTheDay(db, new Date(Date.UTC(2026, 2, 12)));
       expect(v).toBeTruthy();
       expect((v.book_title || '').toLowerCase()).toBe('genesis');
-      expect(Number(v.chapter_number)).toBeGreaterThanOrEqual(37);
-      expect(Number(v.chapter_number)).toBeLessThanOrEqual(41);
+      expect(Number(v.chapter_number)).toBeGreaterThanOrEqual(20);
+      expect(Number(v.chapter_number)).toBeLessThanOrEqual(23);
       expect(v.cfm_group).toBe('ot');
       expect(v.cfm_week).toBe(11);
-      expect(v.cfm_block).toBe('Genesis 37–41');
+      expect(v.cfm_block).toBe('Genesis 20–23');
+    });
+
+    test('each day in same CFM week returns different verse', () => {
+      // March 12–18, 2026 = week 11
+      const ids = new Set();
+      for (let d = 12; d <= 18; d++) {
+        const v = getVerseOfTheDay(db, new Date(Date.UTC(2026, 2, d)));
+        expect(v).toBeTruthy();
+        expect(v.cfm_week).toBe(11);
+        ids.add(v.verse_id);
+      }
+      expect(ids.size).toBeGreaterThan(1); // at least 2 different verses across 7 days
     });
 
     test('2028 uses Book of Mormon grouping', () => {

@@ -936,7 +936,7 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
     const offset = page * pageSize;
     const paged = scores.slice(offset, offset + pageSize);
     const stmtVerse = dba.prepare(`
-      SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id
+      SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
       FROM scriptures WHERE verse_id = ?
     `);
     const results = paged.map(({ verse_id, score }) => {
@@ -997,7 +997,7 @@ async function expandWithConcepts(query, topN = 5, qvec = null) {
 // ═══════════════════════════════════════════════════════════════════════════
 function multiSourceFusion(query, expandedQuery, pageSize) {
   const stmtVerse = dba.prepare(`
-    SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id
+    SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
     FROM scriptures WHERE verse_id = ?
   `);
   const termWeights = queryTermWeights(query);
@@ -1066,7 +1066,7 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
         for (const sr of sumRows) {
           // Get all verses from matching chapter (for chapter aggregation later)
           const verses = dba.prepare(`
-            SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id
+            SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
             FROM scriptures WHERE chapter_id = ? ORDER BY verse_number
           `).all(sr.chapter_id);
           for (const v of verses.slice(0, 5)) { // top 5 per chapter
@@ -1473,7 +1473,7 @@ function topicSearch(query, page = 0, pageSize = 10) {
   const total  = scored.length;
   const paged  = scored.slice(page * pageSize, page * pageSize + pageSize);
   const stmt   = dba.prepare(
-    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, volume_id FROM scriptures WHERE verse_id = ?'
   );
   const results = paged.map(({ verse_id }) => ({ ...stmt.get(verse_id), matched_concept: topicName }));
   return { results, total, matchedTopic: topicName };
@@ -1575,7 +1575,7 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
   // swap scripture_text from the requested language DB when not English.
   const stmtMeta = dba.prepare(`
     SELECT verse_id, verse_title, scripture_text, book_title,
-           chapter_number, verse_number, chapter_id
+           chapter_number, verse_number, chapter_id, volume_id
     FROM scriptures WHERE verse_id = ?
   `);
   // For non-English: resolve coords from English, then fetch text from target DB
