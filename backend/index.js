@@ -305,91 +305,89 @@ fastify.get('/browse/verses', async (request, reply) => {
 
 // HTTP search endpoint (used by mobile sub-searches in context modals)
 fastify.get('/search', async (request, reply) => {
-  const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10', contextVerseId: cvidStr } = request.query;
+  const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10', contextVerseId: cvidStr, cursor: cursorStr } = request.query;
   if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
-  const page     = Math.max(0, parseInt(pStr, 10) || 0);
   const pageSize = Math.min(50, Math.max(1, parseInt(psStr, 10) || 10));
-  const lang     = language.toLowerCase().trim();
   const contextVerseId = cvidStr ? (Number(cvidStr) || null) : null;
+  const lang = (language || 'en').toLowerCase().trim();
   try {
-    // Non-English: basic FTS only
-    if (lang !== 'en') {
-      return searchScriptureInDb(q, page, pageSize, resolveDbAdapter(lang), fastify.log);
-    }
+    let offset = 0;
+    let pipelineResults, total, cacheKey;
 
-    // Step 1: Exact scripture reference → direct lookup
-    const ref = engine.parseScriptureReference(q);
-    if (ref) {
-      const refResult = searchScripture(q, page, pageSize, dba, fastify.log);
-      if (refResult.total > 0) {
-        return { results: refResult.results, total: refResult.total, page, pageSize, query: q, language: lang };
-      }
-    }
-
-    // Step 2: Embed query once
-    let qvec = null;
-    if (embeddingsReady && embeddingPipe) {
-      try {
-        const out = await embeddingPipe(q.trim(), { pooling: 'mean', normalize: true });
-        qvec = new Float32Array(out.data);
-      } catch {}
-    }
-
-    // Step 3: Synonym expansion + Step 4: Multi-source RRF fusion
-    const expanded = expandWithSynonyms(q.trim());
-    let fusionResult = multiSourceFusion(q.trim(), expanded.join(' '), pageSize);
-
-    // Step 5: Sigmoid confidence gate → concept expansion
-    const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
-    const confidence = sigmoidConfidence(topBm25, fusionResult.total);
-    if (confidence < 0.6 && qvec && conceptCache.length) {
-      const topN = confidence < 0.3 ? 5 : 3;
-      const concepts = await expandWithConcepts(q.trim(), topN, qvec);
-      for (const c of concepts) {
-        const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
-        for (const r of cFusion.results) {
-          if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
-            r._rrfScore = (r._rrfScore || 0) * c.score;
-            fusionResult.results.push(r);
-          }
+    if (cursorStr) {
+      const decoded = decodeCursor(cursorStr);
+      if (decoded) {
+        const cached = searchCacheGet(decoded.k);
+        if (cached) {
+          offset          = decoded.o;
+          pipelineResults = cached.results;
+          total           = cached.total;
+          cacheKey        = decoded.k;
         }
       }
-      fusionResult.total = fusionResult.results.length;
-    }
-
-    let { results, total } = fusionResult;
-
-    // Step 6: MMR diversity reranking
-    if (results.length > 1 && qvec) {
-      results = mmrRerank(results, qvec, 0.7, Math.min(pageSize * 3, 60));
-      results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? 0).toFixed(4) }));
-    }
-
-    // Step 7: Semantic fallback
-    if (total < 5 && qvec) {
-      const excludeIds = new Set(results.map(r => r.verse_id));
-      const sem = await semanticSearch(q.trim(), 0, pageSize - results.length, excludeIds, qvec);
-      if (sem && sem.results.length > 0) {
-        results = [...results, ...sem.results];
-        total = total + sem.total;
+      if (!pipelineResults) {
+        const fresh = await runSearchPipeline(q.trim(), lang, contextVerseId, fastify.log);
+        pipelineResults = fresh.results; total = fresh.total; cacheKey = fresh.cacheKey; offset = 0;
       }
+    } else {
+      // Legacy page= support
+      const page = Math.max(0, parseInt(pStr, 10) || 0);
+      const fresh = await runSearchPipeline(q.trim(), lang, contextVerseId, fastify.log);
+      pipelineResults = fresh.results; total = fresh.total; cacheKey = fresh.cacheKey;
+      offset = page * pageSize;
     }
 
-    // Step 8: Context-aware boosting
-    if (contextVerseId) {
-      results = contextBoost(results, contextVerseId);
-      results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
-    }
+    const pageResults = pipelineResults.slice(offset, offset + pageSize);
+    const nextOffset  = offset + pageResults.length;
+    const hasMore     = nextOffset < total;
+    const nextCursor  = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
+    const page        = Math.floor(offset / pageSize);
 
-    const finalResults = results.slice(page * pageSize, page * pageSize + pageSize).map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
-      return clean;
-    });
-    return { results: finalResults, total, page, pageSize, query: q, language: lang };
+    return { results: pageResults, total, nextCursor, page, pageSize, query: q, language: lang };
   } catch (err) {
     fastify.log.error({ err }, '/search failed');
     reply.code(500);
-    return { results: [], total: 0, page, pageSize };
+    return { results: [], total: 0, nextCursor: null, page: 0, pageSize };
+  }
+});
+
+// ── Search Suggestions (autocomplete) ────────────────────────────────────────
+fastify.get('/suggest', async (request, reply) => {
+  const { q, limit: lStr = '8' } = request.query;
+  if (!q || q.trim().length < 2) return { suggestions: [] };
+  const limit = Math.min(15, Math.max(1, parseInt(lStr, 10) || 8));
+  const term  = q.trim().toLowerCase();
+  try {
+    // 1. FTS vocab prefix match
+    const vocabRows = db.prepare(
+      `SELECT DISTINCT term FROM scriptures_fts_vocab
+       WHERE term LIKE ? AND length(term) > 2
+       ORDER BY doc DESC LIMIT ?`
+    ).all(`${term}%`, limit);
+
+    // 2. Book title match
+    const bookRows = db.prepare(
+      `SELECT book_title AS term FROM books
+       WHERE lower(book_title) LIKE ? LIMIT 5`
+    ).all(`%${term}%`);
+
+    // 3. Doctrine aliases (keys starting with the typed prefix)
+    const DOCTRINE_ALIASES = {};
+    const aliasMatches = Object.keys(DOCTRINE_ALIASES)
+      .filter(k => k.startsWith(term))
+      .slice(0, 3)
+      .map(k => ({ term: k }));
+
+    const seen = new Set();
+    const suggestions = [...vocabRows, ...bookRows, ...aliasMatches]
+      .map(r => r.term)
+      .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
+      .slice(0, limit);
+
+    return { suggestions };
+  } catch (err) {
+    fastify.log.warn({ err }, '/suggest failed');
+    return { suggestions: [] };
   }
 });
 
@@ -1305,6 +1303,138 @@ function contextBoost(results, contextVerseId) {
     }
     return { ...r, similarity_score: +((r.similarity_score || 0) + boost).toFixed(4) };
   });
+}
+
+// ── Search Result Cache (LRU, TTL 5 min) ─────────────────────────────────────
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const SEARCH_CACHE_MAX    = 300;            // max cached queries
+const searchResultsCache  = new Map();      // key → { results, total, ts }
+
+function searchCacheGet(key) {
+  const entry = searchResultsCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > SEARCH_CACHE_TTL_MS) {
+    searchResultsCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function searchCacheSet(key, results, total) {
+  if (searchResultsCache.size >= SEARCH_CACHE_MAX) {
+    const oldestKey = searchResultsCache.keys().next().value;
+    searchResultsCache.delete(oldestKey);
+  }
+  searchResultsCache.set(key, { results, total, ts: Date.now() });
+}
+
+function makeCacheKey(query, language, contextVerseId) {
+  return `${String(query).toLowerCase().trim()}|${language}|${contextVerseId || ''}`;
+}
+
+function encodeCursor(cacheKey, nextOffset, total) {
+  return Buffer.from(JSON.stringify({ k: cacheKey, o: nextOffset, t: total })).toString('base64url');
+}
+
+function decodeCursor(cursor) {
+  try {
+    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function runSearchPipeline(query, language, contextVerseId, log) {
+  const lang = String(language || 'en').toLowerCase().trim();
+  const cacheKey = makeCacheKey(query, lang, contextVerseId);
+
+  const cached = searchCacheGet(cacheKey);
+  if (cached) return { ...cached, fromCache: true, cacheKey };
+
+  let results = [];
+  let total = 0;
+
+  if (lang !== 'en') {
+    const r = searchScriptureInDb(query, 0, 200, resolveDbAdapter(lang), log);
+    results = r.results || [];
+    total   = r.total   || results.length;
+  } else {
+    // Step 1: Exact scripture reference
+    const ref = engine.parseScriptureReference(query);
+    if (ref) {
+      const refResult = searchScripture(query, 0, 200, dba, log);
+      if (refResult.total > 0) {
+        searchCacheSet(cacheKey, refResult.results, refResult.total);
+        return { results: refResult.results, total: refResult.total, fromCache: false, cacheKey };
+      }
+    }
+
+    // Step 2: Embed query once
+    let qvec = null;
+    if (embeddingsReady && embeddingPipe) {
+      try {
+        const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true });
+        qvec = new Float32Array(out.data);
+      } catch {}
+    }
+
+    // Steps 3-4: Synonym expansion + multi-source RRF fusion
+    const expanded = expandWithSynonyms(query.trim());
+    let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
+
+    // Step 5: Sigmoid confidence gate → concept expansion
+    const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
+    const confidence = sigmoidConfidence(topBm25, fusionResult.total);
+    if (confidence < 0.6 && qvec && conceptCache.length) {
+      const topN = confidence < 0.3 ? 5 : 3;
+      const concepts = await expandWithConcepts(query.trim(), topN, qvec);
+      for (const c of concepts) {
+        const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
+        for (const r of cFusion.results) {
+          if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
+            r._rrfScore = (r._rrfScore || 0) * c.score;
+            fusionResult.results.push(r);
+          }
+        }
+      }
+      fusionResult.total = fusionResult.results.length;
+    }
+
+    results = fusionResult.results;
+    total   = fusionResult.total;
+
+    // Step 6: MMR diversity reranking
+    if (results.length > 1 && qvec) {
+      results = mmrRerank(results, qvec, 0.7, Math.min(200, results.length));
+      results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? 0).toFixed(4) }));
+    }
+
+    // Step 7: Semantic fallback
+    if (total < 5 && qvec) {
+      const excludeIds = new Set(results.map(r => r.verse_id));
+      const sem = await semanticSearch(query.trim(), 0, 30, excludeIds, qvec);
+      if (sem && sem.results.length > 0) {
+        results = [...results, ...sem.results];
+        total = results.length;
+      }
+    }
+
+    // Step 8: Context-aware boosting
+    if (contextVerseId) {
+      results = contextBoost(results, contextVerseId);
+      results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+    }
+
+    // Clean internal fields before caching
+    results = results.map(r => {
+      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
+      return clean;
+    });
+    total = results.length;
+  }
+
+  searchCacheSet(cacheKey, results, total);
+  return { results, total, fromCache: false, cacheKey };
 }
 
 function buildVerseMetaCache() {
@@ -2474,122 +2604,69 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('search', async (payload) => {
       try {
-        const query    = typeof payload === 'string' ? payload : payload?.query;
-        const page     = Number(payload?.page)     || 0;
-        const pageSize = Number(payload?.pageSize) || 10;
-        const language = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
+        const query         = typeof payload === 'string' ? payload : payload?.query;
+        const pageSize      = Math.min(50, Math.max(1, Number(payload?.pageSize) || 10));
+        const language      = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
         const contextVerseId = Number(payload?.contextVerseId) || null;
+        const cursorStr     = payload?.cursor || null;
 
         if (!query || !String(query).trim()) {
-          socket.emit('search-results', { results: [], total: 0, page: 0, pageSize });
+          socket.emit('search-results', { results: [], total: 0, nextCursor: null });
           return;
         }
 
-        fastify.log.info(`search: "${query}" page=${page} pageSize=${pageSize} lang=${language}`);
+        fastify.log.info(`search: "${query}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`);
 
-        // ── Mathematical Search Pipeline ──
-        // 1. Exact scripture ref → direct lookup (bypass)
-        // 2. Embed query once (single MiniLM inference)
-        // 3. Synonym expansion (stemming-aware dictionary)
-        // 4. Multi-source RRF fusion (FTS + summaries + TG + entities)
-        // 5. Sigmoid confidence gate → concept expansion if low confidence
-        // 6. MMR diversity reranking (λ=0.7: 70% relevance, 30% diversity)
-        // 7. Semantic fallback → pure embedding search if sparse
-        // 8. Context-aware boosting (topic overlap + volume proximity)
+        let offset = 0;
+        let pipelineResults, total, cacheKey;
 
-        if (language !== 'en') {
-          const searchResults = searchScriptureInDb(query, page, pageSize, resolveDbAdapter(language), fastify.log);
-          socket.emit('search-results', { ...searchResults, page, pageSize, query, language });
-          return;
-        }
-
-        // Step 1: Exact scripture reference → direct lookup
-        const ref = engine.parseScriptureReference(query);
-        if (ref) {
-          const searchResults = searchScripture(query, page, pageSize, dba, fastify.log);
-          if (searchResults.total > 0) {
-            socket.emit('search-results', { ...searchResults, page, pageSize, query, language });
-            return;
-          }
-        }
-
-        // Step 2: Embed query once for all semantic operations
-        const t0 = Date.now();
-        let qvec = null;
-        if (embeddingsReady && embeddingPipe) {
-          try {
-            const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true });
-            qvec = new Float32Array(out.data);
-          } catch {}
-        }
-        const t1 = Date.now();
-
-        // Step 3: Synonym expansion
-        const expanded = expandWithSynonyms(query.trim());
-        const expandedQuery = expanded.join(' ');
-
-        // Step 4: Multi-source RRF fusion
-        let fusionResult = multiSourceFusion(query.trim(), expandedQuery, pageSize);
-        const t2 = Date.now();
-
-        // Step 5: Sigmoid confidence gate → concept expansion
-        const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
-        const confidence = sigmoidConfidence(topBm25, fusionResult.total);
-
-        if (confidence < 0.6 && qvec && conceptCache.length) {
-          const topN = confidence < 0.3 ? 5 : 3;
-          const concepts = await expandWithConcepts(query.trim(), topN, qvec);
-          for (const c of concepts) {
-            const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
-            for (const r of cFusion.results) {
-              if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
-                r._rrfScore = (r._rrfScore || 0) * c.score;
-                fusionResult.results.push(r);
-              }
+        if (cursorStr) {
+          // Cursor path: decode offset + cache key, no pipeline re-run
+          const decoded = decodeCursor(cursorStr);
+          if (decoded) {
+            const cached = searchCacheGet(decoded.k);
+            if (cached) {
+              offset          = decoded.o;
+              pipelineResults = cached.results;
+              total           = cached.total;
+              cacheKey        = decoded.k;
             }
           }
-          fusionResult.total = fusionResult.results.length;
-        }
-        const t3 = Date.now();
-
-        let { results, total } = fusionResult;
-
-        // Step 6: MMR diversity reranking — prevents book/chapter dominance
-        if (results.length > 1 && qvec) {
-          results = mmrRerank(results, qvec, 0.7, Math.min(pageSize * 3, 60));
-          results = results.map(r => ({
-            ...r,
-            similarity_score: +(r.simToQuery ?? 0).toFixed(4),
-          }));
-        }
-        const t4 = Date.now();
-
-        // Step 7: Semantic fallback — pure embedding search if still sparse
-        if (total < 5 && qvec) {
-          const excludeIds = new Set(results.map(r => r.verse_id));
-          const sem = await semanticSearch(query.trim(), 0, pageSize - results.length, excludeIds, qvec);
-          if (sem && sem.results.length > 0) {
-            results = [...results, ...sem.results];
-            total = total + sem.total;
+          // If cache expired since cursor was issued, fall through to fresh run
+          if (!pipelineResults) {
+            const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
+            pipelineResults = fresh.results;
+            total           = fresh.total;
+            cacheKey        = fresh.cacheKey;
+            offset          = 0;
           }
+        } else {
+          // Fresh search: run pipeline (cache hit = fast)
+          const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
+          pipelineResults = fresh.results;
+          total           = fresh.total;
+          cacheKey        = fresh.cacheKey;
+          offset          = 0;
         }
-        fastify.log.info(`[TIMING] embed=${t1-t0}ms fusion=${t2-t1}ms concepts=${t3-t2}ms mmr=${t4-t3}ms total=${Date.now()-t0}ms (${results.length}/${total} results, conf=${confidence.toFixed(2)})`);
 
-        // Step 8: Context-aware boosting
-        if (contextVerseId) {
-          results = contextBoost(results, contextVerseId);
-          results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
-        }
+        const pageResults = pipelineResults.slice(offset, offset + pageSize);
+        const nextOffset  = offset + pageResults.length;
+        const hasMore     = nextOffset < total;
+        const nextCursor  = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
 
-        // Clean internal fields before sending to client
-        const finalResults = results.slice(0, pageSize).map(r => {
-          const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
-          return clean;
+        socket.emit('search-results', {
+          results:    pageResults,
+          total,
+          nextCursor,
+          // keep legacy page field for backward compat
+          page:       Math.floor(offset / pageSize),
+          pageSize,
+          query,
+          language,
         });
-        socket.emit('search-results', { results: finalResults, total, page, pageSize, query, language });
       } catch (err) {
         fastify.log.error({ err }, 'search handler failed');
-        socket.emit('search-results', { results: [], total: 0, page: 0, pageSize: 10 });
+        socket.emit('search-results', { results: [], total: 0, nextCursor: null });
         socket.emit('session-error', 'Search failed for the selected language');
       }
     });

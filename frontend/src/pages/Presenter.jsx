@@ -507,8 +507,12 @@ const Presenter = () => {
   const [highlightedText, setHighlightedText] = useState('');
   const [currentLanguage, setCurrentLanguage] = useState('en');
   const [currentPage, setCurrentPage]       = useState(0);
+  const [searchCursor, setSearchCursor]     = useState(null);
+  const [suggestions, setSuggestions]       = useState([]);
   const searchAppendRef = useRef(false);
   const searchSentinelRef = useRef(null);
+  const searchCursorRef = useRef(null);
+  const suggestDebounce = useRef(null);
   const [drawerOpen, setDrawerOpen]         = useState(false);
   const [drawerTab, setDrawerTab]           = useState('search');
 
@@ -1092,7 +1096,7 @@ const Presenter = () => {
     const handleConnectError = () => {
       setConnectionState('error');
     };
-    const handleSearchResults = ({ results, total }) => {
+    const handleSearchResults = ({ results, total, nextCursor }) => {
       if (searchAppendRef.current) {
         setResults(prev => {
           const seen = new Set(prev.map(v => v.verse_id));
@@ -1102,6 +1106,7 @@ const Presenter = () => {
         setResults(results ?? []);
       }
       setTotalResults(total ?? 0);
+      setSearchCursor(nextCursor ?? null);
       searchAppendRef.current = false;
     };
     const handleUpdateVerse = data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); };
@@ -1210,11 +1215,26 @@ const Presenter = () => {
     setCurrentPage(0);
     setTotalResults(0);
     setResults([]);
+    setSearchCursor(null);
     searchAppendRef.current = false;
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => {
       emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
     }, 250);
+    clearTimeout(suggestDebounce.current);
+    if (q.trim().length >= 2) {
+      suggestDebounce.current = setTimeout(async () => {
+        try {
+          const r = await fetch(`${API_URL}/suggest?q=${encodeURIComponent(q.trim())}&limit=6`);
+          if (r.ok) {
+            const { suggestions: s } = await r.json();
+            setSuggestions(s || []);
+          }
+        } catch { setSuggestions([]); }
+      }, 300);
+    } else {
+      setSuggestions([]);
+    }
   };
 
   const handleSearchKeyDown = e => {
@@ -1614,6 +1634,7 @@ const Presenter = () => {
 
   // Search panel infinite scroll
   const searchLoadingRef = useRef(false);
+  searchCursorRef.current = searchCursor;
   useEffect(() => {
     const root = resultsListRef.current;
     if (!root || !searchSentinelRef.current) return;
@@ -1626,7 +1647,12 @@ const Presenter = () => {
           const nextPage = currentPage + 1;
           searchAppendRef.current = true;
           setCurrentPage(nextPage);
-          emitWithSession('search', { query, page: nextPage, pageSize: PAGE_SIZE, language: currentLanguage });
+          const cursor = searchCursorRef.current;
+          if (cursor) {
+            emitWithSession('search', { query, cursor, pageSize: PAGE_SIZE, language: currentLanguage });
+          } else {
+            emitWithSession('search', { query, page: nextPage, pageSize: PAGE_SIZE, language: currentLanguage });
+          }
           setTimeout(() => { searchLoadingRef.current = false; }, 500);
         }
       }
@@ -1704,6 +1730,7 @@ const Presenter = () => {
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
+      setSearchCursor(null);
       emitWithSession('search', { query, page: 0, pageSize: PAGE_SIZE, language: lang });
     }
   };
@@ -1751,6 +1778,7 @@ const Presenter = () => {
     if (query.trim()) {
       clearTimeout(searchDebounce.current);
       setCurrentPage(0);
+      setSearchCursor(null);
       emitWithSession('search', { query, page: 0, pageSize: PAGE_SIZE, language: newPrimary });
     }
   };
@@ -1957,6 +1985,7 @@ const Presenter = () => {
     setQuery(topic);
     setCurrentPage(0);
     setTotalResults(0);
+    setSearchCursor(null);
     emitWithSession('search', { query: topic, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
     setDrawerTab('search');
     setDrawerOpen(true);
@@ -2697,20 +2726,40 @@ const Presenter = () => {
                       : `${results.length} verse${results.length === 1 ? '' : 's'} found`}
                 </div>
               )}
-              <input
-                type="search"
-                inputMode="search"
-                enterKeyHint="search"
-                className="search-input"
-                placeholder="John 3:16 or 'faith'…"
-                value={query}
-                onChange={handleSearch}
-                onKeyDown={handleSearchKeyDown}
-                autoComplete="off"
-                autoCorrect="off"
-                spellCheck={false}
-                autoFocus={drawerOpen && drawerTab === 'search'}
-              />
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  className="search-input"
+                  placeholder="John 3:16 or 'faith'…"
+                  value={query}
+                  onChange={handleSearch}
+                  onKeyDown={handleSearchKeyDown}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoFocus={drawerOpen && drawerTab === 'search'}
+                  onBlur={() => setTimeout(() => setSuggestions([]), 150)}
+                />
+                {suggestions.length > 0 && query.trim().length >= 2 && (
+                  <ul className="search-suggestions">
+                    {suggestions.map(s => (
+                      <li key={s} className="search-suggestion-item"
+                        onPointerDown={() => {
+                          setSuggestions([]);
+                          setQuery(s);
+                          setResults([]);
+                          setSearchCursor(null);
+                          emitWithSession('search', { query: s, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
+                        }}>
+                        <IconSearch />
+                        <span>{s}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <div className="results-list-wrap">
                 <div className="results-list"
                   ref={resultsListRef}
