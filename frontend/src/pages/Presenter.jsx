@@ -783,6 +783,8 @@ const Presenter = () => {
   }, [history]);
   const [toastMsg, setToastMsg]               = useState('');
   const toastTimer                             = React.useRef(null);
+  const clearArmTimer                          = React.useRef(null);
+  const [clearArmed, setClearArmed]           = useState(false);
   const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
   const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
@@ -816,6 +818,15 @@ const Presenter = () => {
   };
 
   const endLive = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      showToast('Press again to clear screen');
+      clearTimeout(clearArmTimer.current);
+      clearArmTimer.current = setTimeout(() => setClearArmed(false), 2500);
+      return;
+    }
+    clearTimeout(clearArmTimer.current);
+    setClearArmed(false);
     emitWithSession('clear-screen');
     setLiveVerse(null);
     setHighlightedText('');
@@ -3125,8 +3136,8 @@ const Presenter = () => {
                   title="Toggle 'Now Reading' label on the TV screen">
                   📖{nowReading ? ' On' : ' Off'}
                 </button>
-                <button className="end-live-btn" onClick={endLive} title="End live — clears TV screen (E)">
-                  ◼ End Live
+                <button className={`end-live-btn${clearArmed ? ' end-live-btn--armed' : ''}`} onClick={endLive} title="End live — clears TV screen (E)">
+                  {clearArmed ? '⚠ Confirm?' : '◼ End Live'}
                 </button>
               </div>
             </div>
@@ -3396,7 +3407,7 @@ const Presenter = () => {
               <>
                 <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">A−</button>
                 <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger text"  aria-label="Increase font size">A+</button>
-                <button className="mobile-endlive-btn" onClick={endLive} title="End live">◼ End</button>
+                <button className={`mobile-endlive-btn${clearArmed ? ' end-live-btn--armed' : ''}`} onClick={endLive} title="End live">{clearArmed ? '?' : '◼ End'}</button>
               </>
             )}
             {staged && (

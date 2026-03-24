@@ -570,7 +570,8 @@ const MobilePresenter = () => {
     if (liveVerse?.verse_id) {
       (async () => {
         const tags = await svcProxy.getVerseTags(liveVerse.verse_id);
-        if (tags) setVerseTags(tags);
+        if (tags) setVerseTags({ ...tags, ready: true });
+        else setVerseTags({ pov: null, speaker: null, labels: [], ready: true });
       })();
     }
   }, [liveVerse?.verse_id]);
@@ -685,6 +686,8 @@ const MobilePresenter = () => {
   }, [history]);
   const [toastMsg, setToastMsg]               = useState('');
   const toastTimer                             = React.useRef(null);
+  const clearArmTimer                          = React.useRef(null);
+  const [clearArmed, setClearArmed]           = useState(false);
   const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
   const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
@@ -938,6 +941,15 @@ const MobilePresenter = () => {
   }, [isOnline]);
 
   const endLive = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      showToast('Tap again to clear screen');
+      clearTimeout(clearArmTimer.current);
+      clearArmTimer.current = setTimeout(() => setClearArmed(false), 2500);
+      return;
+    }
+    clearTimeout(clearArmTimer.current);
+    setClearArmed(false);
     emitWithSession('clear-screen');
     setLiveVerse(null);
     setHighlightedText('');
@@ -1343,7 +1355,11 @@ const MobilePresenter = () => {
           const idx = chapters.findIndex(c => c.chapter_id === chapterId);
           if (idx >= 0) setCtxChapterIdx(idx);
         }
-        if (!chapterId) { setContextLoading(false); return; }
+        if (!chapterId) {
+          setContextLoading(false);
+          showToast('Chapter info not available for this verse');
+          return;
+        }
         // force=true when chapter changed (ref was set by the chapter-change useEffect)
         const force = chapterNeedsRefetchRef.current;
         if (force) chapterNeedsRefetchRef.current = false;
@@ -3096,8 +3112,8 @@ const MobilePresenter = () => {
                   title="Toggle 'Now Reading' label on the display screen">
                   📖{nowReading ? ' On' : ' Off'}
                 </button>
-                <button className="end-live-btn" onClick={endLive} title="End live -- clears screen (E)">
-                  End Live
+                <button className={`end-live-btn${clearArmed ? ' end-live-btn--armed' : ''}`} onClick={endLive} title="End live -- clears screen (E)">
+                  {clearArmed ? 'Confirm?' : 'End Live'}
                 </button>
               </div>
             </div>
@@ -3389,7 +3405,9 @@ const MobilePresenter = () => {
           <button className="prs-live-font" onClick={() => adjustFontSize(-0.3)} title="Smaller display text">A−</button>
           <button className="prs-live-font" onClick={() => adjustFontSize(0.3)} title="Larger display text">A+</button>
           {!staged && liveVerse && (
-            <button className="prs-live-end" onClick={endLive}>End</button>
+            <button className={`prs-live-end${clearArmed ? ' prs-live-end--armed' : ''}`} onClick={endLive}>
+              {clearArmed ? '?' : 'End'}
+            </button>
           )}
         </div>
       )}
