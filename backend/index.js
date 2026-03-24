@@ -1548,6 +1548,30 @@ function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
   } catch { return new Map(); }
 }
 
+// ── Session centroid: mean embedding of the last N live verses ───────────────
+// Returns a normalized Float32Array(384), or null if embeddings are unavailable
+// or the session has no history yet.
+// Called at search time — pure in-memory, zero DB I/O.
+function sessionCentroid(liveHistory) {
+  if (!embeddingsReady || !liveHistory || liveHistory.length === 0) return null;
+  const dims = 384;
+  const acc  = new Float32Array(dims);
+  let   n    = 0;
+  for (const vid of liveHistory) {
+    const vec = embeddingCache.get(vid);
+    if (!vec) continue;
+    for (let i = 0; i < dims; i++) acc[i] += vec[i];
+    n++;
+  }
+  if (n === 0) return null;
+  // Normalize: divide by n, then L2-normalize to unit sphere
+  let mag = 0;
+  for (let i = 0; i < dims; i++) { acc[i] /= n; mag += acc[i] * acc[i]; }
+  mag = Math.sqrt(mag);
+  if (mag > 0) for (let i = 0; i < dims; i++) acc[i] /= mag;
+  return acc;
+}
+
 // ── Semantic search: embed query text → cosine similarity against all verses ──
 async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new Set(), qvec = null) {
   if (!embeddingsReady || !embeddingPipe) return null;
@@ -1958,7 +1982,7 @@ function decodeCursor(cursor) {
   }
 }
 
-async function runSearchPipeline(query, language, contextVerseId, log) {
+async function runSearchPipeline(query, language, contextVerseId, log, sessionId = null) {
   const lang = String(language || 'en').toLowerCase().trim();
   const cacheKey = makeCacheKey(query, lang, contextVerseId);
 
@@ -2174,6 +2198,34 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       });
     }
   }
+
+  // Step 9c: Session-centroid boost
+  // Compute the mean embedding of the last 5 verses pushed live in this session.
+  // Results near that centroid are cosine-boosted — the system "remembers" what
+  // the service is about and drifts results toward the current theme automatically.
+  let sessionCentroidActive = false;
+  if (sessionId && embeddingsReady) {
+    try {
+      const sState = sessionId && typeof getSessionState === 'function' ? sessionState.get(sessionId) : null;
+      if (sState && sState.liveHistory && sState.liveHistory.length >= 2) {
+        const centroid = sessionCentroid(sState.liveHistory);
+        if (centroid) {
+          sessionCentroidActive = true;
+          results = results.map(r => {
+            const vec = embeddingCache.get(r.verse_id);
+            if (!vec) return r;
+            const sim = cosineSimilarity(centroid, vec); // –1..1
+            // Weight: sim > 0.5 → meaningful thematic alignment → up to +0.12 boost
+            const boost = Math.max(0, sim - 0.3) * 0.4;
+            return boost > 0 ? { ...r, similarity_score: (r.similarity_score || 0) + boost } : r;
+          });
+          results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+        }
+      }
+    } catch {}
+  }
+
+  if (pipelineMeta) pipelineMeta.sessionDrift = sessionCentroidActive;
 
   searchCacheSet(cacheKey, results, total, pipelineMeta);
   return { results, total, meta: pipelineMeta, fromCache: false, cacheKey };
@@ -3126,6 +3178,9 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         mainClientSocketId: null,
         pinHash: null,
         updatedAt: Date.now(),
+        // Ring buffer: verse_ids of the last 5 verses pushed live.
+        // Used to compute a session-centroid for search re-ranking.
+        liveHistory: [],
         // true once a TV/viewer socket has joined — used to pick the right grace period
         hadViewer: false,
         // pending setTimeout handle: emitting presenter-left is deferred so brief
@@ -3692,7 +3747,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           }
           // If cache expired since cursor was issued, fall through to fresh run
           if (!pipelineResults) {
-            const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
+            const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId);
             pipelineResults = fresh.results;
             total           = fresh.total;
             pipelineMeta    = fresh.meta;
@@ -3701,7 +3756,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           }
         } else {
           // Fresh search: run pipeline (cache hit = fast)
-          const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
+          const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId);
           pipelineResults = fresh.results;
           total           = fresh.total;
           pipelineMeta    = fresh.meta;
@@ -3973,6 +4028,11 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       state.theme = theme;
       state.highlightedText = '';
       state.updatedAt = Date.now();
+
+      // Track live history for session-centroid re-ranking (max 5)
+      if (verse.verse_id) {
+        state.liveHistory = [verse.verse_id, ...state.liveHistory.filter(id => id !== verse.verse_id)].slice(0, 5);
+      }
 
       // Send only to clients in the same session
       emitToSession(sessionId, 'update-verse', verseWithSegments);
