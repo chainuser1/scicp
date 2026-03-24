@@ -1999,13 +1999,25 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     total   = r.total   || results.length;
   } else {
     // ── Explicit mode detection ──────────────────────────────────────────────
-    // "quoted phrase" → phrase-only FTS, no expansion, no semantic blending
-    // ~semantic query  → embedding-only, skip BM25 entirely
+    // Priority: reference → phrase → semantic → keyword/conceptual pipeline
     const isQuoted   = /^"(.+)"$/.test(query.trim());
     const isSemantic = query.trim().startsWith('~');
 
+    // Step 1: Exact scripture reference — always wins regardless of syntax
+    if (!isQuoted && !isSemantic) {
+      const ref = engine.parseScriptureReference(query);
+      if (ref) {
+        const refResult = searchScripture(query, 0, 200, dba, log);
+        if (refResult.total > 0) {
+          const refMeta = { intent: 'reference', confidence: 1, expansions: [], facets: [] };
+          searchCacheSet(cacheKey, refResult.results, refResult.total, refMeta);
+          return { results: refResult.results, total: refResult.total, meta: refMeta, fromCache: false, cacheKey };
+        }
+      }
+    }
+
+    // Step 2: Explicit phrase mode — "quoted phrase" → FTS phrase match only
     if (isQuoted) {
-      // Extract the inner phrase, run FTS phrase match only
       const phrase = query.trim().slice(1, -1).trim();
       const phraseResult = phraseSearch(phrase, 0, 200, dba, log);
       const phraseMeta = {
@@ -2017,8 +2029,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       return { results: phraseResult.results, total: phraseResult.total, meta: phraseMeta, fromCache: false, cacheKey };
     }
 
+    // Step 3: Explicit semantic mode — ~query → embedding-only, skip BM25
     if (isSemantic) {
-      // Strip the ~ prefix, embed, return pure cosine-ranked results
       const semQuery = query.trim().slice(1).trim();
       if (semQuery && embeddingsReady && embeddingPipe) {
         try {
@@ -2042,20 +2054,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       // If embedding not ready, fall through with stripped query
       query = query.trim().slice(1).trim();
     }
-    // ────────────────────────────────────────────────────────────────────────
+    // ── Steps 4+: keyword / conceptual / mixed pipeline ─────────────────────
 
-    // Step 1: Exact scripture reference
-    const ref = engine.parseScriptureReference(query);
-    if (ref) {
-      const refResult = searchScripture(query, 0, 200, dba, log);
-      if (refResult.total > 0) {
-        const refMeta = { intent: 'reference', confidence: 1, expansions: [], facets: [] };
-        searchCacheSet(cacheKey, refResult.results, refResult.total, refMeta);
-        return { results: refResult.results, total: refResult.total, meta: refMeta, fromCache: false, cacheKey };
-      }
-    }
-
-    // Step 2: Embed query once
+    // Step 4: Embed query once
     let qvec = null;
     if (embeddingsReady && embeddingPipe) {
       try {
@@ -2064,14 +2065,14 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       } catch {}
     }
 
-    // Steps 3-4: Synonym expansion + multi-source RRF fusion
+    // Steps 5-6: Synonym expansion + multi-source RRF fusion
     const expanded = expandWithSynonyms(query.trim());
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
     const synonymTermsAdded = expanded.filter(t => !queryWords.has(t)).slice(0, 8);
     const pmiTermsAdded = expandWithPmi(query.trim()).slice(0, 5).map(t => t.term);
     let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
 
-    // Step 5: Sigmoid confidence gate → concept expansion
+    // Step 7: Sigmoid confidence gate → concept expansion
     const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
     const confidence = sigmoidConfidence(topBm25, fusionResult.total);
     let conceptTermsUsed = [];
