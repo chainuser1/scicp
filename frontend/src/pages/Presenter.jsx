@@ -1094,7 +1094,10 @@ const Presenter = () => {
     };
     const handleSearchResults = ({ results, total }) => {
       if (searchAppendRef.current) {
-        setResults(prev => [...prev, ...(results ?? [])]);
+        setResults(prev => {
+          const seen = new Set(prev.map(v => v.verse_id));
+          return [...prev, ...(results ?? []).filter(v => !seen.has(v.verse_id))];
+        });
       } else {
         setResults(results ?? []);
       }
