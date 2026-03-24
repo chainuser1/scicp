@@ -3230,6 +3230,62 @@ button,
 .presenter-container--light .result-src-badge--cross-ref   { color: #1a5f8a; background: rgba(30,100,160,0.08); border-color: rgba(30,100,160,0.18); }
 .presenter-container--light .result-src-badge--topical-guide{ color: #7a4a00; background: rgba(180,100,0,0.08); border-color: rgba(180,100,0,0.18); }
 
+/* ── Search Facets ── */
+.search-facets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.12);
+}
+.search-facets-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.28);
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+.search-facet-chip {
+  background: rgba(201,168,76,0.08);
+  border: 1px solid rgba(201,168,76,0.22);
+  color: rgba(201,168,76,0.75);
+  font-size: 0.70rem;
+  padding: 2px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.search-facet-chip:hover {
+  background: rgba(201,168,76,0.18);
+  color: #c9a84c;
+  border-color: rgba(201,168,76,0.5);
+}
+.search-facet-chip:active {
+  background: rgba(201,168,76,0.28);
+  transform: scale(0.96);
+}
+.presenter-container--light .search-facets {
+  background: rgba(0,0,0,0.03);
+  border-color: rgba(0,0,0,0.07);
+}
+.presenter-container--light .search-facets-label { color: rgba(0,0,0,0.3); }
+.presenter-container--light .search-facet-chip {
+  background: rgba(140,90,0,0.06);
+  border-color: rgba(140,90,0,0.2);
+  color: rgba(140,90,0,0.7);
+}
+.presenter-container--light .search-facet-chip:hover {
+  background: rgba(140,90,0,0.14);
+  color: #7a4a00;
+  border-color: rgba(140,90,0,0.4);
+}
+
 /* ── Pagination ── */
 /* ── Batch navigation (replaces old pip pagination) ── */
 .batch-nav {
