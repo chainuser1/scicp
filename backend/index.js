@@ -265,6 +265,137 @@ fastify.delete('/setlists/:id', async (request, reply) => {
   }
 });
 
+// ── Reading Event (dwell time, session tracking, spaced repetition) ──────────
+fastify.post('/reading-event', async (request, reply) => {
+  try {
+    const { verse_id, book_id, chapter_id, book_title, chapter_number, verse_number,
+            language = 'en', session_id, dwell_ms = 0, event_type = 'read' } = request.body || {};
+    if (!verse_id) { reply.code(400); return { error: 'verse_id required' }; }
+
+    db_user.prepare(`
+      INSERT INTO reading_events (verse_id, book_id, chapter_id, book_title, chapter_number, verse_number, language, session_id, dwell_ms, event_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(verse_id, book_id || null, chapter_id || null, book_title || null,
+           chapter_number || null, verse_number || null, language, session_id || null,
+           Math.min(dwell_ms || 0, 300000), event_type);
+
+    // Update spaced review record (SM-2 algorithm)
+    if (event_type === 'highlight' || event_type === 'bookmark' || (dwell_ms > 0 && dwell_ms >= 8000)) {
+      const existing = db_user.prepare('SELECT * FROM spaced_reviews WHERE verse_id = ?').get(verse_id);
+      const quality = dwell_ms >= 20000 ? 5 : dwell_ms >= 12000 ? 4 : 3; // 0-5 scale
+      if (!existing) {
+        // First encounter
+        const interval = quality >= 4 ? 4 : 1;
+        const nextReview = Date.now() + interval * 86400000;
+        db_user.prepare(`
+          INSERT OR REPLACE INTO spaced_reviews (verse_id, easiness, interval_days, repetitions, next_review, last_review)
+          VALUES (?, 2.5, ?, 1, ?, ?)
+        `).run(verse_id, interval, nextReview, Date.now());
+      } else {
+        // SM-2 update
+        const newEase = Math.max(1.3, existing.easiness + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+        const newReps = existing.repetitions + 1;
+        const newInterval = newReps === 1 ? 1 : newReps === 2 ? 6 : Math.round(existing.interval_days * newEase);
+        const nextReview = Date.now() + newInterval * 86400000;
+        db_user.prepare(`
+          UPDATE spaced_reviews SET easiness = ?, interval_days = ?, repetitions = ?, next_review = ?, last_review = ?
+          WHERE verse_id = ?
+        `).run(newEase, newInterval, newReps, nextReview, Date.now(), verse_id);
+      }
+    }
+
+    return { ok: true };
+  } catch (err) {
+    fastify.log.warn({ err }, '/reading-event failed');
+    reply.code(500);
+    return { error: 'failed' };
+  }
+});
+
+// ── Reading Coverage (for coverage map visualization) ───────────────────────
+fastify.get('/reading-coverage', async (request, reply) => {
+  try {
+    // Return per-chapter read counts for all chapters ever visited
+    const rows = db_user.prepare(`
+      SELECT chapter_id, book_id, book_title, chapter_number,
+             COUNT(*) AS read_count,
+             MAX(ts) AS last_read,
+             SUM(dwell_ms) AS total_dwell_ms
+      FROM reading_events
+      WHERE event_type = 'read' AND chapter_id IS NOT NULL
+      GROUP BY chapter_id
+      ORDER BY last_read DESC
+    `).all();
+    return { coverage: rows };
+  } catch (err) {
+    fastify.log.warn({ err }, '/reading-coverage failed');
+    return { coverage: [] };
+  }
+});
+
+// ── Spaced Review Queue (SM-2 scheduled verses) ─────────────────────────────
+fastify.get('/spaced-review', async (request, reply) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '10', 10)));
+    const now = Date.now();
+    // Get due verses with their scripture text
+    const due = db_user.prepare(`
+      SELECT sr.verse_id, sr.easiness, sr.interval_days, sr.repetitions, sr.next_review, sr.last_review
+      FROM spaced_reviews sr
+      WHERE sr.next_review <= ?
+      ORDER BY sr.next_review ASC
+      LIMIT ?
+    `).all(now + 86400000, limit); // +1 day look-ahead
+
+    const results = [];
+    for (const row of due) {
+      try {
+        const verse = dba.prepare(`
+          SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id
+          FROM scriptures WHERE verse_id = ?
+        `).get(row.verse_id);
+        if (verse) results.push({ ...verse, review: { easiness: row.easiness, interval_days: row.interval_days, repetitions: row.repetitions, next_review: row.next_review, overdue: row.next_review < now } });
+      } catch {}
+    }
+    return { verses: results, total: results.length };
+  } catch (err) {
+    fastify.log.warn({ err }, '/spaced-review failed');
+    return { verses: [], total: 0 };
+  }
+});
+
+// ── Reading Stats (session co-occurrence for Item2Vec) ──────────────────────
+fastify.get('/reading-stats', async (request, reply) => {
+  try {
+    const recentSessions = db_user.prepare(`
+      SELECT session_id, GROUP_CONCAT(verse_id) AS verse_sequence
+      FROM reading_events
+      WHERE event_type = 'read' AND session_id IS NOT NULL
+      GROUP BY session_id
+      ORDER BY MAX(ts) DESC
+      LIMIT 200
+    `).all();
+
+    // Also return top dwell verses (high engagement signal)
+    const topDwell = db_user.prepare(`
+      SELECT verse_id, COUNT(*) AS visits, AVG(dwell_ms) AS avg_dwell, SUM(dwell_ms) AS total_dwell
+      FROM reading_events
+      WHERE event_type = 'read' AND dwell_ms > 5000
+      GROUP BY verse_id
+      ORDER BY total_dwell DESC
+      LIMIT 100
+    `).all();
+
+    return {
+      sessions: recentSessions.map(s => ({ session_id: s.session_id, verses: s.verse_sequence?.split(',').map(Number).filter(Boolean) || [] })),
+      top_dwell: topDwell
+    };
+  } catch (err) {
+    fastify.log.warn({ err }, '/reading-stats failed');
+    return { sessions: [], top_dwell: [] };
+  }
+});
+
 fastify.get('/browse/books', async (request, reply) => {
   const { language } = request.query;
   const targetDb = resolveDbAdapter(language);
@@ -441,6 +572,41 @@ db_user.exec(`
     name       TEXT    NOT NULL UNIQUE,
     items      TEXT    NOT NULL DEFAULT '[]',
     created_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+  );
+  CREATE TABLE IF NOT EXISTS reading_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    verse_id    INTEGER NOT NULL,
+    book_id     INTEGER,
+    chapter_id  INTEGER,
+    book_title  TEXT,
+    chapter_number INTEGER,
+    verse_number   INTEGER,
+    language    TEXT NOT NULL DEFAULT 'en',
+    session_id  TEXT,
+    dwell_ms    INTEGER DEFAULT 0,
+    event_type  TEXT NOT NULL DEFAULT 'read',
+    ts          INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_re_verse  ON reading_events(verse_id);
+  CREATE INDEX IF NOT EXISTS idx_re_ts     ON reading_events(ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_re_session ON reading_events(session_id);
+  CREATE INDEX IF NOT EXISTS idx_re_chapter ON reading_events(chapter_id);
+
+  CREATE TABLE IF NOT EXISTS spaced_reviews (
+    verse_id      INTEGER PRIMARY KEY,
+    easiness      REAL    NOT NULL DEFAULT 2.5,
+    interval_days REAL    NOT NULL DEFAULT 1.0,
+    repetitions   INTEGER NOT NULL DEFAULT 0,
+    next_review   INTEGER NOT NULL DEFAULT 0,
+    last_review   INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS reading_sessions (
+    id          TEXT PRIMARY KEY,
+    started_at  INTEGER NOT NULL,
+    ended_at    INTEGER,
+    verse_count INTEGER NOT NULL DEFAULT 0,
+    language    TEXT NOT NULL DEFAULT 'en'
   );
 `);
 
@@ -1480,6 +1646,25 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     });
     total = results.length;
   }
+
+  // Step 9: Dwell-time boost — personalize with user engagement history
+  try {
+    const topDwell = db_user.prepare(`
+      SELECT verse_id, SUM(dwell_ms) AS total_dwell
+      FROM reading_events WHERE event_type = 'read' AND dwell_ms > 3000
+      GROUP BY verse_id ORDER BY total_dwell DESC LIMIT 500
+    `).all();
+    if (topDwell.length > 0) {
+      const maxDwell = topDwell[0].total_dwell || 1;
+      const dwellMap = new Map(topDwell.map(r => [r.verse_id, r.total_dwell / maxDwell]));
+      results = results.map(r => {
+        const dw = dwellMap.get(r.verse_id) || 0;
+        if (dw > 0) return { ...r, similarity_score: ((r.similarity_score || 0) + dw * 0.15) };
+        return r;
+      });
+      if (dwellMap.size > 0) results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+    }
+  } catch {}
 
   searchCacheSet(cacheKey, results, total);
   return { results, total, fromCache: false, cacheKey };
