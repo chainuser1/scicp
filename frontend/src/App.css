@@ -3204,6 +3204,17 @@ button,
   opacity: 0.75;
   font-style: italic;
 }
+.search-intel-qppr {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(120, 200, 255, 0.75);
+  border: 1px solid rgba(120, 200, 255, 0.25);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 1.6;
+}
 .search-intel-expansions {
   color: rgba(255,255,255,0.42);
   font-size: 0.70rem;
@@ -3246,6 +3257,10 @@ button,
 .presenter-container--light .search-intel-intent--situational{ background: rgba(180,50,40,0.1); color: #8a2c20; border-color: rgba(180,50,40,0.2); }
 .presenter-container--light .search-intel-intent--phrase     { background: rgba(39,174,96,0.1);  color: #1d7a48; border-color: rgba(39,174,96,0.3); }
 .presenter-container--light .search-intel-intent--semantic-explicit { background: rgba(100,50,150,0.1); color: #5b2d8a; border-color: rgba(100,50,150,0.3); }
+.presenter-container--light .search-intel-qppr {
+  color: rgba(10, 100, 160, 0.85);
+  border-color: rgba(10, 100, 160, 0.25);
+}
 .presenter-container--light .search-intel-expansions { color: rgba(0,0,0,0.4); }
 .presenter-container--light .search-intel-term { color: rgba(0,0,0,0.6); }
 .presenter-container--light .result-src-badge--fts,
