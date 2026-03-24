@@ -296,26 +296,45 @@ const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalP
 
 /* ─── Search Intelligence bar — shows query intent + expansion terms ─── */
 const INTENT_LABELS = {
-  reference:   { label: 'Reference',  title: 'Exact scripture reference matched' },
-  exact:       { label: 'Keyword',    title: 'High-confidence keyword match' },
-  mixed:       { label: 'Expanded',   title: 'Keywords supplemented with related concepts' },
-  conceptual:  { label: 'Semantic',   title: 'Meaning-based search — no strong keyword match; results are conceptually related' },
+  reference:   { label: 'Reference',   title: 'Exact scripture reference matched' },
+  keyword:     { label: 'Keyword',     title: 'High-confidence keyword match' },
+  // legacy key from before multi-dim intent — keep for backward compat with cached results
+  exact:       { label: 'Keyword',     title: 'High-confidence keyword match' },
+  mixed:       { label: 'Expanded',    title: 'Keywords supplemented with related concepts' },
+  conceptual:  { label: 'Semantic',    title: 'Meaning-based search — results are conceptually related' },
+  entity:      { label: null,          title: null },  // label built dynamically from subtype
+  situational: { label: 'Situational', title: 'Question or situational framing — searching by meaning and context' },
 };
 
 const SearchIntelligence = ({ meta, query }) => {
   if (!meta || !query) return null;
-  const { intent, expansions } = meta;
-  const intentInfo = INTENT_LABELS[intent];
-  if (!intentInfo && (!expansions || expansions.length === 0)) return null;
+  const { intent, subtype, entityMatch, display, expansions } = meta;
+
+  // For entity intent, build a richer label: "Person · david" or "Place · jerusalem"
+  let intentLabel, intentTitle;
+  if (intent === 'entity') {
+    intentLabel = display || (subtype === 'person' ? 'Person' : 'Place');
+    intentTitle = entityMatch
+      ? `Named ${subtype} detected: "${entityMatch}" — results filtered to verses about this ${subtype}`
+      : `Named ${subtype || 'entity'} detected`;
+  } else {
+    const info = INTENT_LABELS[intent];
+    if (!info) return null;
+    intentLabel = display || info.label;
+    intentTitle = info.title;
+  }
+
+  const hasExpansions = expansions && expansions.length > 0;
+  if (!intentLabel && !hasExpansions) return null;
 
   return (
     <div className="search-intel">
-      {intentInfo && (
-        <span className={`search-intel-intent search-intel-intent--${intent}`} title={intentInfo.title}>
-          {intentInfo.label}
+      {intentLabel && (
+        <span className={`search-intel-intent search-intel-intent--${intent}`} title={intentTitle}>
+          {intentLabel}{entityMatch ? <span className="search-intel-entity-match"> · {entityMatch}</span> : null}
         </span>
       )}
-      {expansions && expansions.length > 0 && (
+      {hasExpansions && (
         <span className="search-intel-expansions" title="Terms the system associated with your query">
           also: {expansions.map((t, i) => (
             <span key={t} className="search-intel-term">
@@ -331,11 +350,8 @@ const SearchIntelligence = ({ meta, query }) => {
 /* ─── Search Facets — thematic anchors derived from nearest clusters ─── */
 const SearchFacets = ({ meta, onFacetClick }) => {
   if (!meta?.facets?.length) return null;
-  // Only show facets for conceptual/mixed searches — for exact keyword/reference
-  // the results are already precise, facets would add noise.
-  if (meta.intent === 'exact' || meta.intent === 'reference') return null;
-  // Filter out facets with only generic terms or very high similarity
-  // (the top hit is usually just the same cluster as the query itself)
+  // Only show facets for conceptual/mixed/situational searches
+  if (meta.intent === 'keyword' || meta.intent === 'exact' || meta.intent === 'reference') return null;
   const facets = meta.facets.filter(f => f.terms.length > 0).slice(0, 4);
   if (facets.length === 0) return null;
 

@@ -1270,6 +1270,83 @@ function sigmoidConfidence(topBm25Score, resultCount) {
   return Math.sqrt(scoreConf * countConf);
 }
 
+// ── Multi-dimensional query intent classification ─────────────────────────────
+// Returns { type, subtype, entityMatch, display }
+//
+//  type        display       when
+//  ─────────────────────────────────────────────────────────────────────────────
+//  reference   Reference     parseScriptureReference succeeded (caller sets this)
+//  entity      Person/Place  query contains a known person or place name
+//  situational Question      query has question words or imperative framing
+//  conceptual  Semantic      qvec exists, cluster proximity is tight, low keyword signal
+//  keyword     Keyword       strong BM25 signal — corpus knows this as keywords
+//  mixed       Expanded      in between: supplemented with related concepts
+// ─────────────────────────────────────────────────────────────────────────────
+const QUESTION_WORDS = new Set(['what','why','how','when','where','who','which','should','can','could','would','do','does','did','is','are','was','were']);
+const SITUATIONAL_VERBS = new Set(['deal','cope','handle','overcome','face','avoid','resist','forgive','love','trust','pray','repent','confess','heal','comfort','mourn','grieve','fear','doubt','worry','anxiety','anger','temptation','sin','fail','struggle','suffer']);
+
+function classifyQueryIntent(query, confidence, qvec) {
+  const lower   = query.toLowerCase().trim();
+  const words   = lower.replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  const wordSet = new Set(words);
+
+  // 1. Entity detection — person name or place name in query
+  if (entitiesReady) {
+    for (const w of words) {
+      if (entityPersonIndex.has(w))
+        return { type: 'entity', subtype: 'person', entityMatch: w, display: 'Person' };
+    }
+    // Multi-word person check (e.g. "king david", "joseph smith")
+    for (let i = 0; i < words.length - 1; i++) {
+      const bigram = `${words[i]} ${words[i + 1]}`;
+      if (entityPersonIndex.has(bigram))
+        return { type: 'entity', subtype: 'person', entityMatch: bigram, display: 'Person' };
+    }
+    for (const w of words) {
+      if (entityPlaceIndex.has(w))
+        return { type: 'entity', subtype: 'place', entityMatch: w, display: 'Place' };
+    }
+  }
+
+  // 2. Situational / question detection
+  const hasQuestionWord   = words.some(w => QUESTION_WORDS.has(w));
+  const hasSituationalV   = words.some(w => SITUATIONAL_VERBS.has(w));
+  const hasQuestionMark   = query.trim().endsWith('?');
+  if (hasQuestionMark || (hasQuestionWord && words.length >= 3) || hasSituationalV) {
+    return { type: 'situational', subtype: hasQuestionMark ? 'question' : 'topical', entityMatch: null, display: 'Situational' };
+  }
+
+  // 3. Cluster proximity — if qvec lands very close to a cluster centroid,
+  //    the query is navigating semantic space even if confidence is moderate
+  if (qvec && clusterCentroidIndex.length) {
+    const top = nearestClusters(qvec, 1);
+    const clusterSim = top[0]?.similarity ?? 0;
+    if (clusterSim > 0.55 && confidence < 0.65)
+      return { type: 'conceptual', subtype: 'cluster', entityMatch: null, display: 'Semantic' };
+  }
+
+  // 4. Fall back to confidence gradient (existing logic)
+  if (confidence >= 0.6) return { type: 'keyword',    subtype: 'bm25',    entityMatch: null, display: 'Keyword'    };
+  if (confidence >= 0.3) return { type: 'mixed',      subtype: 'hybrid',  entityMatch: null, display: 'Expanded'   };
+  return                        { type: 'conceptual', subtype: 'embedding',entityMatch: null, display: 'Semantic'  };
+}
+
+// Per-intent weight presets: [bm25, semantic, pagerank, cross_ref, cluster, dwell]
+// These blend with learnedWeights — intent biases the signal emphasis.
+const INTENT_WEIGHT_PRESETS = {
+  reference:   [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],  // exact text match dominates
+  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],  // authority + cross-ref (cited entity verses rank high)
+  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],  // semantic + cross-ref (conceptual neighbourhood)
+  conceptual:  [0.3, 1.4, 0.3, 0.6, 0.2, 0.2 ],  // embedding dominates
+  mixed:       [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],  // balanced
+  keyword:     [1.2, 0.5, 0.3, 0.4, 0.2, 0.15],  // BM25 leads
+};
+
+function blendWeights(preset, learned) {
+  // 60% preset, 40% learned — intent shapes emphasis without overriding behavioral learning
+  return preset.map((p, i) => 0.6 * p + 0.4 * (learned[i] ?? p));
+}
+
 // ── Reciprocal Rank Fusion (Algebra): merge ranked lists without weight tuning ──
 // score(d) = Σ_source 1/(k + rank_in_source)   k=60 (Cormack et al. 2009)
 const RRF_K = 60;
@@ -1901,12 +1978,15 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
     }
 
-    // Step 10: Apply learned weights re-ranking (before cleaning)
-    if (learnedWeights && results.length > 1) {
+    // Step 10: Intent-aware re-ranking with blended weights
+    const intentClass = classifyQueryIntent(query.trim(), confidence, qvec);
+    const intentPreset = INTENT_WEIGHT_PRESETS[intentClass.type] || INTENT_WEIGHT_PRESETS.mixed;
+    const activeWeights = blendWeights(intentPreset, learnedWeights);
+    if (results.length > 1) {
       results = results.map(r => {
-        const bm25Component  = (r._bm25_rank || r._bm25 || 0) * learnedWeights[0];
-        const semanticComp   = (r.similarity_score || r.simToQuery || 0) * learnedWeights[1];
-        const pagerankComp   = (pageRankCache.get(r.verse_id) || 0) * learnedWeights[2] * 10;
+        const bm25Component  = (r._bm25_rank || r._bm25 || 0) * activeWeights[0];
+        const semanticComp   = (r.similarity_score || r.simToQuery || 0) * activeWeights[1];
+        const pagerankComp   = (pageRankCache.get(r.verse_id) || 0) * activeWeights[2] * 10;
         const learnedScore   = bm25Component + semanticComp + pagerankComp + (r.similarity_score || 0);
         return { ...r, _learned_score: learnedScore };
       });
@@ -1916,9 +1996,16 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     // Clean internal fields before caching — keep _source for client intelligence display
     const allExpansions = [...new Set([...synonymTermsAdded, ...pmiTermsAdded, ...conceptTermsUsed])]
       .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
-    const intent = confidence >= 0.6 ? 'exact' : confidence < 0.3 ? 'conceptual' : 'mixed';
     const facets = qvec ? nearestClusters(qvec, 4) : [];
-    pipelineMeta = { intent, confidence: +confidence.toFixed(3), expansions: allExpansions, facets };
+    pipelineMeta = {
+      intent:     intentClass.type,
+      display:    intentClass.display,
+      subtype:    intentClass.subtype,
+      entityMatch: intentClass.entityMatch,
+      confidence: +confidence.toFixed(3),
+      expansions: allExpansions,
+      facets,
+    };
 
     results = results.map(r => {
       const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;

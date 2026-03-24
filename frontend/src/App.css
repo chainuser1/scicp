@@ -3182,9 +3182,16 @@ button,
   flex-shrink: 0;
 }
 .search-intel-intent--reference { background: rgba(52,152,219,0.25); color: #74b9e8; border: 1px solid rgba(52,152,219,0.3); }
-.search-intel-intent--exact     { background: rgba(39,174,96,0.2);  color: #6edb9e; border: 1px solid rgba(39,174,96,0.3); }
+.search-intel-intent--exact,
+.search-intel-intent--keyword   { background: rgba(39,174,96,0.2);  color: #6edb9e; border: 1px solid rgba(39,174,96,0.3); }
 .search-intel-intent--mixed     { background: rgba(243,156,18,0.2); color: #f5c05a; border: 1px solid rgba(243,156,18,0.3); }
 .search-intel-intent--conceptual{ background: rgba(155,89,182,0.22);color: #c39be8; border: 1px solid rgba(155,89,182,0.35); }
+.search-intel-intent--entity    { background: rgba(52,152,219,0.22);color: #74c6f5; border: 1px solid rgba(52,152,219,0.35); }
+.search-intel-intent--situational{ background: rgba(231,76,60,0.18); color: #f08d84; border: 1px solid rgba(231,76,60,0.3); }
+.search-intel-entity-match {
+  opacity: 0.75;
+  font-style: italic;
+}
 .search-intel-expansions {
   color: rgba(255,255,255,0.42);
   font-size: 0.70rem;
@@ -3218,10 +3225,13 @@ button,
 
 /* light-mode overrides */
 .presenter-container--light .search-intel { background: rgba(0,0,0,0.04); border-color: rgba(0,0,0,0.08); }
-.presenter-container--light .search-intel-intent--exact     { background: rgba(39,174,96,0.12);  color: #1d7a48; border-color: rgba(39,174,96,0.25); }
+.presenter-container--light .search-intel-intent--exact,
+.presenter-container--light .search-intel-intent--keyword   { background: rgba(39,174,96,0.12);  color: #1d7a48; border-color: rgba(39,174,96,0.25); }
 .presenter-container--light .search-intel-intent--mixed     { background: rgba(180,100,0,0.1);   color: #8a5000; border-color: rgba(180,100,0,0.2); }
 .presenter-container--light .search-intel-intent--conceptual{ background: rgba(100,50,150,0.1);  color: #5b2d8a; border-color: rgba(100,50,150,0.2); }
 .presenter-container--light .search-intel-intent--reference { background: rgba(30,100,160,0.1);  color: #1a5f8a; border-color: rgba(30,100,160,0.2); }
+.presenter-container--light .search-intel-intent--entity    { background: rgba(30,100,160,0.1);  color: #1a5f8a; border-color: rgba(30,100,160,0.2); }
+.presenter-container--light .search-intel-intent--situational{ background: rgba(180,50,40,0.1); color: #8a2c20; border-color: rgba(180,50,40,0.2); }
 .presenter-container--light .search-intel-expansions { color: rgba(0,0,0,0.4); }
 .presenter-container--light .search-intel-term { color: rgba(0,0,0,0.6); }
 .presenter-container--light .result-src-badge--fts,
