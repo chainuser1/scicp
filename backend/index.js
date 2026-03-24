@@ -313,6 +313,25 @@ fastify.post('/reading-event', async (request, reply) => {
 });
 
 // ── Reading Coverage (for coverage map visualization) ───────────────────────
+fastify.post('/search-feedback', async (request, reply) => {
+  try {
+    const { query, verse_id, rank_shown, source } = request.body || {};
+    if (!query || !verse_id) { reply.code(400); return { error: 'query and verse_id required' }; }
+    db_user.prepare(
+      'INSERT INTO search_feedback (query, verse_id, rank_shown, source) VALUES (?, ?, ?, ?)'
+    ).run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null);
+
+    const count = db_user.prepare('SELECT COUNT(*) AS n FROM search_feedback WHERE ts > ?').get(Date.now() - 3600000).n;
+    if (count % 20 === 0 && count > 0) updateLearnedWeights();
+
+    return { ok: true };
+  } catch (err) {
+    fastify.log.warn({ err }, '/search-feedback failed');
+    reply.code(500);
+    return { error: 'failed' };
+  }
+});
+
 fastify.get('/reading-coverage', async (request, reply) => {
   try {
     // Return per-chapter read counts for all chapters ever visited
@@ -608,7 +627,79 @@ db_user.exec(`
     verse_count INTEGER NOT NULL DEFAULT 0,
     language    TEXT NOT NULL DEFAULT 'en'
   );
+
+  CREATE TABLE IF NOT EXISTS search_feedback (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    query      TEXT NOT NULL,
+    verse_id   INTEGER NOT NULL,
+    rank_shown INTEGER NOT NULL,
+    source     TEXT,
+    ts         INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sf_query ON search_feedback(query);
+  CREATE INDEX IF NOT EXISTS idx_sf_ts    ON search_feedback(ts DESC);
 `);
+
+// ── Learned Scoring Weights (updated from feedback) ──────────────────────────
+// Weights for: [bm25, semantic, pagerank, cross_ref, cluster, dwell]
+const DEFAULT_WEIGHTS = [1.0, 0.8, 0.3, 0.5, 0.3, 0.15];
+let learnedWeights = [...DEFAULT_WEIGHTS];
+
+// Load persisted weights if available
+try {
+  db_user.exec(`
+    CREATE TABLE IF NOT EXISTS learned_weights (
+      key   TEXT PRIMARY KEY,
+      value REAL NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+    )
+  `);
+  const stored = db_user.prepare('SELECT key, value FROM learned_weights').all();
+  for (const { key, value } of stored) {
+    const idx = parseInt(key.replace('w', ''), 10);
+    if (!isNaN(idx) && idx < learnedWeights.length) learnedWeights[idx] = value;
+  }
+} catch {}
+
+function updateLearnedWeights() {
+  try {
+    const cutoff = Date.now() - 7 * 86400000;
+    const feedback = db_user.prepare(
+      'SELECT query, verse_id, rank_shown, source FROM search_feedback WHERE ts > ? ORDER BY ts DESC LIMIT 500'
+    ).all(cutoff);
+
+    if (feedback.length < 10) return;
+
+    const sourceWeightDeltas = new Array(learnedWeights.length).fill(0);
+    const sourceCounts = new Array(learnedWeights.length).fill(0);
+
+    for (const fb of feedback) {
+      const srcMap = { 'fts': 0, 'fts-phrase': 0, 'semantic': 1, 'pagerank': 2, 'cross-ref': 3, 'cluster': 4, 'dwell': 5, 'summary': 1, 'topical-guide': 2 };
+      const wIdx = srcMap[fb.source] ?? 0;
+      const rrk = 1 / Math.max(1, fb.rank_shown + 1);
+      const delta = (rrk - 0.15) * 0.01;
+      sourceWeightDeltas[wIdx] += delta;
+      sourceCounts[wIdx]++;
+    }
+
+    const lr = 0.05;
+    for (let i = 0; i < learnedWeights.length; i++) {
+      if (sourceCounts[i] === 0) continue;
+      const grad = sourceWeightDeltas[i] / sourceCounts[i];
+      learnedWeights[i] = Math.max(0.05, Math.min(3.0, learnedWeights[i] + lr * grad));
+    }
+
+    const stmt = db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)');
+    learnedWeights.forEach((w, i) => stmt.run(`w${i}`, w));
+
+    fastify.log.info(`[WeightLearning] Updated weights: ${learnedWeights.map(w => w.toFixed(3)).join(', ')}`);
+  } catch (err) {
+    fastify.log.warn({ err }, 'updateLearnedWeights failed');
+  }
+}
+
+// Run weight update once at startup if we have enough data
+setImmediate(() => { try { updateLearnedWeights(); } catch {} });
 
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 // Uses the shared engine's initializeFts via adapters.
@@ -1639,9 +1730,21 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
     }
 
+    // Step 10: Apply learned weights re-ranking (before cleaning)
+    if (learnedWeights && results.length > 1) {
+      results = results.map(r => {
+        const bm25Component  = (r._bm25_rank || r._bm25 || 0) * learnedWeights[0];
+        const semanticComp   = (r.similarity_score || r.simToQuery || 0) * learnedWeights[1];
+        const pagerankComp   = (pageRankCache.get(r.verse_id) || 0) * learnedWeights[2] * 10;
+        const learnedScore   = bm25Component + semanticComp + pagerankComp + (r.similarity_score || 0);
+        return { ...r, _learned_score: learnedScore };
+      });
+      results.sort((a, b) => (b._learned_score || 0) - (a._learned_score || 0));
+    }
+
     // Clean internal fields before caching
     results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, ...clean } = r;
+      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;
       return clean;
     });
     total = results.length;
