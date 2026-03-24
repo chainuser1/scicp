@@ -1147,7 +1147,7 @@ const MobilePresenter = () => {
         setThemePopover(false);
       if (!e.target.closest('.hdr-lang-wrap'))
         setLangPopover(false);
-      if (!e.target.closest('.hdr-mobile-menu') && !e.target.closest('.hdr-hamburger'))
+      if (!e.target.closest('.prs-more-sheet') && !e.target.closest('.prs-nav-btn'))
         setMobileMenuOpen(false);
     };
     document.addEventListener('mousedown', handler);
@@ -1997,7 +1997,7 @@ const MobilePresenter = () => {
       </div>
     )}
 
-    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode} presenter-container--has-botnav${hasLiveActionBar ? ' presenter-container--actionbar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* ── Online session bar (inside container so it participates in flex layout) ── */}
       {isOnline && !sessionJoined && (
@@ -2222,196 +2222,184 @@ const MobilePresenter = () => {
 
         {/* Right controls — mobile (narrow screens only) */}
         <div className="hdr-right hdr-right--mobile">
-          {/* Search always visible */}
-          <div className={activeTourTarget === 'search' ? 'tour-focus' : ''}>
-            <HdrBtn onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }} active={drawerOpen && drawerTab === 'search'} label="Search scripture">
-              <IconSearch />
-            </HdrBtn>
-          </div>
-          <CastingControl compact />
-          {/* Compact live dot */}
           {liveVerse && (
             <div className="live-badge live-badge--compact">
               <span className="live-badge-dot" />
             </div>
           )}
-          {/* Hamburger */}
-          <button
-            className={`hdr-btn hdr-hamburger${mobileMenuOpen ? ' hdr-btn--active' : ''}`}
-            onClick={() => setMobileMenuOpen(o => !o)}
-            aria-label="More options"
-            title="More options"
-          >
-            <IconMenu />
-          </button>
-
-          {/* Mobile dropdown panel */}
-          {mobileMenuOpen && (
-            <div className="hdr-mobile-menu">
-              {/* Cast to display */}
-              <div className="mobile-menu-section">
-                <div className="mobile-menu-label">Display</div>
-                <div className="mobile-menu-row">
-                  <CastingControl compact={false} />
-                </div>
-              </div>
-
-              <div className="mobile-menu-divider" />
-
-              {/* Language */}
-              <div className="mobile-menu-section">
-                <div className="mobile-menu-label">Language</div>
-                <div className="mobile-menu-row">
-                  <select
-                    className="lang-select lang-select--mobile"
-                    value={currentLanguage}
-                    onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
-                    disabled={Object.values(langDownloads).some(s => s.status === 'downloading')}
-                  >
-                    {LANG_OPTIONS.map(({ value, label }) => {
-                      const st = langDownloads[value];
-                      const dl = !isOnline && st && st.status === 'downloading';
-                      const suffix = dl ? ` ⬇ ${st.progress}%` : (!isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '');
-                      return <option key={value} value={value}>{label}{suffix}</option>;
-                    })}
-                  </select>
-                </div>
-                {/* F8 — secondary language */}
-                <div className="mobile-menu-row" style={{ marginTop: '0.35rem', gap: '0.4rem' }}>
-                  <span className="mobile-menu-label" style={{ margin: 0, flexShrink: 0 }}>+Screen</span>
-                  <select
-                    className="lang-select lang-select--mobile"
-                    value={secondaryLanguage}
-                    onChange={e => handleSecondaryLanguageChange(e.target.value)}
-                    style={{ flex: 1 }}
-                  >
-                    <option value="">Off</option>
-                    {LANG_OPTIONS.map(({ value, label }) => {
-                      const st = langDownloads[value];
-                      const suffix = !isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '';
-                      return <option key={value} value={value}>{label}{suffix}</option>;
-                    })}
-                  </select>
-                  <button
-                    className="popover-swap-btn"
-                    onClick={handleSwapLanguages}
-                    disabled={!secondaryLanguage}
-                    title="Swap primary and secondary language"
-                  >&#8644;</button>
-                </div>
-              </div>
-
-              <div className="mobile-menu-divider" />
-
-              {/* Theme */}
-              <div className="mobile-menu-section">
-                <div className="mobile-menu-label">Screen Theme</div>
-                <div className="mobile-menu-row">
-                  {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme }) => (
-                    <button
-                      key={label}
-                      className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
-                      onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
-                    >{label}</button>
-                  ))}
-                </div>
-                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Verse Transition</div>
-                <div className="mobile-menu-row" style={{ flexWrap: 'wrap' }}>
-                  {[
-                    { value: 'crossfade',  label: '⊙ Fade' },
-                    { value: 'slide-up',   label: '↑ Slide' },
-                    { value: 'fade-black', label: '◼ Black' },
-                    { value: 'cut',        label: '⚡ Cut' },
-                  ].map(({ value, label }) => (
-                    <button
-                      key={value}
-                      className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
-                      onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
-                    >{label}</button>
-                  ))}
-                </div>
-                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>App Appearance</div>
-                <div className="mobile-menu-row">
-                  {['dark', 'light'].map(mode => (
-                    <button
-                      key={mode}
-                      className={`theme-btn${presenterUiMode === mode ? ' active' : ''}`}
-                      onClick={() => {
-                        setPresenterUiMode(mode);
-                        try { localStorage.setItem('scicp.presenter_ui_mode', mode); } catch { /* ignore */ }
-                      }}
-                    >{mode === 'dark' ? '☽ Dark' : '☀ Light'}</button>
-                  ))}
-                </div>
-                <div className="mobile-menu-divider" style={{ margin: '10px 0' }} />
-                <div className="sp-mode-toggle">
-                  <div>
-                    <div className="sp-mode-toggle-label">Simple Mode</div>
-                    <div className="sp-mode-toggle-sub">Bigger, cleaner view — tap a verse to show it</div>
-                  </div>
-                  <button className="sp-mode-btn" onClick={() => { toggleSimpleMode(true); setMobileMenuOpen(false); }}>
-                    Switch to Simple
-                  </button>
-                </div>
-                <div className="popover-row" style={{ marginTop: '0.4rem' }}>
-                  <input
-                    type="text"
-                    className="popover-input"
-                    placeholder="Custom bg URL..."
-                    value={bgUrlInput}
-                    onChange={e => setBgUrlInput(e.target.value)}
-                  />
-                  <button className="popover-apply" onClick={() => {
-                    if (!bgUrlInput) return;
-                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
-                    setBgUrlInput('');
-                    setMobileMenuOpen(false);
-                  }}>Apply</button>
-                </div>
-              </div>
-
-              <div className="mobile-menu-divider" />
-
-              {/* Misc */}
-              <div className="mobile-menu-section">
-                <div className="mobile-menu-row">
-                  <button className="theme-btn" onClick={() => { openDrawer('history'); setMobileMenuOpen(false); }}>
-                    <IconClock /> Recent
-                  </button>
-                  <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
-                    <IconInfo /> Help
-                  </button>
-                  <button className="theme-btn" onClick={() => { setReadinessOpen(true); setMobileMenuOpen(false); }}>
-                    ✅ Checks
-                  </button>
-                </div>
-              </div>
-
-              {/* Online session controls */}
-              {isOnline && (
-                <>
-                  <div className="mobile-menu-divider" />
-                  <div className="mobile-menu-section">
-                    <div className="mobile-menu-label">🌐 Online Session</div>
-                    <div className="mobile-menu-row">
-                      {sessionJoined ? (
-                        <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }}>
-                          Leave Session
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '0.8rem', color: '#888' }}>Not connected to a session</span>
-                      )}
-                      <button className="theme-btn" onClick={() => { switchMode(); setMobileMenuOpen(false); }}>
-                        Switch Mode
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
         </div>
       </header>
+
+      {/* ── More sheet (bottom sheet overlay) ── */}
+      {mobileMenuOpen && (
+        <div className="prs-more-backdrop" onClick={() => setMobileMenuOpen(false)}>
+          <div className="prs-more-sheet" onClick={e => e.stopPropagation()}>
+            <div className="prs-more-handle" />
+            <div className="prs-more-title">Settings</div>
+
+            {/* Cast to display */}
+            <div className="mobile-menu-section">
+              <div className="mobile-menu-label">Display</div>
+              <div className="mobile-menu-row">
+                <CastingControl compact={false} />
+              </div>
+            </div>
+
+            <div className="mobile-menu-divider" />
+
+            {/* Language */}
+            <div className="mobile-menu-section">
+              <div className="mobile-menu-label">Language</div>
+              <div className="mobile-menu-row">
+                <select
+                  className="lang-select lang-select--mobile"
+                  value={currentLanguage}
+                  onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
+                  disabled={Object.values(langDownloads).some(s => s.status === 'downloading')}
+                >
+                  {LANG_OPTIONS.map(({ value, label }) => {
+                    const st = langDownloads[value];
+                    const dl = !isOnline && st && st.status === 'downloading';
+                    const suffix = dl ? ` ⬇ ${st.progress}%` : (!isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '');
+                    return <option key={value} value={value}>{label}{suffix}</option>;
+                  })}
+                </select>
+              </div>
+              {/* F8 — secondary language */}
+              <div className="mobile-menu-row" style={{ marginTop: '0.35rem', gap: '0.4rem' }}>
+                <span className="mobile-menu-label" style={{ margin: 0, flexShrink: 0 }}>+Screen</span>
+                <select
+                  className="lang-select lang-select--mobile"
+                  value={secondaryLanguage}
+                  onChange={e => handleSecondaryLanguageChange(e.target.value)}
+                  style={{ flex: 1 }}
+                >
+                  <option value="">Off</option>
+                  {LANG_OPTIONS.map(({ value, label }) => {
+                    const st = langDownloads[value];
+                    const suffix = !isOnline && st && st.status === 'idle' && !isLanguageBundled(value) ? ' ☁' : '';
+                    return <option key={value} value={value}>{label}{suffix}</option>;
+                  })}
+                </select>
+                <button
+                  className="popover-swap-btn"
+                  onClick={handleSwapLanguages}
+                  disabled={!secondaryLanguage}
+                  title="Swap primary and secondary language"
+                >&#8644;</button>
+              </div>
+            </div>
+
+            <div className="mobile-menu-divider" />
+
+            {/* Theme */}
+            <div className="mobile-menu-section">
+              <div className="mobile-menu-label">Screen Theme</div>
+              <div className="mobile-menu-row">
+                {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme }) => (
+                  <button
+                    key={label}
+                    className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
+                    onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
+                  >{label}</button>
+                ))}
+              </div>
+              <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Verse Transition</div>
+              <div className="mobile-menu-row" style={{ flexWrap: 'wrap' }}>
+                {[
+                  { value: 'crossfade',  label: '⊙ Fade' },
+                  { value: 'slide-up',   label: '↑ Slide' },
+                  { value: 'fade-black', label: '◼ Black' },
+                  { value: 'cut',        label: '⚡ Cut' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
+                    onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
+                  >{label}</button>
+                ))}
+              </div>
+              <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>App Appearance</div>
+              <div className="mobile-menu-row">
+                {['dark', 'light'].map(mode => (
+                  <button
+                    key={mode}
+                    className={`theme-btn${presenterUiMode === mode ? ' active' : ''}`}
+                    onClick={() => {
+                      setPresenterUiMode(mode);
+                      try { localStorage.setItem('scicp.presenter_ui_mode', mode); } catch { /* ignore */ }
+                    }}
+                  >{mode === 'dark' ? '☽ Dark' : '☀ Light'}</button>
+                ))}
+              </div>
+              <div className="mobile-menu-divider" style={{ margin: '10px 0' }} />
+              <div className="sp-mode-toggle">
+                <div>
+                  <div className="sp-mode-toggle-label">Simple Mode</div>
+                  <div className="sp-mode-toggle-sub">Bigger, cleaner view — tap a verse to show it</div>
+                </div>
+                <button className="sp-mode-btn" onClick={() => { toggleSimpleMode(true); setMobileMenuOpen(false); }}>
+                  Switch to Simple
+                </button>
+              </div>
+              <div className="popover-row" style={{ marginTop: '0.4rem' }}>
+                <input
+                  type="text"
+                  className="popover-input"
+                  placeholder="Custom bg URL..."
+                  value={bgUrlInput}
+                  onChange={e => setBgUrlInput(e.target.value)}
+                />
+                <button className="popover-apply" onClick={() => {
+                  if (!bgUrlInput) return;
+                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                  setBgUrlInput('');
+                  setMobileMenuOpen(false);
+                }}>Apply</button>
+              </div>
+            </div>
+
+            <div className="mobile-menu-divider" />
+
+            {/* Misc */}
+            <div className="mobile-menu-section">
+              <div className="mobile-menu-row">
+                <button className="theme-btn" onClick={() => { openDrawer('history'); setMobileMenuOpen(false); }}>
+                  <IconClock /> Recent
+                </button>
+                <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
+                  <IconInfo /> Help
+                </button>
+                <button className="theme-btn" onClick={() => { setReadinessOpen(true); setMobileMenuOpen(false); }}>
+                  ✅ Checks
+                </button>
+              </div>
+            </div>
+
+            {/* Online session controls */}
+            {isOnline && (
+              <>
+                <div className="mobile-menu-divider" />
+                <div className="mobile-menu-section">
+                  <div className="mobile-menu-label">🌐 Online Session</div>
+                  <div className="mobile-menu-row">
+                    {sessionJoined ? (
+                      <button className="theme-btn" onClick={() => { leaveSession(); setMobileMenuOpen(false); }}>
+                        Leave Session
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '0.8rem', color: '#888' }}>Not connected to a session</span>
+                    )}
+                    <button className="theme-btn" onClick={() => { switchMode(); setMobileMenuOpen(false); }}>
+                      Switch Mode
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {connectionState !== 'connected' && (
         <div className={`mobile-conn-banner mobile-conn-banner--${connectionState}`} role="status" aria-live="polite">
@@ -3154,80 +3142,69 @@ const MobilePresenter = () => {
         </div>
       )}
 
-      {!hasLiveActionBar && (
-        <div className="mobile-core-bar">
-          <button
-            className={`mobile-core-btn${drawerOpen && drawerTab === 'search' ? ' mobile-core-btn--active' : ''}`}
-            onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }}
-            aria-label="Open search"
-            title="Search scriptures"
-          >
-            <IconSearch />
-            <span>Search</span>
-          </button>
-          <button
-            className={`mobile-core-btn${drawerOpen && drawerTab === 'setlist' ? ' mobile-core-btn--active' : ''}`}
-            onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); }}
-            aria-label="Open setlist"
-            title="Open setlist"
-          >
-            <IconList />
-            <span>Setlist</span>
-          </button>
-          <button
-            className={`mobile-core-btn${staged ? ' mobile-core-btn--live' : ''}${drawerOpen && drawerTab === 'history' && !staged ? ' mobile-core-btn--active' : ''}`}
-            onClick={() => {
-              if (staged) goLive();
-              else if (!drawerOpen || drawerTab !== 'history') openDrawer('history');
-              else setDrawerOpen(false);
-            }}
-            aria-label={staged ? 'Go live now' : 'Open recent verses'}
-            title={staged ? 'Go Live' : 'Recent verses'}
-          >
-            {staged ? <IconBolt /> : <IconClock />}
-            <span>{staged ? 'Go Live' : 'Recent'}</span>
-          </button>
-          <CastingControl className="mobile-core-btn mobile-core-btn--cast" label="Cast" />
-        </div>
-      )}
+      {/* ── Persistent bottom navigation ── */}
+      <nav className="prs-bottom-nav">
+        <button
+          className={`prs-nav-btn${drawerOpen && drawerTab === 'search' ? ' prs-nav-btn--active' : ''}`}
+          onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }}
+          aria-label="Search"
+        >
+          <IconSearch />
+          <span>Search</span>
+        </button>
 
-      {/* Sticky Go Live bar — mobile only, appears when a verse is staged */}
+        <button
+          className={`prs-nav-btn${drawerOpen && drawerTab === 'setlist' ? ' prs-nav-btn--active' : ''}`}
+          onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); }}
+          aria-label="Setlist"
+        >
+          <IconList />
+          <span>Setlist</span>
+          {setlist.length > 0 && <span className="prs-nav-badge">{setlist.length}</span>}
+        </button>
+
+        {/* Center action — Go Live when staged, End when live, Browse otherwise */}
+        <button
+          className={`prs-nav-btn prs-nav-btn--center${staged ? ' prs-nav-btn--golive' : liveVerse ? ' prs-nav-btn--live' : ''}`}
+          onClick={() => {
+            if (staged) goLive();
+            else if (liveVerse) endLive();
+            else { openDrawer('browse'); setMobileMenuOpen(false); }
+          }}
+          aria-label={staged ? 'Go live' : liveVerse ? 'End live' : 'Browse'}
+        >
+          {staged ? <IconBolt /> : liveVerse ? <span className="prs-live-dot-icon" /> : <IconBook />}
+          <span>{staged ? 'Go Live' : liveVerse ? 'Live' : 'Browse'}</span>
+        </button>
+
+        <CastingControl className="prs-nav-btn prs-nav-btn--cast" label="Cast" />
+
+        <button
+          className={`prs-nav-btn${mobileMenuOpen ? ' prs-nav-btn--active' : ''}`}
+          onClick={() => setMobileMenuOpen(o => !o)}
+          aria-label="More"
+        >
+          <IconMenu />
+          <span>More</span>
+        </button>
+      </nav>
+
+      {/* Live controls strip — shown above bottom nav when staged or live */}
       {(staged || liveVerse) && (
-        <div className="mobile-golive-bar">
-          <button
-            className="mobile-nav-btn"
-            onClick={() => fetchAdjacent('prev', !liveVerse)}
-            aria-label="Previous verse"
-          >&#8249;</button>
-          <div className="mobile-golive-ref">
+        <div className="prs-live-controls">
+          <button className="prs-live-nav" onClick={() => fetchAdjacent('prev', !liveVerse)} aria-label="Previous verse">‹</button>
+          <div className="prs-live-ref">
             {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
-          </div>
-          <button
-            className="mobile-nav-btn"
-            onClick={() => fetchAdjacent('next', !liveVerse)}
-            aria-label="Next verse"
-          >&#8250;</button>
-          <div className="mobile-golive-actions">
-            <button className="mobile-mini-btn" onClick={() => openDrawer('search')}>Search</button>
-            <button className="mobile-mini-btn" onClick={() => openDrawer('setlist')}>Setlist</button>
-            {liveVerse && (
-              <>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller display text" aria-label="Decrease display font size">A−</button>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger display text"  aria-label="Increase display font size">A+</button>
-                <button className="mobile-font-btn mobile-font-btn--reading" onClick={() => adjustUiFontSize(-0.1)} title="Smaller reading text" aria-label="Decrease reading size">a−</button>
-                <button className="mobile-font-btn mobile-font-btn--reading" onClick={() => adjustUiFontSize( 0.1)} title="Larger reading text"  aria-label="Increase reading size">a+</button>
-                <button className="mobile-endlive-btn" onClick={endLive} title="End live">End</button>
-              </>
-            )}
-            {staged && (
-              <button
-                className={`mobile-golive-btn${activeTourTarget === 'golive' ? ' tour-focus' : ''}`}
-                onClick={goLive}
-              >
-                Go Live
-              </button>
+            {liveVerse && liveVerse.segments?.length > 1 && (
+              <span className="prs-live-seg">{currentSegment + 1}/{liveVerse.segments.length}</span>
             )}
           </div>
+          <button className="prs-live-nav" onClick={() => fetchAdjacent('next', !liveVerse)} aria-label="Next verse">›</button>
+          <button className="prs-live-font" onClick={() => adjustFontSize(-0.3)} title="Smaller display text">A−</button>
+          <button className="prs-live-font" onClick={() => adjustFontSize(0.3)} title="Larger display text">A+</button>
+          {!staged && liveVerse && (
+            <button className="prs-live-end" onClick={endLive}>End</button>
+          )}
         </div>
       )}
 

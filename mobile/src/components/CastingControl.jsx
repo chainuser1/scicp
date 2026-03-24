@@ -21,7 +21,7 @@ const IconCast = ({ size = 18 }) => (
   </svg>
 );
 
-export default function CastingControl({ className = '', compact = false }) {
+export default function CastingControl({ className = '', compact = false, label = null }) {
   const [available, setAvailable] = useState(false);
   const [casting, setCasting] = useState(false);
   const [showHint, setShowHint] = useState(false);
@@ -115,7 +115,7 @@ export default function CastingControl({ className = '', compact = false }) {
         <IconCast size={compact ? 16 : 18} />
         {!compact && (
           <span className="cast-btn-label">
-            {casting ? 'Casting' : 'Cast'}
+            {label ?? (casting ? 'Casting' : 'Cast')}
           </span>
         )}
         {casting && <span className="cast-btn-dot" />}
