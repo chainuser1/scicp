@@ -309,7 +309,7 @@ const INTENT_LABELS = {
 
 const SearchIntelligence = ({ meta, query }) => {
   if (!meta || !query) return null;
-  const { intent, subtype, entityMatch, display, expansions, qpprActive } = meta;
+  const { intent, subtype, entityMatch, display, expansions, qpprActive, sessionDrift } = meta;
 
   // For entity intent, build a richer label: "Person · david" or "Place · jerusalem"
   let intentLabel, intentTitle;
@@ -326,7 +326,7 @@ const SearchIntelligence = ({ meta, query }) => {
   }
 
   const hasExpansions = expansions && expansions.length > 0;
-  if (!intentLabel && !hasExpansions && !qpprActive) return null;
+  if (!intentLabel && !hasExpansions && !qpprActive && !sessionDrift) return null;
 
   return (
     <div className="search-intel">
@@ -338,6 +338,11 @@ const SearchIntelligence = ({ meta, query }) => {
       {qpprActive && (
         <span className="search-intel-qppr" title="Results re-ranked using a query-seeded graph walk through verse connections">
           graph-ranked
+        </span>
+      )}
+      {sessionDrift && (
+        <span className="search-intel-drift" title="Results weighted toward this service's current theme based on verses you've displayed">
+          theme-aware
         </span>
       )}
       {hasExpansions && (

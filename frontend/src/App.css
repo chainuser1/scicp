@@ -3215,6 +3215,17 @@ button,
   padding: 0 5px;
   line-height: 1.6;
 }
+.search-intel-drift {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(180, 140, 255, 0.8);
+  border: 1px solid rgba(180, 140, 255, 0.25);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 1.6;
+}
 .search-intel-expansions {
   color: rgba(255,255,255,0.42);
   font-size: 0.70rem;
@@ -3260,6 +3271,10 @@ button,
 .presenter-container--light .search-intel-qppr {
   color: rgba(10, 100, 160, 0.85);
   border-color: rgba(10, 100, 160, 0.25);
+}
+.presenter-container--light .search-intel-drift {
+  color: rgba(80, 40, 160, 0.85);
+  border-color: rgba(80, 40, 160, 0.25);
 }
 .presenter-container--light .search-intel-expansions { color: rgba(0,0,0,0.4); }
 .presenter-container--light .search-intel-term { color: rgba(0,0,0,0.6); }
