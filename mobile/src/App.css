@@ -9659,3 +9659,20 @@ button, [role="button"] {
   border-radius: 99px; padding: 0.15rem 0.5rem;
   letter-spacing: 0.03em;
 }
+
+/* ── End Live armed state ─────────────────────────────────────────── */
+.end-live-btn--armed {
+  background: rgba(231,76,60,0.35) !important;
+  border-color: #e74c3c !important;
+  color: #ff6b6b !important;
+  animation: armed-pulse 0.5s ease-in-out infinite alternate;
+}
+.prs-live-end--armed {
+  background: rgba(231,76,60,0.4) !important;
+  color: #ff6b6b !important;
+  animation: armed-pulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes armed-pulse {
+  from { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); }
+  to   { box-shadow: 0 0 0 6px rgba(231,76,60,0); }
+}

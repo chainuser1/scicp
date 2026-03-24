@@ -525,7 +525,11 @@ export default function ScriptureReader({ onExit }) {
               <section className="rd-section">
                 <h2 className="rd-section-hd">Books of Scripture</h2>
                 <div className="rd-books-grid">
-                  {books.map(b => (
+                  {books.length === 0 ? (
+                    <p className="rd-empty" style={{ gridColumn: '1/-1', padding: '1rem 0' }}>
+                      Scripture library not available. Make sure the database is downloaded.
+                    </p>
+                  ) : books.map(b => (
                     <button key={b.book_id} className="rd-book-btn" onClick={() => openBook(b)}>
                       {b.book_title}
                     </button>
