@@ -232,6 +232,18 @@ const HdrBtn = ({ onClick, active, children, label, title }) => (
   </button>
 );
 
+// SOURCE_LABELS — map internal _source codes to short, human-readable labels
+const SOURCE_LABELS = {
+  'fts':           'keyword',
+  'fts-phrase':    'phrase',
+  'semantic':      'semantic',
+  'cross-ref':     'related',
+  'topical-guide': 'topical',
+  'summary':       'chapter',
+  'dwell':         'popular',
+  'chapter-agg':   'chapter',
+};
+
 // SearchResults — results are already the correct page from the server.
 // No client-side slicing. onPageChange(newPage) triggers a fresh socket request.
 const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalPages, onSelect, onGoLive, onPageChange: _onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang, sentinelRef }) => {
@@ -240,41 +252,79 @@ const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalP
   return (
     <>
       <ul className="results-ul">
-        {results.map(verse => (
-          <li
-            key={verse.verse_id}
-            className={`result-item${Number(verse.verse_id) === Number(stagedVerseId) ? ' result-item--staged' : ''}`}
-            onClick={() => onSelect(verse)}
-            onDoubleClick={() => onGoLive(verse)}
-          >
-            <div className="result-item-top">
-              <span className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
-              <div className="result-item-btns">
-                {onToggleTranslation && (
-                  <button className="result-translation-toggle"
-                    onClick={e => { e.stopPropagation(); onToggleTranslation(verse.verse_id); }}
-                    title="Preview in another language">
-                    {srLang === 'en' ? 'TL' : srLang === 'tl' ? 'CEB' : 'EN'}
-                  </button>
-                )}
-                <button className="result-add-icon" onClick={e => { e.stopPropagation(); onAddToSetlist(verse); }} aria-label="Add to setlist" title="Add to setlist">+</button>
-                <button className="result-live-icon" onClick={e => { e.stopPropagation(); onGoLive(verse); }} aria-label="Go live" title="Go live">●</button>
+        {results.map(verse => {
+          const srcLabel = verse._source ? (SOURCE_LABELS[verse._source] || verse._source) : null;
+          return (
+            <li
+              key={verse.verse_id}
+              className={`result-item${Number(verse.verse_id) === Number(stagedVerseId) ? ' result-item--staged' : ''}`}
+              onClick={() => onSelect(verse)}
+              onDoubleClick={() => onGoLive(verse)}
+            >
+              <div className="result-item-top">
+                <span className="result-title">{verse.book_title} {verse.chapter_number}:{verse.verse_number}</span>
+                <div className="result-item-btns">
+                  {srcLabel && <span className={`result-src-badge result-src-badge--${verse._source}`} title={`Found via ${srcLabel} match`}>{srcLabel}</span>}
+                  {onToggleTranslation && (
+                    <button className="result-translation-toggle"
+                      onClick={e => { e.stopPropagation(); onToggleTranslation(verse.verse_id); }}
+                      title="Preview in another language">
+                      {srLang === 'en' ? 'TL' : srLang === 'tl' ? 'CEB' : 'EN'}
+                    </button>
+                  )}
+                  <button className="result-add-icon" onClick={e => { e.stopPropagation(); onAddToSetlist(verse); }} aria-label="Add to setlist" title="Add to setlist">+</button>
+                  <button className="result-live-icon" onClick={e => { e.stopPropagation(); onGoLive(verse); }} aria-label="Go live" title="Go live">●</button>
+                </div>
               </div>
-            </div>
-            <div className="result-text">{verse.scripture_text}</div>
-            {expandedTranslations?.has(verse.verse_id) && (
-              <div className="result-translation-snippet">
-                {(() => {
-                  const tl = srLang === 'en' ? 'tl' : srLang === 'tl' ? 'ceb' : 'en';
-                  return translationCache?.[`${verse.verse_id}_${tl}`] || 'Loading…';
-                })()}
-              </div>
-            )}
-          </li>
-        ))}
+              <div className="result-text">{verse.scripture_text}</div>
+              {expandedTranslations?.has(verse.verse_id) && (
+                <div className="result-translation-snippet">
+                  {(() => {
+                    const tl = srLang === 'en' ? 'tl' : srLang === 'tl' ? 'ceb' : 'en';
+                    return translationCache?.[`${verse.verse_id}_${tl}`] || 'Loading…';
+                  })()}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
       <div ref={sentinelRef} data-sentinel="search" style={{ height: 1 }} />
     </>
+  );
+};
+
+/* ─── Search Intelligence bar — shows query intent + expansion terms ─── */
+const INTENT_LABELS = {
+  reference:   { label: 'Reference',  title: 'Exact scripture reference matched' },
+  exact:       { label: 'Keyword',    title: 'High-confidence keyword match' },
+  mixed:       { label: 'Expanded',   title: 'Keywords supplemented with related concepts' },
+  conceptual:  { label: 'Semantic',   title: 'Meaning-based search — no strong keyword match; results are conceptually related' },
+};
+
+const SearchIntelligence = ({ meta, query }) => {
+  if (!meta || !query) return null;
+  const { intent, expansions } = meta;
+  const intentInfo = INTENT_LABELS[intent];
+  if (!intentInfo && (!expansions || expansions.length === 0)) return null;
+
+  return (
+    <div className="search-intel">
+      {intentInfo && (
+        <span className={`search-intel-intent search-intel-intent--${intent}`} title={intentInfo.title}>
+          {intentInfo.label}
+        </span>
+      )}
+      {expansions && expansions.length > 0 && (
+        <span className="search-intel-expansions" title="Terms the system associated with your query">
+          also: {expansions.map((t, i) => (
+            <span key={t} className="search-intel-term">
+              {t}{i < expansions.length - 1 ? ' · ' : ''}
+            </span>
+          ))}
+        </span>
+      )}
+    </div>
   );
 };
 
@@ -480,6 +530,7 @@ const Presenter = () => {
   ];
   const [query, setQuery]                   = useState('');
   const [results, setResults]               = useState([]);
+  const [searchMeta, setSearchMeta]         = useState(null);
   const [totalResults, setTotalResults]     = useState(0);
   const [currentTheme, setCurrentTheme]     = useState(() => {
     try {
@@ -1096,7 +1147,7 @@ const Presenter = () => {
     const handleConnectError = () => {
       setConnectionState('error');
     };
-    const handleSearchResults = ({ results, total, nextCursor }) => {
+    const handleSearchResults = ({ results, total, nextCursor, meta }) => {
       if (searchAppendRef.current) {
         setResults(prev => {
           const seen = new Set(prev.map(v => v.verse_id));
@@ -1104,6 +1155,7 @@ const Presenter = () => {
         });
       } else {
         setResults(results ?? []);
+        setSearchMeta(meta ?? null);
       }
       setTotalResults(total ?? 0);
       setSearchCursor(nextCursor ?? null);
@@ -1215,6 +1267,7 @@ const Presenter = () => {
     setCurrentPage(0);
     setTotalResults(0);
     setResults([]);
+    setSearchMeta(null);
     setSearchCursor(null);
     searchAppendRef.current = false;
     clearTimeout(searchDebounce.current);
@@ -2755,6 +2808,7 @@ const Presenter = () => {
                 )}
               </div>
               <div className="results-list-wrap">
+                <SearchIntelligence meta={searchMeta} query={query} />
                 <div className="results-list"
                   ref={resultsListRef}
                   onScroll={e => setResultsScrolled(e.currentTarget.scrollTop > 120)}>

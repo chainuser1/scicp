@@ -462,7 +462,7 @@ fastify.get('/search', async (request, reply) => {
   const lang = (language || 'en').toLowerCase().trim();
   try {
     let offset = 0;
-    let pipelineResults, total, cacheKey;
+    let pipelineResults, total, cacheKey, pipelineMeta;
 
     if (cursorStr) {
       const decoded = decodeCursor(cursorStr);
@@ -472,18 +472,19 @@ fastify.get('/search', async (request, reply) => {
           offset          = decoded.o;
           pipelineResults = cached.results;
           total           = cached.total;
+          pipelineMeta    = cached.meta;
           cacheKey        = decoded.k;
         }
       }
       if (!pipelineResults) {
         const fresh = await runSearchPipeline(q.trim(), lang, contextVerseId, fastify.log);
-        pipelineResults = fresh.results; total = fresh.total; cacheKey = fresh.cacheKey; offset = 0;
+        pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey; offset = 0;
       }
     } else {
       // Legacy page= support
       const page = Math.max(0, parseInt(pStr, 10) || 0);
       const fresh = await runSearchPipeline(q.trim(), lang, contextVerseId, fastify.log);
-      pipelineResults = fresh.results; total = fresh.total; cacheKey = fresh.cacheKey;
+      pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey;
       offset = page * pageSize;
     }
 
@@ -493,7 +494,7 @@ fastify.get('/search', async (request, reply) => {
     const nextCursor  = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
     const page        = Math.floor(offset / pageSize);
 
-    return { results: pageResults, total, nextCursor, page, pageSize, query: q, language: lang };
+    return { results: pageResults, total, nextCursor, meta: pipelineMeta, page, pageSize, query: q, language: lang };
   } catch (err) {
     fastify.log.error({ err }, '/search failed');
     reply.code(500);
@@ -1745,12 +1746,12 @@ function searchCacheGet(key) {
   return entry;
 }
 
-function searchCacheSet(key, results, total) {
+function searchCacheSet(key, results, total, meta) {
   if (searchResultsCache.size >= SEARCH_CACHE_MAX) {
     const oldestKey = searchResultsCache.keys().next().value;
     searchResultsCache.delete(oldestKey);
   }
-  searchResultsCache.set(key, { results, total, ts: Date.now() });
+  searchResultsCache.set(key, { results, total, meta: meta || null, ts: Date.now() });
 }
 
 function makeCacheKey(query, language, contextVerseId) {
@@ -1778,6 +1779,7 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
 
   let results = [];
   let total = 0;
+  let pipelineMeta = null;
 
   if (lang !== 'en') {
     const r = searchScriptureInDb(query, 0, 200, resolveDbAdapter(lang), log);
@@ -1789,8 +1791,9 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     if (ref) {
       const refResult = searchScripture(query, 0, 200, dba, log);
       if (refResult.total > 0) {
-        searchCacheSet(cacheKey, refResult.results, refResult.total);
-        return { results: refResult.results, total: refResult.total, fromCache: false, cacheKey };
+        const refMeta = { intent: 'reference', confidence: 1, expansions: [] };
+        searchCacheSet(cacheKey, refResult.results, refResult.total, refMeta);
+        return { results: refResult.results, total: refResult.total, meta: refMeta, fromCache: false, cacheKey };
       }
     }
 
@@ -1805,14 +1808,19 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
 
     // Steps 3-4: Synonym expansion + multi-source RRF fusion
     const expanded = expandWithSynonyms(query.trim());
+    const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
+    const synonymTermsAdded = expanded.filter(t => !queryWords.has(t)).slice(0, 8);
+    const pmiTermsAdded = expandWithPmi(query.trim()).slice(0, 5).map(t => t.term);
     let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
 
     // Step 5: Sigmoid confidence gate → concept expansion
     const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
     const confidence = sigmoidConfidence(topBm25, fusionResult.total);
+    let conceptTermsUsed = [];
     if (confidence < 0.6 && qvec && conceptCache.length) {
       const topN = confidence < 0.3 ? 5 : 3;
       const concepts = await expandWithConcepts(query.trim(), topN, qvec);
+      conceptTermsUsed = concepts.map(c => c.phrase);
       for (const c of concepts) {
         const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
         for (const r of cFusion.results) {
@@ -1862,9 +1870,14 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       results.sort((a, b) => (b._learned_score || 0) - (a._learned_score || 0));
     }
 
-    // Clean internal fields before caching
+    // Clean internal fields before caching — keep _source for client intelligence display
+    const allExpansions = [...new Set([...synonymTermsAdded, ...pmiTermsAdded, ...conceptTermsUsed])]
+      .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
+    const intent = confidence >= 0.6 ? 'exact' : confidence < 0.3 ? 'conceptual' : 'mixed';
+    pipelineMeta = { intent, confidence: +confidence.toFixed(3), expansions: allExpansions };
+
     results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _source, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;
+      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;
       return clean;
     });
     total = results.length;
@@ -1908,8 +1921,8 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     }
   }
 
-  searchCacheSet(cacheKey, results, total);
-  return { results, total, fromCache: false, cacheKey };
+  searchCacheSet(cacheKey, results, total, pipelineMeta);
+  return { results, total, meta: pipelineMeta, fromCache: false, cacheKey };
 }
 
 function buildVerseMetaCache() {
@@ -3407,7 +3420,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
         fastify.log.info(`search: "${query}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`);
 
         let offset = 0;
-        let pipelineResults, total, cacheKey;
+        let pipelineResults, total, cacheKey, pipelineMeta;
 
         if (cursorStr) {
           // Cursor path: decode offset + cache key, no pipeline re-run
@@ -3418,6 +3431,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
               offset          = decoded.o;
               pipelineResults = cached.results;
               total           = cached.total;
+              pipelineMeta    = cached.meta;
               cacheKey        = decoded.k;
             }
           }
@@ -3426,6 +3440,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
             pipelineResults = fresh.results;
             total           = fresh.total;
+            pipelineMeta    = fresh.meta;
             cacheKey        = fresh.cacheKey;
             offset          = 0;
           }
@@ -3434,6 +3449,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log);
           pipelineResults = fresh.results;
           total           = fresh.total;
+          pipelineMeta    = fresh.meta;
           cacheKey        = fresh.cacheKey;
           offset          = 0;
         }
@@ -3447,6 +3463,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           results:    pageResults,
           total,
           nextCursor,
+          meta:       pipelineMeta,
           // keep legacy page field for backward compat
           page:       Math.floor(offset / pageSize),
           pageSize,
