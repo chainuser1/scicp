@@ -8564,3 +8564,37 @@ button, [role="button"] {
     grid-template-columns: repeat(5, 1fr);
   }
 }
+
+/* ── Web theme quick pills ──────────────────────────────────────── */
+.hdr-theme-quick {
+  display: flex; gap: 0.3rem; align-items: center;
+}
+.theme-quick-pill {
+  padding: 0.2rem 0.65rem; border-radius: 99px;
+  font-size: 0.72rem; font-weight: 600;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: none; color: rgba(255,255,255,0.5);
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.theme-quick-pill--active {
+  background: rgba(201,168,76,0.18);
+  border-color: rgba(201,168,76,0.5);
+  color: #c9a84c;
+}
+.theme-quick-pill:hover:not(.theme-quick-pill--active) {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.75);
+}
+
+/* Live badge web — bigger, with label */
+.live-badge--web {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: rgba(231,76,60,0.12);
+  border: 1px solid rgba(231,76,60,0.3);
+  border-radius: 99px; padding: 0.2rem 0.65rem;
+}
+.live-badge--web .live-badge-dot { flex-shrink: 0; }
+.live-badge--web-label {
+  font-size: 0.72rem; font-weight: 700;
+  letter-spacing: 0.08em; color: #e74c3c;
+}

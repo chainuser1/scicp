@@ -2255,6 +2255,16 @@ const Presenter = () => {
 
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
+            <div className="hdr-theme-quick">
+              {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme: t }) => (
+                <button
+                  key={label}
+                  className={`theme-quick-pill${currentTheme === t ? ' theme-quick-pill--active' : ''}`}
+                  onClick={() => handleThemeChange({ ...t, force_animations: !!currentTheme.force_animations })}
+                  title={`${label} theme`}
+                >{label}</button>
+              ))}
+            </div>
             <HdrBtn onClick={() => setThemePopover(o => !o)} active={themePopover} label="Theme" title="Change theme">
               <IconPalette />
             </HdrBtn>
@@ -2329,9 +2339,9 @@ const Presenter = () => {
 
           {/* Live badge */}
           {liveVerse && (
-            <div className="live-badge">
+            <div className="live-badge live-badge--web">
               <span className="live-badge-dot" />
-              <span>Live</span>
+              <span className="live-badge--web-label">LIVE</span>
             </div>
           )}
         </div>
