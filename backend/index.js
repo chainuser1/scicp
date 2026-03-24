@@ -1687,6 +1687,37 @@ function buildEmbeddingCache() {
     );
   }
   embeddingsReady = true;
+  retrofitEmbeddings(embeddingCache);
+}
+
+// ── Domain Embedding Retrofit ────────────────────────────────────────────────
+// Pull theologically synonymous query pairs closer using scriptureSynonyms.
+// One-time projection: v_new = v_old + η * (centroid_of_synonym_group - v_old)
+function retrofitEmbeddings(vectors) {
+  if (!vectors || vectors.size < 100) return;
+  if (!conceptCache || conceptCache.length === 0) return;
+  const η = 0.1;
+  let retrofitCount = 0;
+  for (const [canonical, aliases] of Object.entries(scriptureSynonyms)) {
+    const allTerms = [canonical, ...(Array.isArray(aliases) ? aliases : [aliases])];
+    const termVecs = allTerms
+      .map(t => conceptCache.find(c => c.phrase.toLowerCase() === t.toLowerCase()))
+      .filter(Boolean)
+      .map(c => c.vec);
+    if (termVecs.length < 2) continue;
+    const dim = termVecs[0].length;
+    const centroid = new Float32Array(dim);
+    for (const v of termVecs) for (let i = 0; i < dim; i++) centroid[i] += v[i] / termVecs.length;
+    for (const entry of conceptCache) {
+      if (allTerms.some(t => t.toLowerCase() === entry.phrase.toLowerCase())) {
+        for (let i = 0; i < dim; i++) {
+          entry.vec[i] = entry.vec[i] + η * (centroid[i] - entry.vec[i]);
+        }
+        retrofitCount++;
+      }
+    }
+  }
+  fastify.log.info(`[Retrofit] Adjusted ${retrofitCount} concept embeddings with domain synonyms`);
 }
 
 async function processBatchAsync(pipe, verses, offset) {

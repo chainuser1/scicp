@@ -9698,3 +9698,66 @@ button, [role="button"] {
 }
 .search-suggestion-item:active { background: rgba(201,168,76,0.12); }
 .search-suggestion-item svg { opacity: 0.4; flex-shrink: 0; }
+
+/* ── Reading Coverage Map ──────────────────────────────────────────── */
+.rd-coverage-summary {
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 0.75rem;
+}
+.rd-coverage-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.4rem;
+}
+.rd-coverage-title {
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: rgba(255,255,255,0.4);
+}
+.rd-coverage-count {
+  font-size: 0.7rem; color: rgba(201,168,76,0.7); font-weight: 600;
+}
+.rd-coverage-bar {
+  height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden;
+}
+.rd-coverage-fill {
+  height: 100%; background: linear-gradient(90deg, #c9a84c, #e8c97a);
+  border-radius: 2px; transition: width 0.6s ease;
+}
+.rd-book-progress {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: rgba(201,168,76,0.2); border: 1px solid rgba(201,168,76,0.4);
+  font-size: 0.55rem; font-weight: 700; color: #c9a84c;
+  position: absolute; top: 4px; right: 4px;
+}
+.rd-ch-btn--read {
+  border-color: rgba(201,168,76,0.35) !important;
+  background: rgba(201,168,76,0.07) !important;
+}
+/* ── Spaced Review ─────────────────────────────────────────────────── */
+.rd-spaced-section { border-top: 1px solid rgba(255,255,255,0.06); }
+.rd-spaced-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.rd-spaced-item {
+  display: flex; flex-direction: column; gap: 0.1rem;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px; padding: 0.55rem 0.75rem;
+  text-align: left; cursor: pointer; position: relative;
+  transition: background 0.15s;
+}
+.rd-spaced-item:hover, .rd-spaced-item:active { background: rgba(201,168,76,0.07); }
+.rd-spaced-ref { font-size: 0.72rem; font-weight: 700; color: #c9a84c; }
+.rd-spaced-text { font-size: 0.7rem; color: rgba(255,255,255,0.45); font-style: italic; }
+.rd-spaced-due {
+  position: absolute; top: 6px; right: 8px;
+  font-size: 0.58rem; font-weight: 700; color: #e74c3c;
+  background: rgba(231,76,60,0.12); border-radius: 4px; padding: 1px 5px;
+}
+/* ── Adaptive Reading Density (Flow Mode) ─────────────────────────── */
+.rd-flow-mode .rd-toolbar { opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+.rd-flow-mode .rd-toolbar:hover { opacity: 1; pointer-events: all; }
+.rd-flow-mode .rd-breadcrumbs { opacity: 0.3; transition: opacity 0.4s; }
+.rd-flow-mode .rd-breadcrumbs:hover { opacity: 1; }
+.rd-flow-mode .rd-section-hd { display: none; }
+.rd-flow-mode .rd-prose { cursor: default; }

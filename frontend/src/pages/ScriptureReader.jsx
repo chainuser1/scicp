@@ -135,6 +135,18 @@ export default function ScriptureReader({ onExit }) {
   const [foundVerse, setFoundVerse] = useState(null); // verse_id to animate as "found"
   const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
+  // ── Dwell time + reading pace + coverage ──────────────────────────────────
+  const [sessionId]       = useState(() => `rs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  const sessionIdRef      = useRef(null);
+  if (sessionIdRef.current === null) sessionIdRef.current = sessionId;
+  const verseStartTimeRef = useRef(null);
+  const verseInViewRef    = useRef(null);
+  const lastVerseTimeRef  = useRef(null);
+  const readingPaceRef    = useRef([]);
+  const [flowMode,     setFlowMode]     = useState(false);
+  const [coverage,     setCoverage]     = useState(new Map());
+  const [spacedReview, setSpacedReview] = useState([]);
+
   // Derived
   const themeObj  = useMemo(() => THEMES.find(t => t.id === theme) || THEMES[0], [theme]);
   const lhObj     = useMemo(() => LINE_HEIGHTS.find(l => l.id === lineHeight) || LINE_HEIGHTS[1], [lineHeight]);
@@ -167,6 +179,54 @@ export default function ScriptureReader({ onExit }) {
   const saveFf    = id => { setFontFamily(id); store(SK.fontFamily, id); };
   const saveLang  = l  => { setLang(l); store(SK.lang, l); };
 
+  // ── Reading event emission ─────────────────────────────────────────────────
+  const emitReadingEvent = useCallback(async (verse, dwellMs = 0, eventType = 'read') => {
+    try {
+      const payload = {
+        verse_id: verse.verse_id,
+        book_id: verse.book_id,
+        chapter_id: verse.chapter_id,
+        book_title: verse.book_title,
+        chapter_number: verse.chapter_number,
+        verse_number: verse.verse_number,
+        language: lang,
+        session_id: sessionIdRef.current,
+        dwell_ms: Math.round(dwellMs),
+        event_type: eventType,
+      };
+      fetch(`${API_URL}/reading-event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }, [lang]);
+
+  // ── Reading pace (flow mode) ───────────────────────────────────────────────
+  const updateReadingPace = useCallback((verseWordCount) => {
+    const now = Date.now();
+    if (lastVerseTimeRef.current) {
+      const elapsed = now - lastVerseTimeRef.current;
+      const expectedMs = verseWordCount * 250;
+      const paceRatio = elapsed / expectedMs;
+      readingPaceRef.current = [...readingPaceRef.current.slice(-4), paceRatio];
+      const avgPace = readingPaceRef.current.reduce((a, b) => a + b, 0) / readingPaceRef.current.length;
+      const shouldFlow = avgPace < 0.6 && readingPaceRef.current.length >= 3;
+      setFlowMode(f => f !== shouldFlow ? shouldFlow : f);
+    }
+    lastVerseTimeRef.current = now;
+  }, []);
+
+  const onVerseVisible = useCallback((verse) => {
+    if (verseInViewRef.current && verseStartTimeRef.current) {
+      const dwell = Date.now() - verseStartTimeRef.current;
+      emitReadingEvent(verseInViewRef.current, dwell, 'read');
+    }
+    verseInViewRef.current = verse;
+    verseStartTimeRef.current = Date.now();
+    updateReadingPace(verse.scripture_text?.split(' ').length || 10);
+  }, [emitReadingEvent, updateReadingPace]);
+
   // ── Offline detection ─────────────────────────────────────────────────────
   useEffect(() => {
     const on = () => setIsOffline(false);
@@ -174,6 +234,25 @@ export default function ScriptureReader({ onExit }) {
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  // ── Coverage + spaced review fetches ─────────────────────────────────────
+  useEffect(() => {
+    fetch(`${API_URL}/reading-coverage`)
+      .then(r => r.ok ? r.json() : { coverage: [] })
+      .then(({ coverage: rows }) => {
+        const map = new Map();
+        for (const row of rows) map.set(row.chapter_id, row);
+        setCoverage(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetch(`${API_URL}/spaced-review?limit=3`)
+      .then(r => r.ok ? r.json() : { verses: [] })
+      .then(({ verses }) => setSpacedReview(verses || []))
+      .catch(() => {});
   }, []);
 
   // ── Load books ────────────────────────────────────────────────────────────
@@ -223,6 +302,28 @@ export default function ScriptureReader({ onExit }) {
     }, 250);
     return () => clearTimeout(tid);
   }, [chapterVerses]);
+
+  // ── IntersectionObserver: dwell tracking ─────────────────────────────────
+  useEffect(() => {
+    if (!chapterVerses.length) return;
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+          const verseId = parseInt(entry.target.dataset.verseId, 10);
+          const verse = chapterVerses.find(v => v.verse_id === verseId);
+          if (verse) onVerseVisible(verse);
+        }
+      }
+    }, { threshold: 0.6 });
+    document.querySelectorAll('[data-verse-id]').forEach(el => observer.observe(el));
+    return () => {
+      observer.disconnect();
+      if (verseInViewRef.current && verseStartTimeRef.current) {
+        const dwell = Date.now() - verseStartTimeRef.current;
+        emitReadingEvent(verseInViewRef.current, dwell, 'read');
+      }
+    };
+  }, [chapterVerses, onVerseVisible, emitReadingEvent]);
 
   // ── Book / chapter navigation ─────────────────────────────────────────────
   const openBook = useCallback(async (book) => {
@@ -404,7 +505,7 @@ export default function ScriptureReader({ onExit }) {
   // RENDER
   // ══════════════════════════════════════════════════════════════════════════
   return (
-    <div className="rd-root" style={cssVars}>
+    <div className={`rd-root${flowMode ? ' rd-flow-mode' : ''}`} style={cssVars}>
 
       {/* ── HOME SCREEN ── */}
       {screen === 'home' && (
@@ -496,7 +597,32 @@ export default function ScriptureReader({ onExit }) {
                   </div>
                 </section>
               )}
+              {spacedReview.length > 0 && (
+                <section className="rd-section rd-spaced-section">
+                  <h2 className="rd-section-hd">📖 For Review <span className="rd-section-sub">— revisit these verses</span></h2>
+                  <div className="rd-spaced-list">
+                    {spacedReview.slice(0, 3).map(v => (
+                      <button key={v.verse_id} className="rd-spaced-item" onClick={() => openBook({ book_id: v.book_id, book_title: v.book_title })}>
+                        <span className="rd-spaced-ref">{v.book_title} {v.chapter_number}:{v.verse_number}</span>
+                        <span className="rd-spaced-text">{v.scripture_text?.slice(0, 60)}…</span>
+                        {v.review?.overdue && <span className="rd-spaced-due">Due</span>}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
               <section className="rd-section">
+                {coverage.size > 0 && (
+                  <div className="rd-coverage-summary">
+                    <div className="rd-coverage-header">
+                      <span className="rd-coverage-title">Your Reading</span>
+                      <span className="rd-coverage-count">{coverage.size} chapters covered</span>
+                    </div>
+                    <div className="rd-coverage-bar">
+                      <div className="rd-coverage-fill" style={{ width: `${Math.min(100, (coverage.size / 789) * 100).toFixed(1)}%` }} title={`${((coverage.size / 789) * 100).toFixed(1)}% of all chapters`} />
+                    </div>
+                  </div>
+                )}
                 <h2 className="rd-section-hd">Books of Scripture</h2>
                 <div className="rd-books-grid">
                   {books.length === 0 ? (
@@ -504,7 +630,14 @@ export default function ScriptureReader({ onExit }) {
                       Scripture library not available. Please check the server connection.
                     </p>
                   ) : books.map(b => (
-                    <button key={b.book_id} className="rd-book-btn" onClick={() => openBook(b)}>{b.book_title}</button>
+                    <button key={b.book_id} className="rd-book-btn" style={{ position: 'relative' }} onClick={() => openBook(b)}>
+                      {b.book_title}
+                      {(() => {
+                        const bookCovered = [...coverage.values()].filter(c => c.book_id === b.book_id);
+                        if (bookCovered.length === 0) return null;
+                        return <span className="rd-book-progress" title={`${bookCovered.length} chapters read`}>{bookCovered.length}</span>;
+                      })()}
+                    </button>
                   ))}
                 </div>
               </section>
@@ -538,7 +671,7 @@ export default function ScriptureReader({ onExit }) {
             </div>
 
             {loadingChapter ? <div className="rd-loading">Loading…</div> : (
-              <div className="rd-prose" style={{ fontSize: `${fontSize}px`, lineHeight: lhObj.val, fontFamily: ffObj.css }}>
+              <div className="rd-prose" style={{ fontSize: `${fontSize}px`, lineHeight: lhObj.val, fontFamily: ffObj.css }} onClick={flowMode ? () => setFlowMode(false) : undefined}>
                 {chapterVerses.map(verse => {
                   const hlId  = highlights[verse.verse_id];
                   const hlObj = hlId ? HIGHLIGHT_COLORS.find(c => c.id === hlId) : null;
@@ -549,6 +682,7 @@ export default function ScriptureReader({ onExit }) {
                       key={verse.verse_id}
                       ref={el => { if (el) verseEls.current[verse.verse_id] = el; }}
                       className={`rd-verse${bkd ? ' rd-verse--bkd' : ''}${found ? ' rd-verse--found' : ''}`}
+                      data-verse-id={verse.verse_id}
                       style={hlObj ? { background: hlObj.css } : {}}
                       onMouseDown={() => startLp(verse)}
                       onMouseUp={cancelLp}
@@ -724,13 +858,13 @@ export default function ScriptureReader({ onExit }) {
               <div className="rd-lp-label">Highlight</div>
               <div className="rd-lp-colors">
                 {HIGHLIGHT_COLORS.map(c => (
-                  <button key={c.id} className={`rd-lp-color${highlights[lpMenu.verse.verse_id] === c.id ? ' rd-lp-color--on' : ''}`} style={{ background: c.css, outlineColor: c.border }} onClick={() => toggleHighlight(lpMenu.verse.verse_id, c.id)} />
+                  <button key={c.id} className={`rd-lp-color${highlights[lpMenu.verse.verse_id] === c.id ? ' rd-lp-color--on' : ''}`} style={{ background: c.css, outlineColor: c.border }} onClick={() => { toggleHighlight(lpMenu.verse.verse_id, c.id); emitReadingEvent(lpMenu.verse, 0, 'highlight'); }} />
                 ))}
                 {highlights[lpMenu.verse.verse_id] && <button className="rd-lp-clear" onClick={() => toggleHighlight(lpMenu.verse.verse_id, highlights[lpMenu.verse.verse_id])}>Remove</button>}
               </div>
             </div>
             <div className="rd-lp-actions">
-              <button className="rd-lp-act" onClick={() => toggleBookmark(lpMenu.verse.verse_id)}>{bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}</button>
+              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse.verse_id); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>{bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}</button>
               <button className="rd-lp-act" onClick={() => { try { navigator.clipboard.writeText(`${lpMenu.verse.scripture_text} — ${lpMenu.verse.book_title} ${lpMenu.verse.chapter_number}:${lpMenu.verse.verse_number}`); showToast('Copied'); } catch { /* ignore */ } setLpMenu(null); }}>📋 Copy verse</button>
               <button className="rd-lp-act" onClick={() => { openVerseCtx(lpMenu.verse); setLpMenu(null); }}>🔗 View context &amp; related</button>
             </div>
