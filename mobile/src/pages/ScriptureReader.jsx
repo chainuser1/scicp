@@ -140,6 +140,7 @@ export default function ScriptureReader({ onExit }) {
   const scrollToRef = useRef(null); // verse_id to scroll to
   const verseEls    = useRef({});   // verse_id → DOM element
   const [foundVerse, setFoundVerse] = useState(null); // verse_id to pulse-animate as "found"
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
   const PAGE_SIZE = 20;
 
@@ -180,6 +181,15 @@ export default function ScriptureReader({ onExit }) {
       setTimeout(() => loadChapter(currentBook, allChapters, chapterIdx, null, l), 0);
     }
   };
+
+  // ── Offline detection ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const on = () => setIsOffline(false);
+    const off = () => setIsOffline(true);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
   // ── Load books ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -420,6 +430,11 @@ export default function ScriptureReader({ onExit }) {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span className="rd-home-title">Scriptures</span>
+            {isOffline && (
+              <span className="rd-offline-badge" title="You are offline — reading works fully offline">
+                ✈ Offline
+              </span>
+            )}
             <button className="rd-settings-btn" onClick={() => setSettingsOpen(true)} aria-label="Reading settings">Aa</button>
           </div>
 

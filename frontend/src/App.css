@@ -8598,3 +8598,96 @@ button, [role="button"] {
   font-size: 0.72rem; font-weight: 700;
   letter-spacing: 0.08em; color: #e74c3c;
 }
+
+/* ── Web theme popover background presets ───────────────────────── */
+.popover-bg-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+.popover-bg-preset {
+  aspect-ratio: 16/9;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background: rgba(255,255,255,0.06);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s;
+  display: flex; align-items: flex-end;
+}
+.popover-bg-preset--active { border-color: #c9a84c; }
+.popover-bg-preset-label {
+  font-size: 0.52rem; font-weight: 600;
+  color: #fff; background: rgba(0,0,0,0.6);
+  width: 100%; text-align: center; padding: 2px 0;
+  pointer-events: none;
+}
+
+/* Keyboard shortcut panel */
+.kbd-help-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 300;
+  background: #1a1a24; border: 1px solid rgba(201,168,76,0.2);
+  border-radius: 10px; padding: 0.75rem 1rem;
+  min-width: 280px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: fade-in 0.12s ease;
+}
+.kbd-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.3rem 0; font-size: 0.78rem;
+}
+.kbd-key {
+  font-family: monospace; font-size: 0.72rem;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px; padding: 0.15rem 0.4rem;
+  color: #c9a84c; white-space: nowrap; flex-shrink: 0;
+  min-width: 90px; text-align: center;
+}
+.kbd-desc { color: rgba(255,255,255,0.6); }
+
+/* Reader verse action menu */
+.rd-verse-menu-backdrop {
+  position: fixed; inset: 0; z-index: 9000;
+}
+.rd-verse-menu {
+  position: fixed; z-index: 9001;
+  background: #1e1e2e;
+  border: 1px solid rgba(201,168,76,0.2);
+  border-radius: 10px;
+  padding: 0.3rem 0;
+  min-width: 180px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: fade-in 0.12s ease;
+}
+.rd-verse-menu-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  width: 100%; background: none; border: none;
+  color: rgba(255,255,255,0.8); font-size: 0.82rem;
+  padding: 0.5rem 1rem; cursor: pointer; text-align: left;
+  transition: background 0.1s;
+}
+.rd-verse-menu-item:hover { background: rgba(255,255,255,0.07); }
+.rd-toast {
+  position: fixed; bottom: 1.5rem; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30,30,46,0.95);
+  border: 1px solid rgba(201,168,76,0.3);
+  color: #c9a84c; font-size: 0.82rem;
+  padding: 0.45rem 1.1rem; border-radius: 99px;
+  z-index: 9999; animation: fade-in 0.15s ease;
+  pointer-events: none;
+}
+
+/* ── Offline badge ──────────────────────────────────────────────── */
+.rd-offline-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 0.65rem; font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 99px; padding: 0.15rem 0.5rem;
+  letter-spacing: 0.03em;
+}
