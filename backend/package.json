@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest",
+    "test": "jest --forceExit",
     "build": "echo 'Backend is a Node.js server - no build step required'"
   },
   "keywords": [],

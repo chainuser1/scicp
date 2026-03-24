@@ -595,7 +595,7 @@ const Presenter = () => {
     try { if (window.matchMedia('(prefers-color-scheme: light)').matches) return themes.light; } catch { /* ignore */ }
     return themes.dark;
   });
-  const [presenterUiMode, setPresenterUiMode] = useState(() => {
+  const [presenterUiMode, _setPresenterUiMode] = useState(() => {
     try { return localStorage.getItem('scicp.presenter_ui_mode') || 'dark'; } catch { return 'dark'; }
   });
   const PRESENTER_HISTORY_KEY = 'scicp.presenter_history_v1';

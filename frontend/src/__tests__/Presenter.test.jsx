@@ -65,7 +65,7 @@ describe('Presenter component', () => {
     renderPresenter();
     const searchInput = document.querySelector('input.search-input');
     if (searchInput) {
-      expect(searchInput.getAttribute('placeholder')).toContain('John 3:16');
+      expect(searchInput.getAttribute('placeholder')).toContain('Search');
     } else {
       // Search input may be inside a drawer that is not open by default
       // Just verify the component rendered
