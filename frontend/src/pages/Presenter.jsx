@@ -1248,6 +1248,14 @@ const Presenter = () => {
       const match = String(verseTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
       if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
     }
+    const rankInResults = results.findIndex(r => r.verse_id === verse.verse_id);
+    if (rankInResults >= 0) {
+      fetch(`${API_URL}/search-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+      }).catch(() => {});
+    }
     // Drawer stays open so presenter can keep browsing.
     // Go Live button / double-click / ● icon still sends live immediately.
   };
@@ -1259,6 +1267,14 @@ const Presenter = () => {
     setCurrentSegment(0);
     setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
     setDrawerOpen(false);
+    const rankInResults = results.findIndex(r => r.verse_id === verse.verse_id);
+    if (rankInResults >= 0) {
+      fetch(`${API_URL}/search-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+      }).catch(() => {});
+    }
   };
 
   const goLive = () => {

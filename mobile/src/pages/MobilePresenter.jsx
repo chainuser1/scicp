@@ -1242,6 +1242,15 @@ const MobilePresenter = () => {
       const match = String(verseTheme.background_url).match(/url\((['"]?)(.*?)\1\)/i);
       if (match?.[2]) emitWithSession('preload-background', { background_url: match[2] });
     }
+    const rankInResults = results.findIndex(r => r.verse_id === verse.verse_id);
+    if (rankInResults >= 0) {
+      const base = serverUrl ? String(serverUrl).replace(/\/+$/, '') : '';
+      fetch(`${base}/search-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+      }).catch(() => {});
+    }
   };
 
   const goLiveDirectly = verse => {
@@ -1251,6 +1260,15 @@ const MobilePresenter = () => {
     setCurrentSegment(0);
     setHistory(h => [{ ...v, _ts: Date.now() }, ...h.filter(e => e.verse_id !== v.verse_id).slice(0, 19)]);
     setDrawerOpen(false);
+    const rankInResults = results.findIndex(r => r.verse_id === verse.verse_id);
+    if (rankInResults >= 0) {
+      const base = serverUrl ? String(serverUrl).replace(/\/+$/, '') : '';
+      fetch(`${base}/search-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+      }).catch(() => {});
+    }
   };
 
   const goLive = () => {
