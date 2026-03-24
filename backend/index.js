@@ -1906,6 +1906,52 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     results = r.results || [];
     total   = r.total   || results.length;
   } else {
+    // ── Explicit mode detection ──────────────────────────────────────────────
+    // "quoted phrase" → phrase-only FTS, no expansion, no semantic blending
+    // ~semantic query  → embedding-only, skip BM25 entirely
+    const isQuoted   = /^"(.+)"$/.test(query.trim());
+    const isSemantic = query.trim().startsWith('~');
+
+    if (isQuoted) {
+      // Extract the inner phrase, run FTS phrase match only
+      const phrase = query.trim().slice(1, -1).trim();
+      const phraseResult = phraseSearch(phrase, 0, 200, dba, log);
+      const phraseMeta = {
+        intent: 'phrase', display: 'Phrase', subtype: 'exact',
+        entityMatch: null, confidence: 1, expansions: [], facets: [],
+        originalQuery: phrase,
+      };
+      searchCacheSet(cacheKey, phraseResult.results, phraseResult.total, phraseMeta);
+      return { results: phraseResult.results, total: phraseResult.total, meta: phraseMeta, fromCache: false, cacheKey };
+    }
+
+    if (isSemantic) {
+      // Strip the ~ prefix, embed, return pure cosine-ranked results
+      const semQuery = query.trim().slice(1).trim();
+      if (semQuery && embeddingsReady && embeddingPipe) {
+        try {
+          const out  = await embeddingPipe(semQuery, { pooling: 'mean', normalize: true });
+          const qvec = new Float32Array(out.data);
+          const semResult = await semanticSearch(semQuery, 0, 200, new Set(), qvec);
+          if (semResult && semResult.results.length > 0) {
+            const facets = nearestClusters(qvec, 4);
+            const semMeta = {
+              intent: 'semantic-explicit', display: 'Semantic', subtype: 'embedding',
+              entityMatch: null, confidence: 0, expansions: [], facets,
+              originalQuery: semQuery,
+            };
+            searchCacheSet(cacheKey, semResult.results, semResult.total, semMeta);
+            return { results: semResult.results, total: semResult.total, meta: semMeta, fromCache: false, cacheKey };
+          }
+        } catch (err) {
+          log.warn({ err }, '[SemanticExplicit] embedding failed, falling through to normal pipeline');
+        }
+      }
+      // If embedding not ready, fall through with stripped query
+      query = query.trim().slice(1).trim();
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     // Step 1: Exact scripture reference
     const ref = engine.parseScriptureReference(query);
     if (ref) {

@@ -2992,6 +2992,16 @@ button,
   transition: border-color var(--transition), box-shadow var(--transition);
   flex-shrink: 0;
 }
+/* Phrase mode: green tint — user is in exact-match mode */
+.search-input--phrase {
+  border-color: rgba(39,174,96,0.4) !important;
+  box-shadow: 0 0 0 2px rgba(39,174,96,0.12) !important;
+}
+/* Semantic mode: purple tint — user is in meaning-match mode */
+.search-input--semantic {
+  border-color: rgba(155,89,182,0.45) !important;
+  box-shadow: 0 0 0 2px rgba(155,89,182,0.14) !important;
+}
 
 .search-input::placeholder {
   color: var(--text-dim);
@@ -3188,6 +3198,8 @@ button,
 .search-intel-intent--conceptual{ background: rgba(155,89,182,0.22);color: #c39be8; border: 1px solid rgba(155,89,182,0.35); }
 .search-intel-intent--entity    { background: rgba(52,152,219,0.22);color: #74c6f5; border: 1px solid rgba(52,152,219,0.35); }
 .search-intel-intent--situational{ background: rgba(231,76,60,0.18); color: #f08d84; border: 1px solid rgba(231,76,60,0.3); }
+.search-intel-intent--phrase    { background: rgba(39,174,96,0.22); color: #6edb9e; border: 1px solid rgba(39,174,96,0.4); font-variant: small-caps; }
+.search-intel-intent--semantic-explicit { background: rgba(155,89,182,0.28); color: #d4a8f0; border: 1px solid rgba(155,89,182,0.5); font-variant: small-caps; }
 .search-intel-entity-match {
   opacity: 0.75;
   font-style: italic;
@@ -3232,6 +3244,8 @@ button,
 .presenter-container--light .search-intel-intent--reference { background: rgba(30,100,160,0.1);  color: #1a5f8a; border-color: rgba(30,100,160,0.2); }
 .presenter-container--light .search-intel-intent--entity    { background: rgba(30,100,160,0.1);  color: #1a5f8a; border-color: rgba(30,100,160,0.2); }
 .presenter-container--light .search-intel-intent--situational{ background: rgba(180,50,40,0.1); color: #8a2c20; border-color: rgba(180,50,40,0.2); }
+.presenter-container--light .search-intel-intent--phrase     { background: rgba(39,174,96,0.1);  color: #1d7a48; border-color: rgba(39,174,96,0.3); }
+.presenter-container--light .search-intel-intent--semantic-explicit { background: rgba(100,50,150,0.1); color: #5b2d8a; border-color: rgba(100,50,150,0.3); }
 .presenter-container--light .search-intel-expansions { color: rgba(0,0,0,0.4); }
 .presenter-container--light .search-intel-term { color: rgba(0,0,0,0.6); }
 .presenter-container--light .result-src-badge--fts,
