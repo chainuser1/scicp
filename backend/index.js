@@ -1082,6 +1082,32 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
     ...r, _source: 'fts', _bm25: r._bm25_rank || 0,
   }));
 
+  // BM25F: boost verses whose doctrine tags or speaker match the query
+  if (db_tags && ftsRanked.length > 0) {
+    const queryLower = query.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    const queryWords = new Set(queryLower.split(/\s+/).filter(w => w.length > 2));
+    if (queryWords.size > 0) {
+      for (const row of ftsRanked) {
+        let fieldBoost = 1.0;
+        try {
+          const tagRow = db_tags.prepare('SELECT labels_json, speaker FROM verse_doctrine_tags WHERE verse_id = ?').get(row.verse_id);
+          if (tagRow) {
+            const labels = JSON.parse(tagRow.labels_json || '[]');
+            const labelText = labels.join(' ').toLowerCase();
+            const speakerText = (tagRow.speaker || '').toLowerCase();
+            for (const w of queryWords) {
+              if (labelText.includes(w)) fieldBoost += 0.3;
+              if (speakerText.includes(w)) fieldBoost += 0.2;
+            }
+          }
+        } catch {}
+        row._bm25_rank = (row._bm25_rank || 0) * fieldBoost;
+        row._bm25 = row._bm25_rank;
+      }
+      ftsRanked.sort((a, b) => (b._bm25 || 0) - (a._bm25 || 0));
+    }
+  }
+
   // ── Source A2: Exact phrase FTS — separate RRF lane for phrase matches ──
   const phraseRanked = [];
   if (detectedPhrases.length > 0) {
@@ -1164,6 +1190,28 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
     }
   }
 
+  // ── Source E: Cross-reference graph — highest-weight theological signal ──
+  const xrefRanked = [];
+  if (db_vxref) {
+    const seen = new Set(ftsRanked.map(r => r.verse_id));
+    const topFts = ftsRanked.slice(0, 15);
+    for (const ftsVerse of topFts) {
+      try {
+        const xrRow = db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?').get(ftsVerse.verse_id);
+        if (!xrRow) continue;
+        const refs = JSON.parse(xrRow.cross_references || '[]');
+        for (const refId of refs.slice(0, 8)) {
+          if (seen.has(refId)) continue;
+          const row = stmtVerse.get(refId);
+          if (row) {
+            xrefRanked.push({ ...row, _source: 'cross-ref', _xref_from: ftsVerse.verse_id });
+            seen.add(refId);
+          }
+        }
+      } catch {}
+    }
+  }
+
   // ── Identify matched topic slugs for PPR boost ──
   // Phrase-aware: try full query and bigrams first, then fall back to single words
   const queryTopicSlugs = [];
@@ -1213,9 +1261,9 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
 
   // ── RRF: merge all sources with reciprocal rank fusion + PPR ──
   const rrfScores = reciprocalRankFusion(
-    [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked],
+    [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked, xrefRanked],
     queryTopicSlugs,
-    [1, 3, 1, 1, 1]  // phraseRanked gets 3x weight — exact phrase is a strong signal
+    [1, 3, 1, 1, 1, 5]  // xrefRanked gets 5x weight — explicit citation is strongest signal
   );
 
   // ── Chapter aggregation: boost chapters with many verse hits ──
@@ -1883,6 +1931,46 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       });
     enhanced.sort((a, b) => b.score - a.score);
 
+    // ── Source: Cluster neighbors (cross-book discovery) ──
+    let clusterLabel = null;
+    if (db_graph) {
+      try {
+        const clusterRow = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(verseId);
+        if (clusterRow) {
+          clusterLabel = clusterRow.cluster_id;
+          const sourceBook = dba.prepare('SELECT book_id FROM scriptures WHERE verse_id = ? LIMIT 1').get(verseId);
+          const verseBook = sourceBook ? sourceBook.book_id : null;
+          const existingIds = new Set(enhanced.map(r => r.verse_id));
+          existingIds.add(verseId);
+          const clusterMembers = db_graph.prepare(`
+            SELECT vc.verse_id, vc.centroid_distance
+            FROM verse_clusters vc
+            WHERE vc.cluster_id = ? AND vc.verse_id != ?
+            ORDER BY vc.centroid_distance ASC
+            LIMIT 60
+          `).all(clusterRow.cluster_id, verseId);
+          const clusterNeighbors = [];
+          for (const m of clusterMembers) {
+            if (existingIds.has(m.verse_id)) continue;
+            const row = dba.prepare(`
+              SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
+              FROM scriptures WHERE verse_id = ?
+            `).get(m.verse_id);
+            if (!row) continue;
+            const sameBook = row.book_id === verseBook;
+            const clusterScore = (1 - m.centroid_distance) * (sameBook ? 0.4 : 1.0);
+            clusterNeighbors.push({ verse_id: m.verse_id, embSim: 0, score: clusterScore * 0.7, overlap: 0 });
+            existingIds.add(m.verse_id);
+            if (clusterNeighbors.length >= 12) break;
+          }
+          if (clusterNeighbors.length > 0) {
+            enhanced.push(...clusterNeighbors);
+            enhanced.sort((a, b) => b.score - a.score);
+          }
+        }
+      } catch {}
+    }
+
     // kNN results are already curated (top-20 most similar) — use light diversity only
     // Skip cluster-based filtering since kNN neighbors are inherently relevant
     const diverseResults = enhanced.slice(0, offset + pageSize);
@@ -1893,13 +1981,11 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       const cTopics = verseTopicCache.get(verse_id);
       const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
       const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
-      return { ...row, similarity_score: +embSim.toFixed(4), matched_concept: matchedConcept };
+      return { ...row, similarity_score: +(embSim ?? 0).toFixed(4), matched_concept: matchedConcept };
     });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
-    return { results, total: enhanced.length, matchedConcept, page, pageSize };
+    return { results, total: enhanced.length, matchedConcept, page, pageSize, cluster_id: clusterLabel };
   }
-
-  // Fallback: Bayesian scoring with full embedding comparison
   if (embeddingsReady) {
     const liveVec = embeddingCache.get(verseId);
     if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
