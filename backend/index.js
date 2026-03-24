@@ -701,6 +701,126 @@ function updateLearnedWeights() {
 // Run weight update once at startup if we have enough data
 setImmediate(() => { try { updateLearnedWeights(); } catch {} });
 
+// ── Item2Vec: Session-based verse embeddings ──────────────────────────────────
+const ITEM2VEC_DIM = 64;
+let item2vecVectors = new Map(); // verse_id → Float32Array(64)
+let item2vecReady = false;
+
+function item2vecDot(a, b) {
+  let s = 0;
+  for (let i = 0; i < ITEM2VEC_DIM; i++) s += a[i] * b[i];
+  return s;
+}
+
+function item2vecNorm(v) {
+  let s = 0;
+  for (let i = 0; i < ITEM2VEC_DIM; i++) s += v[i] * v[i];
+  return Math.sqrt(s) || 1;
+}
+
+function item2vecSimilarity(a, b) {
+  return item2vecDot(a, b) / (item2vecNorm(a) * item2vecNorm(b));
+}
+
+function trainItem2Vec() {
+  try {
+    // Collect session sequences from reading_events
+    const sessionRows = db_user.prepare(
+      `SELECT session_id, GROUP_CONCAT(verse_id) AS seq
+       FROM reading_events
+       WHERE event_type = 'read' AND session_id IS NOT NULL AND verse_id IS NOT NULL
+       GROUP BY session_id
+       HAVING COUNT(*) >= 3
+       ORDER BY MAX(ts) DESC LIMIT 500`
+    ).all();
+
+    // Build co-occurrence pairs (Skip-gram window=2)
+    const pairs = []; // [[center, context], ...]
+    for (const row of sessionRows) {
+      const seq = row.seq.split(',').map(Number).filter(Boolean);
+      for (let i = 0; i < seq.length; i++) {
+        for (let j = Math.max(0, i - 2); j <= Math.min(seq.length - 1, i + 2); j++) {
+          if (i !== j) pairs.push([seq[i], seq[j]]);
+        }
+      }
+    }
+
+    // If we have no real session data yet, warm-start from verse_knn co-occurrence
+    if (pairs.length < 50 && db_graph) {
+      fastify.log.info('[Item2Vec] No session data yet — warm-starting from verse_knn');
+      const knnSample = db_graph.prepare(
+        'SELECT verse_id, neighbor_id FROM verse_knn WHERE rank <= 3 ORDER BY RANDOM() LIMIT 5000'
+      ).all();
+      for (const r of knnSample) pairs.push([r.verse_id, r.neighbor_id]);
+    }
+
+    if (pairs.length === 0) return;
+
+    // Get unique verse ids
+    const verseIds = [...new Set(pairs.flat())];
+
+    // Initialize random vectors (Xavier initialization)
+    const scale = 1 / Math.sqrt(ITEM2VEC_DIM);
+    const newVectors = new Map();
+    for (const vid of verseIds) {
+      const v = new Float32Array(ITEM2VEC_DIM);
+      for (let i = 0; i < ITEM2VEC_DIM; i++) v[i] = (Math.random() * 2 - 1) * scale;
+      newVectors.set(vid, v);
+    }
+
+    // Skip-gram training (1 epoch, lr=0.025, negative sampling k=5)
+    const lr = 0.025;
+    const k = 5; // negative samples
+    const verseArray = verseIds;
+
+    // Shuffle pairs
+    for (let i = pairs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+    }
+
+    for (const [center, context] of pairs) {
+      const vc = newVectors.get(center);
+      const vctx = newVectors.get(context);
+      if (!vc || !vctx) continue;
+
+      // Positive sample gradient
+      const dot = item2vecDot(vc, vctx);
+      const sigmoid = 1 / (1 + Math.exp(-Math.max(-10, Math.min(10, dot))));
+      const err = (1 - sigmoid) * lr;
+      for (let i = 0; i < ITEM2VEC_DIM; i++) {
+        vc[i] += err * vctx[i];
+        vctx[i] += err * vc[i];
+      }
+
+      // Negative samples
+      for (let n = 0; n < k; n++) {
+        const negId = verseArray[Math.floor(Math.random() * verseArray.length)];
+        if (negId === center || negId === context) continue;
+        const vneg = newVectors.get(negId);
+        if (!vneg) continue;
+        const ndot = item2vecDot(vc, vneg);
+        const nsig = 1 / (1 + Math.exp(-Math.max(-10, Math.min(10, ndot))));
+        const nerr = -nsig * lr;
+        for (let i = 0; i < ITEM2VEC_DIM; i++) {
+          vc[i] += nerr * vneg[i];
+          vneg[i] += nerr * vc[i];
+        }
+      }
+    }
+
+    item2vecVectors = newVectors;
+    item2vecReady = true;
+    fastify.log.info(`[Item2Vec] Trained on ${pairs.length} pairs, ${verseIds.length} verses`);
+  } catch (err) {
+    fastify.log.warn({ err }, '[Item2Vec] Training failed');
+  }
+}
+
+// Train at startup (non-blocking via setImmediate) and re-train every 30 min
+setImmediate(() => trainItem2Vec());
+setInterval(() => trainItem2Vec(), 30 * 60 * 1000);
+
 // Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
 // Uses the shared engine's initializeFts via adapters.
 const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
@@ -1769,6 +1889,25 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     }
   } catch {}
 
+  // Step 9b: Item2Vec session similarity boost
+  if (item2vecReady && item2vecVectors.size > 0 && results.length > 0) {
+    // Get query vector as average of top-5 result vectors
+    const topVecs = results.slice(0, 5)
+      .map(r => item2vecVectors.get(r.verse_id))
+      .filter(Boolean);
+    if (topVecs.length > 0) {
+      const queryVec = new Float32Array(ITEM2VEC_DIM);
+      for (const v of topVecs) for (let i = 0; i < ITEM2VEC_DIM; i++) queryVec[i] += v[i] / topVecs.length;
+
+      results = results.map(r => {
+        const rv = item2vecVectors.get(r.verse_id);
+        if (!rv) return r;
+        const sim = item2vecSimilarity(queryVec, rv);
+        return { ...r, similarity_score: (r.similarity_score || 0) + sim * 0.1 };
+      });
+    }
+  }
+
   searchCacheSet(cacheKey, results, total);
   return { results, total, fromCache: false, cacheKey };
 }
@@ -2290,6 +2429,31 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
       } catch {}
     }
 
+    // ── Source: Item2Vec behavioral similarity ──
+    if (item2vecReady && item2vecVectors.size > 0 && item2vecVectors.size <= 10000) {
+      const iv = item2vecVectors.get(verseId);
+      if (iv) {
+        const existingIds = new Set(enhanced.map(r => r.verse_id));
+        existingIds.add(verseId);
+        const i2vScored = [];
+        for (const [vid, vec] of item2vecVectors) {
+          if (existingIds.has(vid)) continue;
+          const sim = item2vecSimilarity(iv, vec);
+          if (sim > 0.3) i2vScored.push({ vid, sim });
+        }
+        i2vScored.sort((a, b) => b.sim - a.sim);
+        for (const { vid, sim } of i2vScored.slice(0, 8)) {
+          try {
+            const row = dba.prepare(
+              'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
+            ).get(vid);
+            if (row) enhanced.push({ verse_id: vid, embSim: sim * 0.5, score: sim * 0.5, overlap: 0, source: 'item2vec', ...row });
+          } catch {}
+        }
+        if (i2vScored.length > 0) enhanced.sort((a, b) => b.score - a.score);
+      }
+    }
+
     // kNN results are already curated (top-20 most similar) — use light diversity only
     // Skip cluster-based filtering since kNN neighbors are inherently relevant
     const diverseResults = enhanced.slice(0, offset + pageSize);
@@ -2427,6 +2591,226 @@ fastify.get('/verse/of-the-day', async (request, reply) => {
     fastify.log.error('verse-of-the-day failed', err);
     reply.code(500);
     return { error: 'internal error' };
+  }
+});
+
+// ── GET /for-you ────────────────────────────────────────────────────────────
+fastify.get('/for-you', async (request, reply) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '12', 10)));
+    const language = (request.query.language || 'en').toLowerCase();
+
+    const stmtVerse = dba.prepare(
+      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
+    );
+
+    // ── Step 1: Get user's reading history verse_ids ──
+    const readRows = db_user.prepare(
+      'SELECT DISTINCT verse_id FROM reading_events WHERE event_type = "read" ORDER BY ts DESC LIMIT 200'
+    ).all();
+    const readSet = new Set(readRows.map(r => r.verse_id));
+
+    const scored = new Map(); // verse_id → score
+
+    // ── Step 2: Cluster affinity — find user's favourite clusters ──
+    if (db_graph && readSet.size > 0) {
+      const clusterFreq = new Map();
+      for (const vid of [...readSet].slice(0, 100)) {
+        try {
+          const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(vid);
+          if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1);
+        } catch {}
+      }
+      const topClusters = [...clusterFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+      for (const [clusterId, freq] of topClusters) {
+        const weight = freq / Math.max(...topClusters.map(c => c[1]));
+        try {
+          const members = db_graph.prepare(
+            'SELECT verse_id, centroid_distance FROM verse_clusters WHERE cluster_id = ? ORDER BY centroid_distance ASC LIMIT 30'
+          ).all(clusterId);
+          for (const m of members) {
+            if (readSet.has(m.verse_id)) continue;
+            const s = weight * (1 - m.centroid_distance);
+            scored.set(m.verse_id, (scored.get(m.verse_id) || 0) + s * 0.6);
+          }
+        } catch {}
+      }
+    }
+
+    // ── Step 3: Topic PPR from user's reading history topics ──
+    if (db_tg && readSet.size > 0) {
+      const recentVerses = [...readSet].slice(0, 30);
+      const topicSlugs = new Set();
+      for (const vid of recentVerses) {
+        try {
+          const vt = db_tg.prepare('SELECT topic_slugs FROM verse_topics WHERE verse_id = ?').get(vid);
+          if (vt && vt.topic_slugs) {
+            JSON.parse(vt.topic_slugs || '[]').slice(0, 3).forEach(s => topicSlugs.add(s));
+          }
+        } catch {}
+      }
+      for (const slug of [...topicSlugs].slice(0, 8)) {
+        try {
+          const pprRows = db_tg.prepare(
+            'SELECT verse_id, ppr FROM topic_ppr WHERE topic_slug = ? ORDER BY ppr DESC LIMIT 50'
+          ).all(slug);
+          for (const r of pprRows) {
+            if (readSet.has(r.verse_id)) continue;
+            scored.set(r.verse_id, (scored.get(r.verse_id) || 0) + r.ppr * 0.4);
+          }
+        } catch {}
+      }
+    }
+
+    // ── Step 4: Fallback — global PageRank for cold start ──
+    if (scored.size < limit) {
+      const pr = [...pageRankCache.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 100)
+        .filter(([vid]) => !readSet.has(vid));
+      for (const [vid, pr_score] of pr.slice(0, limit * 3)) {
+        if (!scored.has(vid)) scored.set(vid, pr_score * 0.2);
+      }
+    }
+
+    // ── Step 5: Sort, fetch text, diversify by book ──
+    const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
+    const results = [];
+    const seenBooks = new Set();
+    for (const [vid, score] of ranked) {
+      if (results.length >= limit) break;
+      try {
+        const row = stmtVerse.get(vid);
+        if (!row) continue;
+        const bookCount = [...seenBooks].filter(b => b === row.book_id).length;
+        if (bookCount >= 2) continue;
+        seenBooks.add(row.book_id);
+        results.push({ ...row, _for_you_score: +score.toFixed(4), _reason: 'for-you' });
+      } catch {}
+    }
+
+    const withReasons = results.map(r => {
+      const { _for_you_score, ...clean } = r;
+      return { ...clean, discovery_score: _for_you_score };
+    });
+
+    return { verses: withReasons, total: withReasons.length, personalised: readSet.size > 0 };
+  } catch (err) {
+    fastify.log.warn({ err }, '/for-you failed');
+    return { verses: [], total: 0, personalised: false };
+  }
+});
+
+// ── GET /trending ────────────────────────────────────────────────────────────
+fastify.get('/trending', async (request, reply) => {
+  try {
+    const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '10', 10)));
+    const now = Date.now();
+    const h24 = now - 86400000;
+    const d7  = now - 7 * 86400000;
+
+    const readRows = db_user.prepare(`
+      SELECT verse_id,
+             SUM(CASE WHEN ts >= ? THEN 3 ELSE 0 END) +
+             SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS hot_score,
+             MAX(ts) AS last_seen
+      FROM reading_events
+      WHERE ts >= ? AND event_type IN ('read', 'highlight', 'bookmark')
+      GROUP BY verse_id
+      HAVING hot_score > 0
+    `).all(h24, d7, d7);
+
+    const clickRows = db_user.prepare(`
+      SELECT verse_id,
+             SUM(CASE WHEN ts >= ? THEN 2 ELSE 1 END) AS click_score
+      FROM search_feedback
+      WHERE ts >= ?
+      GROUP BY verse_id
+    `).all(h24, d7);
+
+    const scores = new Map();
+    for (const r of readRows) scores.set(r.verse_id, (scores.get(r.verse_id) || 0) + r.hot_score);
+    for (const r of clickRows) scores.set(r.verse_id, (scores.get(r.verse_id) || 0) + r.click_score);
+
+    if (scores.size < limit) {
+      const prTop = [...pageRankCache.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit * 2);
+      for (const [vid, pr] of prTop) {
+        if (!scores.has(vid)) scores.set(vid, pr * 5);
+      }
+    }
+
+    const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit * 3);
+    const results = [];
+    const seenBooks = new Set();
+    for (const [vid, score] of ranked) {
+      if (results.length >= limit) break;
+      try {
+        const row = dba.prepare(
+          'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?'
+        ).get(vid);
+        if (!row) continue;
+        if (seenBooks.has(row.book_id) && seenBooks.size < 5) { seenBooks.add(row.book_id); }
+        results.push({ ...row, trending_score: +score.toFixed(2) });
+        seenBooks.add(row.book_id);
+      } catch {}
+    }
+
+    return { verses: results, total: results.length };
+  } catch (err) {
+    fastify.log.warn({ err }, '/trending failed');
+    return { verses: [], total: 0 };
+  }
+});
+
+// ── GET /personalized-votd ────────────────────────────────────────────────────
+fastify.get('/personalized-votd', async (request, reply) => {
+  try {
+    const language = (request.query.language || 'en').toLowerCase();
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const recentCount = db_user.prepare(
+      'SELECT COUNT(DISTINCT verse_id) AS n FROM reading_events WHERE ts > ?'
+    ).get(Date.now() - 30 * 86400000).n;
+
+    if (recentCount >= 5 && db_graph) {
+      const clusterFreq = new Map();
+      const readRows = db_user.prepare(
+        'SELECT verse_id FROM reading_events WHERE event_type = "read" ORDER BY ts DESC LIMIT 50'
+      ).all();
+      const readSet = new Set(readRows.map(r => r.verse_id));
+
+      for (const { verse_id } of readRows.slice(0, 30)) {
+        try {
+          const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(verse_id);
+          if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1);
+        } catch {}
+      }
+
+      if (clusterFreq.size > 0) {
+        const topCluster = [...clusterFreq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const members = db_graph.prepare(
+          'SELECT verse_id FROM verse_clusters WHERE cluster_id = ? AND verse_id NOT IN (SELECT verse_id FROM reading_events WHERE ts > ?) ORDER BY centroid_distance ASC LIMIT 50'
+        ).all(topCluster, Date.now() - 86400000);
+
+        if (members.length > 0) {
+          // Deterministic seed from today's date so same user gets same VOTD all day
+          const dateSeed = parseInt(today.replace(/-/g, ''), 10);
+          const pick = members[dateSeed % members.length];
+          const row = dba.prepare(
+            'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?'
+          ).get(pick.verse_id);
+          if (row) return { verse: row, personalised: true, date: today };
+        }
+      }
+    }
+
+    // Fallback: use existing getVerseOfTheDay
+    const fallback = getVerseOfTheDay(dba);
+    return { verse: fallback, personalised: false, date: today };
+  } catch (err) {
+    fastify.log.warn({ err }, '/personalized-votd failed');
+    try { return { verse: getVerseOfTheDay(dba), personalised: false, date: new Date().toISOString().slice(0, 10) }; } catch { return { verse: null }; }
   }
 });
 
