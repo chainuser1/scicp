@@ -406,8 +406,8 @@ export default function App() {
     })();
   }, [serverUrl, stopCamera]);
 
-  // ── Already initialized — show presenter + overlays ──
-  if (ready && mode) {
+  // ── Already initialized — show presenter + overlays (not reader mode) ──
+  if (ready && mode && mode !== 'reader') {
     return (
       <SocketCtx.Provider value={ctxValue}>
         <MobilePresenter />
