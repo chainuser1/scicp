@@ -1480,6 +1480,74 @@ function chapterAggregate(verseScores) {
   return chapterScores;
 }
 
+// ── Query-Personalized PageRank (QPPR) ──────────────────────────────────────
+// Seeds a random walk from the top-K hits of the current query and propagates
+// authority through the kNN graph.  Only the local 2-hop subgraph (~1 000 nodes)
+// is touched at query time — the walk is O(seeds × fan-out × iters).
+//
+// Math:  r_{t+1} = α · A · r_t + (1-α) · seeds
+//   α = restart probability (0.85)
+//   A = row-normalised weighted adjacency (edge weight = cosine similarity)
+//   seeds = uniform over seed verse IDs
+//
+// Returns a Map<verse_id, normalised_score> for every node in the local subgraph.
+// Verses that are both semantically near the query AND structurally central to the
+// top results receive the highest scores.
+function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
+  if (!db_graph || !seedIds || seedIds.length === 0) return new Map();
+  try {
+    const knnQ = db_graph.prepare(
+      'SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT 15'
+    );
+
+    // BFS: collect local subgraph up to `hops` hops from seeds
+    const adjOut  = new Map(); // verse_id → [{n: neighbor_id, w: similarity}]
+    const visited = new Set(seedIds);
+    let frontier  = [...seedIds];
+
+    for (let hop = 0; hop < hops; hop++) {
+      const next = [];
+      for (const vid of frontier) {
+        if (adjOut.has(vid)) continue;
+        const rows = knnQ.all(vid);
+        adjOut.set(vid, rows.map(r => ({ n: r.neighbor_id, w: r.similarity })));
+        for (const r of rows) {
+          if (!visited.has(r.neighbor_id)) { visited.add(r.neighbor_id); next.push(r.neighbor_id); }
+        }
+      }
+      frontier = next;
+    }
+
+    // Initialise scores: seed nodes start with uniform weight
+    const seedSet    = new Set(seedIds);
+    const seedWeight = (1 - alpha) / seedIds.length;
+    const scores     = new Map();
+    for (const vid of visited) scores.set(vid, seedSet.has(vid) ? seedWeight / (1 - alpha) : 0);
+
+    // Power iteration
+    for (let iter = 0; iter < iters; iter++) {
+      const next = new Map();
+      for (const vid of visited) next.set(vid, seedSet.has(vid) ? seedWeight : 0);
+      for (const [vid, neighbors] of adjOut) {
+        const r = scores.get(vid) || 0;
+        if (r === 0) continue;
+        const wSum = neighbors.reduce((s, nb) => s + nb.w, 0) || 1;
+        for (const nb of neighbors) {
+          next.set(nb.n, (next.get(nb.n) || 0) + alpha * r * (nb.w / wSum));
+        }
+      }
+      for (const [k, v] of next) scores.set(k, v);
+    }
+
+    // Normalise: max → 1.0
+    let maxScore = 0;
+    for (const v of scores.values()) if (v > maxScore) maxScore = v;
+    if (maxScore > 0) for (const [k, v] of scores) scores.set(k, v / maxScore);
+
+    return scores;
+  } catch { return new Map(); }
+}
+
 // ── Semantic search: embed query text → cosine similarity against all verses ──
 async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new Set(), qvec = null) {
   if (!embeddingsReady || !embeddingPipe) return null;
@@ -2018,7 +2086,12 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       }
     }
 
-    // Step 8: Context-aware boosting
+    // Step 6.5: Query-Personalized PageRank
+    // Seed the walk from the top results (after MMR + semantic fallback).
+    // The walk propagates authority through embedding-kNN edges, surfacing verses
+    // that are structurally central to the query's neighbourhood.
+    const qpprSeeds = results.slice(0, 10).map(r => r.verse_id);
+    const qpprScores = qpprSeeds.length >= 3 ? queryPPR(qpprSeeds) : null;
     if (contextVerseId) {
       results = contextBoost(results, contextVerseId);
       results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
@@ -2032,7 +2105,10 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       results = results.map(r => {
         const bm25Component  = (r._bm25_rank || r._bm25 || 0) * activeWeights[0];
         const semanticComp   = (r.similarity_score || r.simToQuery || 0) * activeWeights[1];
-        const pagerankComp   = (pageRankCache.get(r.verse_id) || 0) * activeWeights[2] * 10;
+        // Use QPPR (query-seeded walk) when available; fall back to static PageRank
+        const qppr           = qpprScores?.get(r.verse_id) || 0;
+        const staticPR       = pageRankCache.get(r.verse_id) || 0;
+        const pagerankComp   = (qppr > 0 ? qppr * 20 : staticPR * 10) * activeWeights[2];
         const learnedScore   = bm25Component + semanticComp + pagerankComp + (r.similarity_score || 0);
         return { ...r, _learned_score: learnedScore };
       });
@@ -2051,6 +2127,7 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
       confidence: +confidence.toFixed(3),
       expansions: allExpansions,
       facets,
+      qpprActive: !!(qpprScores && qpprScores.size > 0),
     };
 
     results = results.map(r => {
