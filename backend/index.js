@@ -1335,11 +1335,11 @@ function classifyQueryIntent(query, confidence, qvec) {
 // These blend with learnedWeights — intent biases the signal emphasis.
 const INTENT_WEIGHT_PRESETS = {
   reference:   [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],  // exact text match dominates
-  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],  // authority + cross-ref (cited entity verses rank high)
-  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],  // semantic + cross-ref (conceptual neighbourhood)
+  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],  // authority + cross-ref
+  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],  // semantic + cross-ref
   conceptual:  [0.3, 1.4, 0.3, 0.6, 0.2, 0.2 ],  // embedding dominates
   mixed:       [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],  // balanced
-  keyword:     [1.2, 0.5, 0.3, 0.4, 0.2, 0.15],  // BM25 leads
+  keyword:     [1.0, 0.8, 0.3, 0.4, 0.2, 0.15],  // BM25 leads but semantic re-ranks within set
 };
 
 function blendWeights(preset, learned) {
@@ -2073,18 +2073,27 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
 
     // Step 7: Sigmoid confidence gate → concept expansion
+    // Also fires for short queries (≤2 words) regardless of confidence —
+    // common theological words ("faith", "grace") have high BM25 confidence
+    // but still benefit from thematic expansion (trust, belief, testimony…).
     const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
     const confidence = sigmoidConfidence(topBm25, fusionResult.total);
+    const queryWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
+    const isShortQuery = queryWordCount <= 2;
     let conceptTermsUsed = [];
-    if (confidence < 0.6 && qvec && conceptCache.length) {
-      const topN = confidence < 0.3 ? 5 : 3;
+    const shouldExpand = (confidence < 0.6) || (isShortQuery && confidence < 0.85);
+    if (shouldExpand && qvec && conceptCache.length) {
+      // Short high-confidence queries get gentle expansion (topN=2, half weight)
+      // Low-confidence queries get full expansion (topN=3-5, full weight)
+      const topN   = confidence < 0.3 ? 5 : (confidence < 0.6 ? 3 : 2);
+      const wScale = confidence >= 0.6 ? 0.5 : 1.0; // dampen for high-conf short queries
       const concepts = await expandWithConcepts(query.trim(), topN, qvec);
       conceptTermsUsed = concepts.map(c => c.phrase);
       for (const c of concepts) {
         const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
         for (const r of cFusion.results) {
           if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
-            r._rrfScore = (r._rrfScore || 0) * c.score;
+            r._rrfScore = (r._rrfScore || 0) * c.score * wScale;
             fusionResult.results.push(r);
           }
         }
@@ -2101,8 +2110,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? 0).toFixed(4) }));
     }
 
-    // Step 7: Semantic fallback
-    if (total < 5 && qvec) {
+    // Step 8: Semantic fallback — also fires for short queries with few semantic results
+    const semFallbackThreshold = isShortQuery ? 15 : 5;
+    if (total < semFallbackThreshold && qvec) {
       const excludeIds = new Set(results.map(r => r.verse_id));
       const sem = await semanticSearch(query.trim(), 0, 30, excludeIds, qvec);
       if (sem && sem.results.length > 0) {
