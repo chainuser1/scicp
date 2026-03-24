@@ -48,6 +48,17 @@ const FONT_FAMILIES = [
   { label: 'OpenDyslexic (Accessible)',     value: "OpenDyslexic, Arial, sans-serif" },
 ];
 
+// Background preset gallery — curated worship-appropriate images
+const BG_PRESETS = [
+  { label: 'Auto',    url: null },
+  { label: 'NT Dark', url: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default' },
+  { label: 'NT Light',url: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default' },
+  { label: 'OT Dark', url: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default' },
+  { label: 'OT Light',url: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default' },
+  { label: 'BoM Dark',url: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default' },
+  { label: 'D&C Dark',url: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default' },
+];
+
 const VOLUME_THEME_BACKGROUNDS = {
   ot: {
     light: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default',
@@ -431,6 +442,7 @@ const MobilePresenter = () => {
   const [votdError, setVotdError]           = useState(false);
   const [votdCopied, setVotdCopied]         = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);
+  const [displayOpen, setDisplayOpen]         = useState(false);
   const [readinessOpen, setReadinessOpen]     = useState(false);
   const [readinessBusy, setReadinessBusy]     = useState(false);
   const [readiness, setReadiness]             = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
@@ -1759,16 +1771,57 @@ const MobilePresenter = () => {
     showToast('Announcement sent to screen');
   };
 
-  const fetchSavedSetlists = () => {
+  const fetchSavedSetlists = async () => {
     setSetlistsLoading(true);
-    // Setlists are not persisted on mobile for now — use local state only
-    setSavedSetlists([]);
+    if (isOnline && serverUrl) {
+      try {
+        const base = String(serverUrl).replace(/\/+$/, '');
+        const r = await fetch(`${base}/setlists`);
+        if (r.ok) {
+          const data = await r.json();
+          setSavedSetlists(data.setlists || []);
+          setSetlistsLoading(false);
+          return;
+        }
+      } catch { /* fall through to local */ }
+    }
+    // Offline: read from localStorage
+    try {
+      const raw = localStorage.getItem('scicp.saved_setlists_v1');
+      setSavedSetlists(raw ? JSON.parse(raw) : []);
+    } catch {
+      setSavedSetlists([]);
+    }
     setSetlistsLoading(false);
   };
-  const saveSetlist = () => {
+  const saveSetlist = async () => {
     const name = setlistSaveName.trim();
     if (!name) return;
-    setSavedSetlists(prev => [...prev, { id: `local_${Date.now()}`, name, items: [...setlist] }]);
+    if (isOnline && serverUrl) {
+      try {
+        const base = String(serverUrl).replace(/\/+$/, '');
+        const r = await fetch(`${base}/setlists`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, items: setlist }),
+        });
+        if (r.ok) {
+          const saved = await r.json();
+          setSavedSetlists(prev => [...prev, saved]);
+          setSetlistSaveOpen(false);
+          setSetlistSaveName('');
+          showToast(`Setlist "${name}" saved`);
+          return;
+        }
+      } catch { /* fall through to local */ }
+    }
+    // Offline: save to localStorage
+    const entry = { id: `local_${Date.now()}`, name, items: [...setlist] };
+    setSavedSetlists(prev => {
+      const next = [...prev, entry];
+      try { localStorage.setItem('scicp.saved_setlists_v1', JSON.stringify(next)); } catch {}
+      return next;
+    });
     setSetlistSaveOpen(false);
     setSetlistSaveName('');
     showToast(`Setlist "${name}" saved locally`);
@@ -1779,8 +1832,20 @@ const MobilePresenter = () => {
     setSetlistLoadOpen(false);
     showToast(`Loaded "${saved.name}"`);
   };
-  const deleteSavedSetlist = (id) => {
-    setSavedSetlists(prev => prev.filter(s => s.id !== id));
+  const deleteSavedSetlist = async (id) => {
+    if (isOnline && serverUrl && !id.startsWith('local_')) {
+      try {
+        const base = String(serverUrl).replace(/\/+$/, '');
+        await fetch(`${base}/setlists/${id}`, { method: 'DELETE' });
+      } catch { /* ignore */ }
+    }
+    setSavedSetlists(prev => {
+      const next = prev.filter(s => s.id !== id);
+      if (!isOnline || id.startsWith('local_')) {
+        try { localStorage.setItem('scicp.saved_setlists_v1', JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
   };
 
   const toggleTranslation = async (verse_id) => {
@@ -2230,6 +2295,158 @@ const MobilePresenter = () => {
         </div>
       </header>
 
+      {/* ── Display Panel bottom sheet ── */}
+      {displayOpen && (
+        <div className="prs-more-backdrop" onClick={() => setDisplayOpen(false)}>
+          <div className="prs-display-sheet" onClick={e => e.stopPropagation()}>
+            <div className="prs-more-handle" />
+            <div className="prs-more-title">Display Settings</div>
+
+            {/* Active volume indicator */}
+            {liveVerse && (() => {
+              const vk = resolveVolumeKey(liveVerse);
+              const labels = { ot: 'Old Testament', nt: 'New Testament', bom: 'Book of Mormon', dc: 'D&C', pgp: 'Pearl of Great Price' };
+              return vk ? (
+                <div className="disp-volume-badge">
+                  📖 {labels[vk]} theme active
+                </div>
+              ) : null;
+            })()}
+
+            {/* TV Screen Theme */}
+            <div className="disp-section">
+              <div className="disp-section-label">TV Screen</div>
+              <div className="disp-row">
+                {[{ label: '☀ Light', t: themes.light }, { label: '☽ Dark', t: themes.dark }].map(({ label, t }) => (
+                  <button
+                    key={label}
+                    className={`disp-btn${currentTheme?.tone === t.tone && !currentTheme?.background_url?.includes('custom') ? ' disp-btn--active' : ''}`}
+                    onClick={() => handleThemeChange({ ...t, transition_mode: currentTheme.transition_mode || 'crossfade', force_animations: !!currentTheme.force_animations })}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Background Presets */}
+            <div className="disp-section">
+              <div className="disp-section-label">Background</div>
+              <div className="disp-bg-presets">
+                {BG_PRESETS.map(({ label, url }) => {
+                  const activeUrl = currentTheme?.background_url;
+                  const isAuto = !url;
+                  const isActive = isAuto
+                    ? !activeUrl || activeUrl === 'auto'
+                    : activeUrl?.includes(url.split('/').pop());
+                  return (
+                    <button
+                      key={label}
+                      className={`disp-preset${isActive ? ' disp-preset--active' : ''}`}
+                      style={url ? { backgroundImage: `url('${url}')`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
+                      onClick={() => {
+                        if (isAuto) {
+                          const vk = liveVerse ? resolveVolumeKey(liveVerse) : null;
+                          const tone = currentTheme?.tone === 'dark' ? 'dark' : 'light';
+                          const autoUrl = vk ? VOLUME_THEME_BACKGROUNDS[vk]?.[tone] : null;
+                          const base = currentTheme?.tone === 'dark' ? themes.dark : themes.light;
+                          handleThemeChange({ ...base, transition_mode: currentTheme.transition_mode, force_animations: !!currentTheme.force_animations, ...(autoUrl ? { background_url: `url('${autoUrl}')` } : {}) });
+                        } else {
+                          handleThemeChange({ ...currentTheme, background_url: `url('${url}')` });
+                        }
+                      }}
+                    >
+                      <span className="disp-preset-label">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Custom URL fallback */}
+              <div className="disp-row" style={{ marginTop: '0.5rem' }}>
+                <input
+                  type="text"
+                  className="popover-input"
+                  placeholder="Custom image URL…"
+                  value={bgUrlInput}
+                  onChange={e => setBgUrlInput(e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                <button className="popover-apply" onClick={() => {
+                  if (!bgUrlInput.trim()) return;
+                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput.trim()}')` });
+                  setBgUrlInput('');
+                }}>Apply</button>
+              </div>
+            </div>
+
+            {/* TV Font Size */}
+            <div className="disp-section">
+              <div className="disp-section-label">TV Font Size</div>
+              <div className="disp-row disp-row--slider">
+                <button className="disp-font-btn" onClick={() => adjustFontSize(-0.3)}>A−</button>
+                <input
+                  type="range" min="2.0" max="9.0" step="0.3"
+                  value={parseFloat(currentTheme?.font_size || '4.8')}
+                  onChange={e => handleThemeChange({ ...currentTheme, font_size: `${parseFloat(e.target.value)}rem` })}
+                  className="disp-slider"
+                />
+                <button className="disp-font-btn disp-font-btn--lg" onClick={() => adjustFontSize(0.3)}>A+</button>
+                <span className="disp-font-val">{parseFloat(currentTheme?.font_size || '4.8').toFixed(1)}</span>
+              </div>
+            </div>
+
+            {/* Layout */}
+            <div className="disp-section">
+              <div className="disp-section-label">Layout</div>
+              <div className="disp-row">
+                {[
+                  { value: 'centered',    label: '⊡ Centered' },
+                  { value: 'lower-third', label: '⊟ Lower Third' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    className={`disp-btn${(currentTheme?.layout || 'centered') === value ? ' disp-btn--active' : ''}`}
+                    onClick={() => handleThemeChange({ ...currentTheme, layout: value })}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Verse Transition */}
+            <div className="disp-section">
+              <div className="disp-section-label">Verse Transition</div>
+              <div className="disp-row" style={{ flexWrap: 'wrap' }}>
+                {[
+                  { value: 'crossfade',  label: '⊙ Fade' },
+                  { value: 'slide-up',   label: '↑ Slide' },
+                  { value: 'fade-black', label: '◼ Black' },
+                  { value: 'cut',        label: '⚡ Cut' },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    className={`disp-btn${(currentTheme?.transition_mode || 'crossfade') === value ? ' disp-btn--active' : ''}`}
+                    onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
+                  >{label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* App UI */}
+            <div className="disp-section">
+              <div className="disp-section-label">App Appearance</div>
+              <div className="disp-row">
+                {[{ v: 'dark', l: '☽ Dark UI' }, { v: 'light', l: '☀ Light UI' }].map(({ v, l }) => (
+                  <button
+                    key={v}
+                    className={`disp-btn${presenterUiMode === v ? ' disp-btn--active' : ''}`}
+                    onClick={() => { setPresenterUiMode(v); try { localStorage.setItem('scicp.presenter_ui_mode', v); } catch {} }}
+                  >{l}</button>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* ── More sheet (bottom sheet overlay) ── */}
       {mobileMenuOpen && (
         <div className="prs-more-backdrop" onClick={() => setMobileMenuOpen(false)}>
@@ -2292,47 +2509,8 @@ const MobilePresenter = () => {
 
             <div className="mobile-menu-divider" />
 
-            {/* Theme */}
+            {/* Simple Mode toggle */}
             <div className="mobile-menu-section">
-              <div className="mobile-menu-label">Screen Theme</div>
-              <div className="mobile-menu-row">
-                {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme }) => (
-                  <button
-                    key={label}
-                    className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
-                    onClick={() => { handleThemeChange(theme); setMobileMenuOpen(false); }}
-                  >{label}</button>
-                ))}
-              </div>
-              <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Verse Transition</div>
-              <div className="mobile-menu-row" style={{ flexWrap: 'wrap' }}>
-                {[
-                  { value: 'crossfade',  label: '⊙ Fade' },
-                  { value: 'slide-up',   label: '↑ Slide' },
-                  { value: 'fade-black', label: '◼ Black' },
-                  { value: 'cut',        label: '⚡ Cut' },
-                ].map(({ value, label }) => (
-                  <button
-                    key={value}
-                    className={`theme-btn${(currentTheme.transition_mode || 'crossfade') === value ? ' active' : ''}`}
-                    onClick={() => handleThemeChange({ ...currentTheme, transition_mode: value })}
-                  >{label}</button>
-                ))}
-              </div>
-              <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>App Appearance</div>
-              <div className="mobile-menu-row">
-                {['dark', 'light'].map(mode => (
-                  <button
-                    key={mode}
-                    className={`theme-btn${presenterUiMode === mode ? ' active' : ''}`}
-                    onClick={() => {
-                      setPresenterUiMode(mode);
-                      try { localStorage.setItem('scicp.presenter_ui_mode', mode); } catch { /* ignore */ }
-                    }}
-                  >{mode === 'dark' ? '☽ Dark' : '☀ Light'}</button>
-                ))}
-              </div>
-              <div className="mobile-menu-divider" style={{ margin: '10px 0' }} />
               <div className="sp-mode-toggle">
                 <div>
                   <div className="sp-mode-toggle-label">Simple Mode</div>
@@ -2341,21 +2519,6 @@ const MobilePresenter = () => {
                 <button className="sp-mode-btn" onClick={() => { toggleSimpleMode(true); setMobileMenuOpen(false); }}>
                   Switch to Simple
                 </button>
-              </div>
-              <div className="popover-row" style={{ marginTop: '0.4rem' }}>
-                <input
-                  type="text"
-                  className="popover-input"
-                  placeholder="Custom bg URL..."
-                  value={bgUrlInput}
-                  onChange={e => setBgUrlInput(e.target.value)}
-                />
-                <button className="popover-apply" onClick={() => {
-                  if (!bgUrlInput) return;
-                  handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
-                  setBgUrlInput('');
-                  setMobileMenuOpen(false);
-                }}>Apply</button>
               </div>
             </div>
 
@@ -3163,6 +3326,15 @@ const MobilePresenter = () => {
           {setlist.length > 0 && <span className="prs-nav-badge">{setlist.length}</span>}
         </button>
 
+        <button
+          className={`prs-nav-btn${displayOpen ? ' prs-nav-btn--active' : ''}`}
+          onClick={() => { setDisplayOpen(o => !o); setMobileMenuOpen(false); }}
+          aria-label="Display settings"
+        >
+          <IconPalette />
+          <span>Display</span>
+        </button>
+
         {/* Center action — Go Live when staged, End when live, Browse otherwise */}
         <button
           className={`prs-nav-btn prs-nav-btn--center${staged ? ' prs-nav-btn--golive' : liveVerse ? ' prs-nav-btn--live' : ''}`}
@@ -3194,9 +3366,23 @@ const MobilePresenter = () => {
         <div className="prs-live-controls">
           <button className="prs-live-nav" onClick={() => fetchAdjacent('prev', !liveVerse)} aria-label="Previous verse">‹</button>
           <div className="prs-live-ref">
-            {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
-            {liveVerse && liveVerse.segments?.length > 1 && (
-              <span className="prs-live-seg">{currentSegment + 1}/{liveVerse.segments.length}</span>
+            <div className="prs-live-ref-line1">
+              {liveVerse ? (
+                <><span className="prs-live-dot-pulse" />Now Projecting</>
+              ) : (
+                <><span className="prs-live-staged-dot" />Staged</>
+              )}
+              <span className="prs-live-citation">
+                {(staged || liveVerse).book_title} {(staged || liveVerse).chapter_number}:{(staged || liveVerse).verse_number}
+              </span>
+              {liveVerse && liveVerse.segments?.length > 1 && (
+                <span className="prs-live-seg">{currentSegment + 1}/{liveVerse.segments.length}</span>
+              )}
+            </div>
+            {liveVerse && (
+              <div className="prs-live-preview-text">
+                {(liveVerse.segments?.[currentSegment] || liveVerse.scripture_text || '').slice(0, 60).trimEnd()}…
+              </div>
             )}
           </div>
           <button className="prs-live-nav" onClick={() => fetchAdjacent('next', !liveVerse)} aria-label="Next verse">›</button>

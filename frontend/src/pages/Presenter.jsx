@@ -20,6 +20,16 @@ const themes = {
   }
 };
 
+const BG_PRESETS = [
+  { label: 'Auto',     url: null },
+  { label: 'NT Dark',  url: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default' },
+  { label: 'NT Light', url: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default' },
+  { label: 'OT Dark',  url: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default' },
+  { label: 'OT Light', url: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default' },
+  { label: 'BoM Dark', url: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default' },
+  { label: 'D&C Dark', url: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default' },
+];
+
 const FONT_FAMILIES = [
   { label: 'Cormorant Garamond (Sacred)',  value: "'Cormorant Garamond', Georgia, serif" },
   { label: 'Cinzel (Classic Roman)',        value: "'Cinzel', serif" },
@@ -504,6 +514,7 @@ const Presenter = () => {
 
   const [themePopover, setThemePopover]     = useState(false);
   const [langPopover,  setLangPopover]      = useState(false);
+  const [kbdHelpOpen,  setKbdHelpOpen]      = useState(false);
   const [sessionPopover, setSessionPopover] = useState(false);
   const [sessionId, setSessionId]           = useState('');
   const [sessionLabel, setSessionLabel]     = useState('');
@@ -1857,6 +1868,7 @@ const Presenter = () => {
     const handler = (e) => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); setKbdHelpOpen(o => !o); return; }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case ' ':
@@ -1894,7 +1906,7 @@ const Presenter = () => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen]);
+  }, [staged, liveVerse, highlightedText, currentSegment, drawerOpen, kbdHelpOpen]);
 
   // Auto-advance segments
   useEffect(() => {
@@ -2305,21 +2317,49 @@ const Presenter = () => {
                   ))}
                 </div>
                 <div className="popover-divider" />
-                <div className="popover-label">Custom background</div>
+                <div className="popover-label">Layout</div>
+                <div style={{ display: 'flex', gap: '0.35rem' }}>
+                  {[{ value: 'centered', label: '⊡ Centered' }, { value: 'lower-third', label: '⊟ Lower Third' }].map(({ value, label }) => (
+                    <button
+                      key={value}
+                      className={`theme-btn${(currentTheme?.layout || 'centered') === value ? ' active' : ''}`}
+                      onClick={() => handleThemeChange({ ...currentTheme, layout: value })}
+                    >{label}</button>
+                  ))}
+                </div>
+
+                <div className="popover-divider" />
+                <div className="popover-label">Background</div>
+                <div className="popover-bg-presets">
+                  {BG_PRESETS.map(({ label, url }) => {
+                    const isActive = !url ? !bgUrlInput : currentTheme?.background_url?.includes(url.split('/').pop());
+                    return (
+                      <button
+                        key={label}
+                        className={`popover-bg-preset${isActive ? ' popover-bg-preset--active' : ''}`}
+                        style={url ? { backgroundImage: `url('${url}')`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
+                        onClick={() => {
+                          if (!url) {
+                            handleThemeChange({ ...(currentTheme?.tone === 'dark' ? themes.dark : themes.light), transition_mode: currentTheme.transition_mode, force_animations: !!currentTheme.force_animations });
+                            setBgUrlInput('');
+                          } else {
+                            handleThemeChange({ ...currentTheme, background_url: `url('${url}')` });
+                            setBgUrlInput('');
+                          }
+                        }}
+                        title={label}
+                      >
+                        <span className="popover-bg-preset-label">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="popover-divider" />
+                <div className="popover-label">Custom URL</div>
                 <div className="popover-row">
-                  <input
-                    type="text"
-                    className="popover-input"
-                    placeholder="https://…"
-                    value={bgUrlInput}
-                    onChange={e => setBgUrlInput(e.target.value)}
-                  />
-                  <button className="popover-apply" onClick={() => {
-                    if (!bgUrlInput) return;
-                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
-                    setBgUrlInput('');
-                    setThemePopover(false);
-                  }}>Apply</button>
+                  <input type="text" className="popover-input" placeholder="https://…" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
+                  <button className="popover-apply" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` }); setBgUrlInput(''); setThemePopover(false); }}>Apply</button>
                 </div>
               </div>
             )}
@@ -2336,6 +2376,31 @@ const Presenter = () => {
           <HdrBtn onClick={() => openDrawer('history')} active={drawerOpen && drawerTab === 'history'} label="Recent verses">
             <IconClock />
           </HdrBtn>
+
+          {/* Keyboard shortcuts */}
+          <div style={{ position: 'relative' }}>
+            <HdrBtn onClick={() => setKbdHelpOpen(o => !o)} active={kbdHelpOpen} label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+              <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>?</span>
+            </HdrBtn>
+            {kbdHelpOpen && (
+              <div className="kbd-help-panel">
+                <div className="popover-label" style={{ marginBottom: '0.5rem' }}>Keyboard Shortcuts</div>
+                {[
+                  ['Space / Enter', 'Go Live (when verse staged)'],
+                  ['← / →',        'Prev / Next segment'],
+                  ['↑ / ↓',        'Prev / Next verse in results'],
+                  ['Esc',          'Clear screen / close drawer'],
+                  ['Ctrl + F',     'Focus search'],
+                  ['Ctrl + /',     'Toggle this panel'],
+                ].map(([key, desc]) => (
+                  <div key={key} className="kbd-row">
+                    <kbd className="kbd-key">{key}</kbd>
+                    <span className="kbd-desc">{desc}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Live badge */}
           {liveVerse && (
