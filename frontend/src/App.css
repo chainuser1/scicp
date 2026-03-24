@@ -8703,3 +8703,23 @@ button, [role="button"] {
   from { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); }
   to   { box-shadow: 0 0 0 6px rgba(231,76,60,0); }
 }
+
+/* ── Search Suggestions ──────────────────────────────────────────── */
+.search-suggestions {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
+  background: #1a1a24;
+  border: 1px solid rgba(201,168,76,0.18);
+  border-radius: 0 0 10px 10px;
+  margin: 0; padding: 0.25rem 0;
+  list-style: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  max-height: 280px; overflow-y: auto;
+}
+.search-suggestion-item {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 1rem; font-size: 0.82rem;
+  color: rgba(255,255,255,0.75); cursor: pointer;
+  transition: background 0.1s;
+}
+.search-suggestion-item:hover { background: rgba(201,168,76,0.1); }
+.search-suggestion-item svg { opacity: 0.4; flex-shrink: 0; }
