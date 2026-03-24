@@ -42,15 +42,18 @@ function supportsWebPresentation() {
 
 function candidateClientUrls(clientUrl) {
   const urls = new Set();
-  // On Capacitor/Android, assets are accessible via file:// — try this first
+  // On Capacitor/Android, use http://localhost/ which is intercepted by
+  // WebViewAssetLoader — this correctly resolves absolute-path script/css
+  // references (e.g. /assets/client-display-xxx.js).  The old file:///
+  // android_asset/ path caused blank pages because absolute /assets/ URLs
+  // resolved to file:///assets/ which doesn't exist.
   if (window.Capacitor?.isNativePlatform?.()) {
-    urls.add('file:///android_asset/public/client-display.html');
+    urls.add('http://localhost/client-display.html');
   }
   if (clientUrl) urls.add(clientUrl);
   try {
     urls.add(new URL('client-display.html', window.location.href.replace(/^capacitor:\/\//, 'http://')).toString());
   } catch { /* ignore */ }
-  urls.add('http://localhost/client-display.html');
   return [...urls].filter(Boolean);
 }
 

@@ -1,9 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import legacy from '@vitejs/plugin-legacy';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Emit a legacy SystemJS bundle + polyfills so client-display.html works
+    // on VEWD/old TV browsers (Chromium 38–52) when served via LAN casting.
+    // Modern Android WebView and real browsers still get the native ES bundle.
+    legacy({
+      targets: ['chrome >= 50', 'safari >= 12', 'firefox >= 60'],
+      additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
+    }),
+  ],
   resolve: {
     alias: {
       // Allow importing from the shared/ module at the repo root
