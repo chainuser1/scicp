@@ -328,6 +328,34 @@ const SearchIntelligence = ({ meta, query }) => {
   );
 };
 
+/* ─── Search Facets — thematic anchors derived from nearest clusters ─── */
+const SearchFacets = ({ meta, onFacetClick }) => {
+  if (!meta?.facets?.length) return null;
+  // Only show facets for conceptual/mixed searches — for exact keyword/reference
+  // the results are already precise, facets would add noise.
+  if (meta.intent === 'exact' || meta.intent === 'reference') return null;
+  // Filter out facets with only generic terms or very high similarity
+  // (the top hit is usually just the same cluster as the query itself)
+  const facets = meta.facets.filter(f => f.terms.length > 0).slice(0, 4);
+  if (facets.length === 0) return null;
+
+  return (
+    <div className="search-facets" title="Thematic regions of scripture near your query — click to explore">
+      <span className="search-facets-label">themes</span>
+      {facets.map(f => (
+        <button
+          key={f.cluster_id}
+          className="search-facet-chip"
+          onClick={() => onFacetClick(f)}
+          title={`${f.member_count} verses · similarity ${(f.similarity * 100).toFixed(0)}%`}
+        >
+          {f.terms.slice(0, 3).join(' · ')}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 /* ─── Quick-topic chips shown in the idle state ─── */
 const QUICK_TOPICS = [
   'faith', 'atonement', 'prayer', 'hope', 'charity',
@@ -2809,6 +2837,15 @@ const Presenter = () => {
               </div>
               <div className="results-list-wrap">
                 <SearchIntelligence meta={searchMeta} query={query} />
+                <SearchFacets meta={searchMeta} onFacetClick={facet => {
+                  const facetQuery = facet.terms.slice(0, 3).join(' ');
+                  setQuery(facetQuery);
+                  setResults([]);
+                  setSearchMeta(null);
+                  setSearchCursor(null);
+                  setCurrentPage(0);
+                  emitWithSession('search', { query: facetQuery, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
+                }} />
                 <div className="results-list"
                   ref={resultsListRef}
                   onScroll={e => setResultsScrolled(e.currentTarget.scrollTop > 120)}>

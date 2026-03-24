@@ -1069,6 +1069,49 @@ function initRwrLookup() {
   }
 }
 
+// ── Cluster label cache: cluster_id → { terms[], rep_verse_id, member_count, centroid } ──
+const clusterLabelCache = new Map();
+// Flat array of { cluster_id, centroid: Float32Array } for fast nearest-cluster scan
+let clusterCentroidIndex = [];
+
+function initClusterLabels() {
+  if (!db_graph) return;
+  try {
+    const count = db_graph.prepare('SELECT COUNT(*) AS n FROM cluster_labels').get()?.n;
+    if (!count) return;
+    const rows = db_graph.prepare(
+      'SELECT cluster_id, label_terms, rep_verse_id, member_count, centroid FROM cluster_labels'
+    ).all();
+    for (const row of rows) {
+      const terms    = JSON.parse(row.label_terms || '[]');
+      const centroid = new Float32Array(row.centroid.buffer, row.centroid.byteOffset, row.centroid.byteLength / 4);
+      clusterLabelCache.set(row.cluster_id, {
+        terms, rep_verse_id: row.rep_verse_id, member_count: row.member_count, centroid,
+      });
+      clusterCentroidIndex.push({ cluster_id: row.cluster_id, centroid });
+    }
+    fastify.log.info(`[Clusters] Loaded ${clusterLabelCache.size} cluster labels`);
+  } catch (err) {
+    fastify.log.warn('[Clusters] cluster_labels not found — run prebake-cluster-labels.js:', err.message);
+  }
+}
+
+// Find the N clusters whose centroids are closest to a query vector.
+// Returns [{ cluster_id, terms, rep_verse_id, member_count, similarity }]
+function nearestClusters(qvec, topN = 3) {
+  if (!clusterCentroidIndex.length || !qvec) return [];
+  const scored = clusterCentroidIndex.map(({ cluster_id, centroid }) => ({
+    cluster_id,
+    similarity: cosineSimilarity(qvec, centroid),
+  }));
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, topN).map(({ cluster_id, similarity }) => {
+    const info = clusterLabelCache.get(cluster_id);
+    if (!info) return null;
+    return { cluster_id, terms: info.terms, rep_verse_id: info.rep_verse_id, member_count: info.member_count, similarity: +similarity.toFixed(4) };
+  }).filter(Boolean);
+}
+
 function getIdf(term) {
   if (!idfStmt) return IDF_DEFAULT;
   const row = idfStmt.get(term.toLowerCase());
@@ -1791,7 +1834,7 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     if (ref) {
       const refResult = searchScripture(query, 0, 200, dba, log);
       if (refResult.total > 0) {
-        const refMeta = { intent: 'reference', confidence: 1, expansions: [] };
+        const refMeta = { intent: 'reference', confidence: 1, expansions: [], facets: [] };
         searchCacheSet(cacheKey, refResult.results, refResult.total, refMeta);
         return { results: refResult.results, total: refResult.total, meta: refMeta, fromCache: false, cacheKey };
       }
@@ -1874,7 +1917,8 @@ async function runSearchPipeline(query, language, contextVerseId, log) {
     const allExpansions = [...new Set([...synonymTermsAdded, ...pmiTermsAdded, ...conceptTermsUsed])]
       .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
     const intent = confidence >= 0.6 ? 'exact' : confidence < 0.3 ? 'conceptual' : 'mixed';
-    pipelineMeta = { intent, confidence: +confidence.toFixed(3), expansions: allExpansions };
+    const facets = qvec ? nearestClusters(qvec, 4) : [];
+    pipelineMeta = { intent, confidence: +confidence.toFixed(3), expansions: allExpansions, facets };
 
     results = results.map(r => {
       const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;
@@ -2151,6 +2195,7 @@ buildEntityCache();
 initIdfLookup();
 initPprLookup();
 initRwrLookup();
+initClusterLabels();
 
 // Finds a topic by name/slug match, returns all verses in that topic cluster
 // ranked by how many topics they share with the query topic.
