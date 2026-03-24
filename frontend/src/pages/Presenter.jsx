@@ -296,14 +296,15 @@ const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalP
 
 /* ─── Search Intelligence bar — shows query intent + expansion terms ─── */
 const INTENT_LABELS = {
-  reference:   { label: 'Reference',   title: 'Exact scripture reference matched' },
-  keyword:     { label: 'Keyword',     title: 'High-confidence keyword match' },
-  // legacy key from before multi-dim intent — keep for backward compat with cached results
-  exact:       { label: 'Keyword',     title: 'High-confidence keyword match' },
-  mixed:       { label: 'Expanded',    title: 'Keywords supplemented with related concepts' },
-  conceptual:  { label: 'Semantic',    title: 'Meaning-based search — results are conceptually related' },
-  entity:      { label: null,          title: null },  // label built dynamically from subtype
-  situational: { label: 'Situational', title: 'Question or situational framing — searching by meaning and context' },
+  reference:        { label: 'Reference',   title: 'Exact scripture reference matched' },
+  keyword:          { label: 'Keyword',     title: 'High-confidence keyword match' },
+  exact:            { label: 'Keyword',     title: 'High-confidence keyword match' },
+  mixed:            { label: 'Expanded',    title: 'Keywords supplemented with related concepts' },
+  conceptual:       { label: 'Semantic',    title: 'Meaning-based search — results are conceptually related' },
+  entity:           { label: null,          title: null },
+  situational:      { label: 'Situational', title: 'Question or situational framing — searching by meaning and context' },
+  phrase:           { label: 'Phrase',      title: 'Exact phrase match — only verses containing this sequence of words' },
+  'semantic-explicit': { label: 'Semantic', title: 'Pure embedding search — results ranked by meaning proximity to your query' },
 };
 
 const SearchIntelligence = ({ meta, query }) => {
@@ -2822,8 +2823,8 @@ const Presenter = () => {
                   type="search"
                   inputMode="search"
                   enterKeyHint="search"
-                  className="search-input"
-                  placeholder="John 3:16 or 'faith'…"
+                  className={`search-input${query.trim().startsWith('"') ? ' search-input--phrase' : query.trim().startsWith('~') ? ' search-input--semantic' : ''}`}
+                  placeholder={'Search… or "quote" for phrase · ~idea for semantic'}
                   value={query}
                   onChange={handleSearch}
                   onKeyDown={handleSearchKeyDown}
