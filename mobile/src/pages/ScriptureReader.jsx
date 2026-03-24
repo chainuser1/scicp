@@ -13,6 +13,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as svc from '../scripture-service';
+import { useSocketCtx } from '../socket-context';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ const recallStr = (k, fb) => { try { return localStorage.getItem(k) || fb; } cat
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ScriptureReader({ onExit }) {
+  const { serverUrl } = useSocketCtx() || {};
 
   // ── Prefs (persist across launches) ──────────────────────────────────────
   const [theme,      setThemeId]    = useState(() => recallStr(SK.theme, 'night'));
@@ -142,6 +144,18 @@ export default function ScriptureReader({ onExit }) {
   const [foundVerse, setFoundVerse] = useState(null); // verse_id to pulse-animate as "found"
   const [isOffline, setIsOffline] = useState(() => !navigator.onLine);
 
+  // ── Dwell time + reading pace + coverage ──────────────────────────────────
+  const [sessionId]       = useState(() => `rs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+  const sessionIdRef      = useRef(null);
+  if (sessionIdRef.current === null) sessionIdRef.current = sessionId;
+  const verseStartTimeRef = useRef(null);
+  const verseInViewRef    = useRef(null);
+  const lastVerseTimeRef  = useRef(null);
+  const readingPaceRef    = useRef([]);
+  const [flowMode,     setFlowMode]     = useState(false);
+  const [coverage,     setCoverage]     = useState(new Map());
+  const [spacedReview, setSpacedReview] = useState([]);
+
   const PAGE_SIZE = 20;
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -182,6 +196,55 @@ export default function ScriptureReader({ onExit }) {
     }
   };
 
+  // ── Reading event emission ─────────────────────────────────────────────────
+  const emitReadingEvent = useCallback(async (verse, dwellMs = 0, eventType = 'read') => {
+    try {
+      const base = (serverUrl) ? String(serverUrl).replace(/\/+$/, '') : '';
+      const payload = {
+        verse_id: verse.verse_id,
+        book_id: verse.book_id,
+        chapter_id: verse.chapter_id,
+        book_title: verse.book_title,
+        chapter_number: verse.chapter_number,
+        verse_number: verse.verse_number,
+        language: lang,
+        session_id: sessionIdRef.current,
+        dwell_ms: Math.round(dwellMs),
+        event_type: eventType,
+      };
+      fetch(`${base}/reading-event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }, [serverUrl, lang]);
+
+  // ── Reading pace (flow mode) ───────────────────────────────────────────────
+  const updateReadingPace = useCallback((verseWordCount) => {
+    const now = Date.now();
+    if (lastVerseTimeRef.current) {
+      const elapsed = now - lastVerseTimeRef.current;
+      const expectedMs = verseWordCount * 250;
+      const paceRatio = elapsed / expectedMs;
+      readingPaceRef.current = [...readingPaceRef.current.slice(-4), paceRatio];
+      const avgPace = readingPaceRef.current.reduce((a, b) => a + b, 0) / readingPaceRef.current.length;
+      const shouldFlow = avgPace < 0.6 && readingPaceRef.current.length >= 3;
+      setFlowMode(f => f !== shouldFlow ? shouldFlow : f);
+    }
+    lastVerseTimeRef.current = now;
+  }, []);
+
+  const onVerseVisible = useCallback((verse) => {
+    if (verseInViewRef.current && verseStartTimeRef.current) {
+      const dwell = Date.now() - verseStartTimeRef.current;
+      emitReadingEvent(verseInViewRef.current, dwell, 'read');
+    }
+    verseInViewRef.current = verse;
+    verseStartTimeRef.current = Date.now();
+    updateReadingPace(verse.scripture_text?.split(' ').length || 10);
+  }, [emitReadingEvent, updateReadingPace]);
+
   // ── Offline detection ─────────────────────────────────────────────────────
   useEffect(() => {
     const on = () => setIsOffline(false);
@@ -196,6 +259,28 @@ export default function ScriptureReader({ onExit }) {
     try { setBooks(svc.browse('books', {}, lang) || []); } catch { setBooks([]); }
   }, [lang]);
 
+  // ── Coverage + spaced review fetches ─────────────────────────────────────
+  useEffect(() => {
+    const base = serverUrl ? String(serverUrl).replace(/\/+$/, '') : '';
+    if (!base) return;
+    fetch(`${base}/reading-coverage`)
+      .then(r => r.ok ? r.json() : { coverage: [] })
+      .then(({ coverage: rows }) => {
+        const map = new Map();
+        for (const row of rows) map.set(row.chapter_id, row);
+        setCoverage(map);
+      })
+      .catch(() => {});
+  }, [serverUrl]);
+
+  useEffect(() => {
+    const base = serverUrl ? String(serverUrl).replace(/\/+$/, '') : '';
+    if (!base) return;
+    fetch(`${base}/spaced-review?limit=3`)
+      .then(r => r.ok ? r.json() : { verses: [] })
+      .then(({ verses }) => setSpacedReview(verses || []))
+      .catch(() => {});
+  }, [serverUrl]);
   // ── Chapter loading ───────────────────────────────────────────────────────
   const loadChapter = useCallback((book, chapters, idx, anchorVerseId, forceLang) => {
     const ch = chapters[idx];
@@ -238,6 +323,28 @@ export default function ScriptureReader({ onExit }) {
     }, 250);
     return () => clearTimeout(tid);
   }, [chapterVerses]);
+
+  // ── IntersectionObserver: dwell tracking ─────────────────────────────────
+  useEffect(() => {
+    if (!chapterVerses.length) return;
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+          const verseId = parseInt(entry.target.dataset.verseId, 10);
+          const verse = chapterVerses.find(v => v.verse_id === verseId);
+          if (verse) onVerseVisible(verse);
+        }
+      }
+    }, { threshold: 0.6 });
+    document.querySelectorAll('[data-verse-id]').forEach(el => observer.observe(el));
+    return () => {
+      observer.disconnect();
+      if (verseInViewRef.current && verseStartTimeRef.current) {
+        const dwell = Date.now() - verseStartTimeRef.current;
+        emitReadingEvent(verseInViewRef.current, dwell, 'read');
+      }
+    };
+  }, [chapterVerses, onVerseVisible, emitReadingEvent]);
 
   // ── Book / chapter navigation ─────────────────────────────────────────────
   const openBook = useCallback((book) => {
@@ -416,7 +523,7 @@ export default function ScriptureReader({ onExit }) {
   // ── RENDER ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="rd-root" style={cssVars}>
+    <div className={`rd-root${flowMode ? ' rd-flow-mode' : ''}`} style={cssVars}>
 
       {/* ═══════════════════════════════════════════════════════════════
           HOME SCREEN
@@ -521,8 +628,34 @@ export default function ScriptureReader({ onExit }) {
                 </section>
               )}
 
+              {spacedReview.length > 0 && (
+                <section className="rd-section rd-spaced-section">
+                  <h2 className="rd-section-hd">📖 For Review <span className="rd-section-sub">— revisit these verses</span></h2>
+                  <div className="rd-spaced-list">
+                    {spacedReview.slice(0, 3).map(v => (
+                      <button key={v.verse_id} className="rd-spaced-item" onClick={() => openBook({ book_id: v.book_id, book_title: v.book_title })}>
+                        <span className="rd-spaced-ref">{v.book_title} {v.chapter_number}:{v.verse_number}</span>
+                        <span className="rd-spaced-text">{v.scripture_text?.slice(0, 60)}…</span>
+                        {v.review?.overdue && <span className="rd-spaced-due">Due</span>}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {/* Books grid */}
               <section className="rd-section">
+                {coverage.size > 0 && (
+                  <div className="rd-coverage-summary">
+                    <div className="rd-coverage-header">
+                      <span className="rd-coverage-title">Your Reading</span>
+                      <span className="rd-coverage-count">{coverage.size} chapters covered</span>
+                    </div>
+                    <div className="rd-coverage-bar">
+                      <div className="rd-coverage-fill" style={{ width: `${Math.min(100, (coverage.size / 789) * 100).toFixed(1)}%` }} title={`${((coverage.size / 789) * 100).toFixed(1)}% of all chapters`} />
+                    </div>
+                  </div>
+                )}
                 <h2 className="rd-section-hd">Books of Scripture</h2>
                 <div className="rd-books-grid">
                   {books.length === 0 ? (
@@ -530,8 +663,13 @@ export default function ScriptureReader({ onExit }) {
                       Scripture library not available. Make sure the database is downloaded.
                     </p>
                   ) : books.map(b => (
-                    <button key={b.book_id} className="rd-book-btn" onClick={() => openBook(b)}>
+                    <button key={b.book_id} className="rd-book-btn" style={{ position: 'relative' }} onClick={() => openBook(b)}>
                       {b.book_title}
+                      {(() => {
+                        const bookCovered = [...coverage.values()].filter(c => c.book_id === b.book_id);
+                        if (bookCovered.length === 0) return null;
+                        return <span className="rd-book-progress" title={`${bookCovered.length} chapters read`}>{bookCovered.length}</span>;
+                      })()}
                     </button>
                   ))}
                 </div>
@@ -608,6 +746,7 @@ export default function ScriptureReader({ onExit }) {
               <div
                 className="rd-prose"
                 style={{ fontSize: `${fontSize}px`, lineHeight: lhObj.val, fontFamily: ffObj.css }}
+                onClick={flowMode ? () => setFlowMode(false) : undefined}
               >
                 {chapterVerses.map(verse => {
                   const hlId  = highlights[verse.verse_id];
@@ -619,6 +758,7 @@ export default function ScriptureReader({ onExit }) {
                       key={verse.verse_id}
                       ref={el => { if (el) verseEls.current[verse.verse_id] = el; }}
                       className={`rd-verse${bkd ? ' rd-verse--bkd' : ''}${found ? ' rd-verse--found' : ''}`}
+                      data-verse-id={verse.verse_id}
                       style={hlObj ? { background: hlObj.css } : {}}
                       onTouchStart={() => startLp(verse)}
                       onTouchEnd={cancelLp}
@@ -892,7 +1032,7 @@ export default function ScriptureReader({ onExit }) {
                     key={c.id}
                     className={`rd-lp-color${highlights[lpMenu.verse.verse_id] === c.id ? ' rd-lp-color--on' : ''}`}
                     style={{ background: c.css, outlineColor: c.border }}
-                    onClick={() => toggleHighlight(lpMenu.verse.verse_id, c.id)}
+                    onClick={() => { toggleHighlight(lpMenu.verse.verse_id, c.id); emitReadingEvent(lpMenu.verse, 0, 'highlight'); }}
                     aria-label={`Highlight ${c.id}`}
                   />
                 ))}
@@ -907,7 +1047,7 @@ export default function ScriptureReader({ onExit }) {
 
             {/* Actions */}
             <div className="rd-lp-actions">
-              <button className="rd-lp-act" onClick={() => toggleBookmark(lpMenu.verse.verse_id)}>
+              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse.verse_id); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>
                 {bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}
               </button>
               <button className="rd-lp-act" onClick={() => {
