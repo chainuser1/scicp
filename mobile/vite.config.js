@@ -2,13 +2,12 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import legacy from '@vitejs/plugin-legacy';
 import path from 'path';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 export default defineConfig({
   plugins: [
     react(),
-    // Emit a legacy SystemJS bundle + polyfills so client-display.html works
-    // on VEWD/old TV browsers (Chromium 38–52) when served via LAN casting.
-    // Modern Android WebView and real browsers still get the native ES bundle.
+    visualizer({ open: true, filename: 'bundle-stats.html' }),
     legacy({
       targets: ['chrome >= 50', 'safari >= 12', 'firefox >= 60'],
       additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
@@ -16,7 +15,6 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      // Allow importing from the shared/ module at the repo root
       '@shared': path.resolve(__dirname, '../shared'),
     },
   },
@@ -31,14 +29,19 @@ export default defineConfig({
   },
   build: {
     commonjsOptions: {
-      // The shared/ directory uses CommonJS (module.exports).
-      // Tell Rollup's CJS plugin to process files outside node_modules.
       include: [/shared\//, /node_modules\//],
     },
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
         'client-display': path.resolve(__dirname, 'client-display.html'),
+      },
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-socket': ['socket.io-client'],
+          'vendor-qrcode': ['qrcode'],
+        },
       },
     },
   },
