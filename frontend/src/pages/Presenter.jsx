@@ -2309,33 +2309,11 @@ const Presenter = () => {
           </div>
 
           {/* Presenter UI dark/light mode toggle */}
-          <HdrBtn
-            onClick={() => {
-              const next = presenterUiMode === 'dark' ? 'light' : 'dark';
-              setPresenterUiMode(next);
-              try { localStorage.setItem('scicp.presenter_ui_mode', next); } catch { /* ignore */ }
-            }}
-            label={presenterUiMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={presenterUiMode === 'dark' ? 'Switch presenter to light mode' : 'Switch presenter to dark mode'}
-          >
-            {presenterUiMode === 'dark'
-              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-              : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            }
-          </HdrBtn>
+
 
           {/* Theme popover */}
           <div className="hdr-theme-wrap">
-            <div className="hdr-theme-quick">
-              {[{ label: 'Light', theme: themes.light }, { label: 'Dark', theme: themes.dark }].map(({ label, theme: t }) => (
-                <button
-                  key={label}
-                  className={`theme-quick-pill${currentTheme === t ? ' theme-quick-pill--active' : ''}`}
-                  onClick={() => handleThemeChange({ ...t, force_animations: !!currentTheme.force_animations })}
-                  title={`${label} theme`}
-                >{label}</button>
-              ))}
-            </div>
+           
             <HdrBtn onClick={() => setThemePopover(o => !o)} active={themePopover} label="Theme" title="Change theme">
               <IconPalette />
             </HdrBtn>
