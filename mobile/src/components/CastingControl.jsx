@@ -27,8 +27,11 @@ export default function CastingControl({ className = '', compact = false, label 
   const [showHint, setShowHint] = useState(false);
   const pendingAutoStartRef = useRef(false);
   const getClientUrl = () => {
+    // On native Android, http://localhost/ is intercepted by WebViewAssetLoader
+    // and serves APK assets — absolute /assets/ script paths resolve correctly.
+    // (file:///android_asset/ caused blank page because /assets/ != file:///assets/)
     if (window.Capacitor?.isNativePlatform?.()) {
-      return 'file:///android_asset/public/client-display.html';
+      return 'http://localhost/client-display.html';
     }
     const href = window.location.href.replace(/^capacitor:\/\//, 'http://');
     return new URL('client-display.html', href).toString();
