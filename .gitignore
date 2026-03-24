@@ -40,3 +40,7 @@ vite
 # Scraper caches
 resources/db/*_cache.json
 release.keystore
+
+# Fine-tuned model (large binary files — store in Drive or object storage)
+resources/models/
+resources/training-pairs.json
