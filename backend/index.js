@@ -2337,9 +2337,35 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
   let pipelineMeta = null;
 
   if (lang !== 'en') {
-    const r = searchScriptureInDb(query, 0, 200, resolveDbAdapter(lang), log);
-    results = r.results || [];
-    total   = r.total   || results.length;
+    // English versions (e.g. NRSVUE) run the full pipeline against LDS embeddings,
+    // then swap the display text to the selected version afterward.
+    const ENGLISH_VERSIONS = new Set(['nrsvue']);
+    if (ENGLISH_VERSIONS.has(lang)) {
+      const full = await runSearchPipeline(query, 'en', contextVerseId, log, sessionId);
+      results       = full.results || [];
+      total         = full.total   || results.length;
+      pipelineMeta  = full.meta    || null;
+
+      // Swap scripture_text to the selected English version
+      const targetDb = resolveDbAdapter(lang);
+      if (targetDb && targetDb !== dba) {
+        const stmtCoords   = dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1');
+        const stmtTransText = targetDb.prepare('SELECT scripture_text, verse_title, book_title FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1');
+        results = results.map(r => {
+          const coords = stmtCoords.get(r.verse_id);
+          if (!coords) return r;
+          const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
+          if (t?.scripture_text) {
+            return { ...r, scripture_text: t.scripture_text, verse_title: t.verse_title || r.verse_title, book_title: t.book_title || r.book_title };
+          }
+          return r;
+        });
+      }
+    } else {
+      const r = searchScriptureInDb(query, 0, 200, resolveDbAdapter(lang), log);
+      results = r.results || [];
+      total   = r.total   || results.length;
+    }
   } else {
     // ── Explicit mode detection ──────────────────────────────────────────────
     // "" and ~ are OPTIONAL power-user shortcuts. Without them, the system
