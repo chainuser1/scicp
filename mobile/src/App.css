@@ -9762,3 +9762,18 @@ button, [role="button"] {
 .rd-flow-mode .rd-breadcrumbs:hover { opacity: 1; }
 .rd-flow-mode .rd-section-hd { display: none; }
 .rd-flow-mode .rd-prose { cursor: default; }
+
+/* ── Network offline banner (H16) ── */
+.network-offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #8b0000;
+  color: #f0ece0;
+  text-align: center;
+  padding: 6px;
+  font-size: 13px;
+  z-index: 9999;
+  font-weight: 600;
+}

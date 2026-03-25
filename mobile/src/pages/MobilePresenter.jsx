@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
+import { Keyboard } from '@capacitor/keyboard';
+import { Capacitor } from '@capacitor/core';
 import { useSocketCtx } from '../socket-context';
 import { isDisplayAvailable, isCasting, startLocalServer, stopLocalServer, getLocalServerUrl } from '../socket-local';
 import * as svc from '../scripture-service';
@@ -551,6 +553,23 @@ const MobilePresenter = () => {
   const chapterNeedsRefetchRef = useRef(false); // set true when chapter changes so openContextModal force-refetches
   const [ctxSlideDir,  setCtxSlideDir]  = useState(null); // 'prev' | 'next' | null
   const RELATED_PAGE_SIZE = 8;
+
+  // ── Keyboard handling for native platforms (H18) ──
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let showListener, hideListener;
+    Keyboard.addListener('keyboardWillShow', (info) => {
+      document.body.style.paddingBottom = `${info.keyboardHeight}px`;
+    }).then(l => { showListener = l; }).catch(() => {});
+    Keyboard.addListener('keyboardWillHide', () => {
+      document.body.style.paddingBottom = '0px';
+    }).then(l => { hideListener = l; }).catch(() => {});
+    return () => {
+      if (showListener) showListener.remove();
+      if (hideListener) hideListener.remove();
+      document.body.style.paddingBottom = '0px';
+    };
+  }, []);
 
   // Reset verse-level and navigation context when live verse changes
   useEffect(() => {

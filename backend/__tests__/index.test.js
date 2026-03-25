@@ -1200,3 +1200,211 @@ describe('Backend API Tests', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Socket.IO Handler Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Helpers to build minimal mock io / socket objects
+function makeMockIo() {
+  const connectionHandlers = [];
+  const emitted = {};
+
+  const io = {
+    on(event, handler) {
+      if (event === 'connection') connectionHandlers.push(handler);
+    },
+    to(_room) {
+      return { emit: jest.fn() };
+    },
+    engine: { on: jest.fn() },
+    sockets: {
+      sockets: new Map(),
+      adapter: {
+        rooms: new Map(),
+      },
+    },
+    _connectionHandlers: connectionHandlers,
+    _emitted: emitted,
+  };
+  return io;
+}
+
+function makeMockSocket(querySession = '') {
+  const handlers = {};
+  const emitted = [];
+  const joined = [];
+
+  const socket = {
+    id: 'mock-socket-' + Math.random().toString(36).slice(2),
+    handshake: { query: { session: querySession }, address: '127.0.0.1' },
+    on(event, handler) { handlers[event] = handler; },
+    emit(event, data) { emitted.push({ event, data }); },
+    to(_room) { return { emit: jest.fn() }; },
+    join(room) { joined.push(room); },
+    leave(_room) {},
+    _handlers: handlers,
+    _emitted: emitted,
+    _joined: joined,
+  };
+  return socket;
+}
+
+describe('expandWithSynonyms', () => {
+  test('returns at least the original word', () => {
+    const result = expandWithSynonyms('grace');
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain('grace');
+  });
+
+  test('expands known synonym "god"', () => {
+    const result = expandWithSynonyms('god');
+    expect(result).toContain('god');
+    // 'god' maps to lord, jehovah, etc.
+    expect(result.length).toBeGreaterThan(1);
+  });
+
+  test('expands known synonym "faith"', () => {
+    const result = expandWithSynonyms('faith');
+    expect(result).toContain('faith');
+    expect(result).toContain('believe');
+  });
+
+  test('handles multi-word phrase "holy ghost" — expands its synonyms', () => {
+    const result = expandWithSynonyms('holy ghost');
+    // The phrase is split into individual words; synonyms for "holy ghost" are added
+    expect(result).toContain('holy spirit');
+    expect(result).toContain('comforter');
+  });
+
+  test('handles unknown word gracefully', () => {
+    const result = expandWithSynonyms('xyzzy');
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toContain('xyzzy');
+  });
+
+  test('de-duplicates synonyms', () => {
+    const result = expandWithSynonyms('god');
+    const unique = new Set(result);
+    expect(unique.size).toBe(result.length);
+  });
+});
+
+describe('Socket.IO session logic via registerSocketHandlers', () => {
+  let io;
+  let triggerConnection;
+
+  beforeAll(() => {
+    io = makeMockIo();
+    // registerSocketHandlers binds io.on('connection', ...) with internal state.
+    // We pass null-safe stubs for db params (not used in session-management events).
+    registerSocketHandlers(io, {
+      segmentVerseText,
+      db: null,
+      db_cebuano: null,
+      db_tagalog: null,
+      db_spanish: null,
+      db_greek: null,
+      db_ilocano: null,
+      db_japanese: null,
+      db_nrsvue: null,
+      db_waray: null,
+    });
+    triggerConnection = (socket) => {
+      io._connectionHandlers.forEach(h => h(socket));
+    };
+  });
+
+  test('registers a connection handler on io', () => {
+    expect(io._connectionHandlers.length).toBeGreaterThan(0);
+    expect(typeof io._connectionHandlers[0]).toBe('function');
+  });
+
+  test('create-session emits session-created with sessionId and presenterToken', () => {
+    const socket = makeMockSocket();
+    triggerConnection(socket);
+
+    expect(typeof socket._handlers['create-session']).toBe('function');
+
+    const cb = jest.fn();
+    socket._handlers['create-session']({ label: 'Test Room' }, cb);
+
+    const created = socket._emitted.find(e => e.event === 'session-created');
+    expect(created).toBeDefined();
+    expect(created.data).toHaveProperty('sessionId');
+    expect(created.data).toHaveProperty('presenterToken');
+    expect(created.data.sessionId).toMatch(/^[A-Z0-9]{6}$/);
+    expect(created.data.presenterToken).toMatch(/^[0-9a-f]{32}$/);
+
+    // callback should also be called
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ ok: true }));
+  });
+
+  test('create-session without label still works', () => {
+    const socket = makeMockSocket();
+    triggerConnection(socket);
+
+    socket._handlers['create-session']({}, undefined);
+    const created = socket._emitted.find(e => e.event === 'session-created');
+    expect(created).toBeDefined();
+    expect(created.data.sessionId).toBeTruthy();
+  });
+
+  test('join-session with invalid id emits session-error', () => {
+    const socket = makeMockSocket();
+    triggerConnection(socket);
+
+    expect(typeof socket._handlers['join-session']).toBe('function');
+    socket._handlers['join-session']({ sessionId: 'INVALID99' }, undefined);
+
+    const err = socket._emitted.find(e => e.event === 'session-error');
+    expect(err).toBeDefined();
+    expect(err.data).toHaveProperty('message');
+  });
+
+  test('leave-session emits session-left', () => {
+    // First create a session so we have a valid one to join and then leave
+    const presenterSocket = makeMockSocket();
+    triggerConnection(presenterSocket);
+    presenterSocket._handlers['create-session']({ label: 'Leave Test' }, undefined);
+
+    const created = presenterSocket._emitted.find(e => e.event === 'session-created');
+    const sessionId = created.data.sessionId;
+
+    // A second socket joins then leaves
+    const viewerSocket = makeMockSocket();
+    triggerConnection(viewerSocket);
+    viewerSocket._handlers['join-session']({ sessionId }, undefined);
+
+    viewerSocket._emitted.length = 0; // clear before leave
+    viewerSocket._handlers['leave-session']({}, undefined);
+
+    const left = viewerSocket._emitted.find(e => e.event === 'session-left');
+    expect(left).toBeDefined();
+  });
+
+  test('search with empty query emits search-results with empty array', async () => {
+    const socket = makeMockSocket();
+    triggerConnection(socket);
+
+    expect(typeof socket._handlers['search']).toBe('function');
+    await socket._handlers['search']({ query: '' });
+
+    const results = socket._emitted.find(e => e.event === 'search-results');
+    expect(results).toBeDefined();
+    expect(results.data.results).toEqual([]);
+    expect(results.data.total).toBe(0);
+  });
+
+  test('search with oversized query emits error in search-results', async () => {
+    const socket = makeMockSocket();
+    triggerConnection(socket);
+
+    await socket._handlers['search']({ query: 'x'.repeat(501) });
+
+    const results = socket._emitted.find(e => e.event === 'search-results');
+    expect(results).toBeDefined();
+    expect(results.data.error).toBe('query-too-long');
+  });
+});

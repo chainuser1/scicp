@@ -598,6 +598,7 @@ const io = new Server(fastify.server, {
   },
   pingInterval: SERVICE_CONFIG.PING_INTERVAL_MS,
   pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
+  maxHttpBufferSize: 100 * 1024, // 100KB max per socket message
 });
 
 // Writable user-data DB for setlists (lives outside read-only resources)
@@ -2314,6 +2315,9 @@ function searchCacheGet(key) {
     searchResultsCache.delete(key);
     return null;
   }
+  // LRU: move to end so FIFO eviction removes least-recently-used
+  searchResultsCache.delete(key);
+  searchResultsCache.set(key, entry);
   return entry;
 }
 
@@ -3920,6 +3924,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     if (!normalized || normalized === DEFAULT_SESSION_ID) return;
     const roomSize = getRoomSize(normalized);
     if (roomSize !== 0) return;
+    // Don't clean up sessions with recent presenter activity (handles timer/activity race)
+    const state = sessionState.get(normalized);
+    if (state && state.presenterLastActivityAt && (Date.now() - state.presenterLastActivityAt < 60000)) {
+      scheduleCleanup(normalized); // reschedule
+      return;
+    }
     cancelCleanup(normalized);
     if (sessionState.has(normalized)) {
       sessionState.delete(normalized);
@@ -4018,7 +4028,8 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   const _idleSweep = setInterval(() => {
     for (const [sessionId] of sessionState) {
       if (sessionId === DEFAULT_SESSION_ID) continue;
-      if (getRoomSize(sessionId) === 0 && !cleanupTimers.has(sessionId)) {
+      const roomSize = getRoomSize(sessionId);
+      if (roomSize !== null && roomSize === 0 && !cleanupTimers.has(sessionId)) {
         sessionState.delete(sessionId);
         fastify.log.info(`[idle-sweep] Removed ghost session ${sessionId}`);
       }
@@ -4030,7 +4041,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
   });
 
   io.on('connection', (socket) => {
-    console.log('a user connected');
+    fastify.log.info('a user connected');
     socket.on('error', (err) => {
       fastify.log.warn({ err: err.message, socketId: socket.id }, '[Socket.IO] socket error');
     });
@@ -4038,6 +4049,19 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     let activeRole = 'viewer';
     socket.join(activeSessionId);
     getSessionState(activeSessionId);
+
+    // ── Per-socket rate limiter for expensive events ──────────────────────────
+    const _socketRateBuckets = {};
+    function socketRateLimit(event, maxPerMin) {
+      const now = Date.now();
+      const bucket = _socketRateBuckets[event] || (_socketRateBuckets[event] = { count: 0, resetAt: now + 60000 });
+      if (now > bucket.resetAt) { bucket.count = 0; bucket.resetAt = now + 60000; }
+      if (++bucket.count > maxPerMin) {
+        fastify.log.warn({ socketId: socket.id, event }, '[rate-limit] Socket event throttled');
+        return false;
+      }
+      return true;
+    }
 
     const joinSession = (candidateSessionId, role = 'viewer', pin = '', presenterToken = '') => {
       const normalized = normalizeSessionId(candidateSessionId);
@@ -4085,10 +4109,19 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
             });
             return { error: 'Another presenter is active in this session' };
           } else {
-            // Presenter lock is permanent until they explicitly hit "Leave Session".
-            // A disconnected device (sleeping phone, WiFi blip, mid-sermon) does
-            // not open the slot — the preacher's place is always held for them.
-            return { error: 'presenter-session-in-progress' };
+            // Presenter disconnected. Allow takeover if disconnect was > SESSION_GRACE_MS ago
+            // or if the grace period has passed. During grace period, hold the slot.
+            const disconnectedAt = state.presenterDisconnectedAt;
+            const graceElapsed = disconnectedAt && (Date.now() - disconnectedAt > SESSION_GRACE_MS);
+            if (graceElapsed) {
+              // Grace period expired — allow new presenter
+              state.presenterToken = incomingToken || generateToken();
+              state.presenterDisconnectedAt = null;
+              state.lockedOutTokens = new Set();
+              fastify.log.info(`Session ${normalized}: presenter slot released after grace period`);
+            } else {
+              return { error: 'presenter-session-in-progress' };
+            }
           }
         }
       }
@@ -4369,6 +4402,10 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('search', async (payload) => {
       try {
+        if (!socketRateLimit('search', 30)) {
+          socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'rate-limited' });
+          return;
+        }
         const query         = typeof payload === 'string' ? payload : payload?.query;
         const pageSize      = Math.min(50, Math.max(1, Number(payload?.pageSize) || 10));
         const language      = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
@@ -4380,7 +4417,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
           return;
         }
 
-        fastify.log.info(`search: "${query}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`);
+        const queryStr = String(query).trim();
+        if (queryStr.length > 500) {
+          socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'query-too-long' });
+          return;
+        }
+
+        fastify.log.info(`search: "${queryStr}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`);
 
         let offset = 0;
         let pipelineResults, total, cacheKey, pipelineMeta;
@@ -4441,10 +4484,12 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('update-verse', (payload) => {
+      if (!socketRateLimit('update-verse', 60)) return;
       const verse = payload && payload.verse ? payload.verse : payload;
+      if (!verse || typeof verse !== 'object' || !verse.verse_id) return;
       const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
-      console.log('updating verse:', verse);
+      fastify.log.info({ verseId: verse?.verse_id }, 'updating verse');
       const state = getSessionState(sessionId);
       state.liveVerse = verse;
       state.updatedAt = Date.now();
@@ -4455,7 +4500,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
       const theme = payload && payload.theme ? payload.theme : payload;
       const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
-      console.log('updating theme:', theme);
+      fastify.log.info('updating theme');
       const state = getSessionState(sessionId);
       state.theme = theme;
       state.updatedAt = Date.now();
@@ -4463,12 +4508,13 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     });
 
     socket.on('highlight-text', (payload) => {
+      if (!socketRateLimit('highlight-text', 60)) return;
       const text = payload && Object.prototype.hasOwnProperty.call(payload, 'text') ? payload.text : payload;
       const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
-      console.log('highlighting text:', text);
+      fastify.log.info('highlighting text');
       const state = getSessionState(sessionId);
-      state.highlightedText = text ? String(text).trim() : '';
+      state.highlightedText = text ? String(text).trim().slice(0, 5000) : '';
       state.updatedAt = Date.now();
       emitToSession(sessionId, 'highlight-text', state.highlightedText);
     });
@@ -4490,6 +4536,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     // ── go-custom (F2/F12) — send arbitrary announcement text to the TV ───────
     socket.on('go-custom', (payload) => {
+      if (!socketRateLimit('go-custom', 30)) return;
       const { text, subtext, theme } = payload || {};
       const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
@@ -4745,7 +4792,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.on('disconnect', () => {
       releasePresenterLock(activeSessionId, socket.id);
       scheduleCleanup(activeSessionId);
-      console.log('user disconnected');
+      fastify.log.info({ socketId: socket.id }, 'user disconnected');
     });
   });
 }
@@ -5037,7 +5084,7 @@ const start = async () => {
   try {
     const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
     await fastify.listen({ port, host: '0.0.0.0' })
-    console.log(`Server running on ${port}`)
+    fastify.log.info(`Server running on ${port}`)
     // Initialize FTS in background so health checks can pass immediately.
     // Skip in production/Electron — DBs are pre-built with FTS tables.
     if (!SKIP_RECOMPUTE) {
@@ -5053,6 +5100,14 @@ const start = async () => {
       if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
       if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
       if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
+      // M26: Quick integrity check on primary English FTS index
+      try {
+        dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get();
+      } catch (ftsErr) {
+        fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding');
+        dba.exec('DROP TABLE IF EXISTS scriptures_fts');
+        initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log });
+      }
     });
     } else {
       fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.');

@@ -164,7 +164,7 @@ const BOOK_ABBREVIATIONS = {
   'sos': 'Song of Solomon',
   'obadiah': 'Obadiah',
 
-  'oa': 'Olive Garden Account',
+  'oa': 'Obadiah',
 
   // ── Tagalog (Filipino) book names ─────────────────────────────────────────
   'exodo': 'Exodus',

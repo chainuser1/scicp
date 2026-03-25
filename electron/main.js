@@ -52,13 +52,21 @@ process.on('unhandledRejection', (reason) => {
 });
 
 function logLifecycle(msg) {
-  const ts = new Date().toISOString();
-  const logDir = path.join(app.getPath('userData'), 'logs');
   try {
-    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-    fs.appendFileSync(path.join(logDir, 'app.log'), `[${ts}] ${msg}\n`);
-  } catch {}
-  console.log(`[${ts}] ${msg}`);
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'app.log');
+    // Rotate if > 5MB
+    try {
+      const stats = fs.statSync(logFile);
+      if (stats.size > 5 * 1024 * 1024) {
+        fs.renameSync(logFile, path.join(logDir, 'app.log.1'));
+      }
+    } catch { /* file doesn't exist yet */ }
+    const ts = new Date().toISOString();
+    fs.appendFileSync(logFile, `[${ts}] ${msg}\n`);
+  } catch { /* logging must never crash the app */ }
+  console.log(`[${new Date().toISOString()}] ${msg}`);
 }
 
 const isDev = !app.isPackaged;
@@ -298,6 +306,7 @@ async function selectConnectionMode() {
 // ─── Window management ────────────────────────────────────────────────────────
 let presenterWin = null;
 let clientWin    = null;
+let _clientWinCreating = false;
 
 function getIcon() {
   return isDev
@@ -307,7 +316,8 @@ function getIcon() {
 
 function openClientWindow(display) {
   if (clientWin) { clientWin.focus(); return; }
-
+  if (_clientWinCreating) return;
+  _clientWinCreating = true;
   const primary = screen.getPrimaryDisplay();
   const isSecondary = display && display.id !== primary.id;
   const shouldFullscreen = Boolean(isSecondary);
@@ -343,6 +353,7 @@ function openClientWindow(display) {
   });
   clientWin.loadURL(`http://127.0.0.1:${process.env.PORT}/client?electron=1`);
   clientWin.on('closed', () => { clientWin = null; });
+  _clientWinCreating = false;
 }
 
 async function createWindows(connectionMode) {
@@ -351,12 +362,17 @@ async function createWindows(connectionMode) {
   const primary = screen.getPrimaryDisplay();
   const isOnline = connectionMode?.mode === 'online';
 
+  // Load saved window bounds
+  const boundsPath = path.join(app.getPath('userData'), 'window-bounds.json');
+  let savedBounds = {};
+  try { savedBounds = JSON.parse(fs.readFileSync(boundsPath, 'utf8')); } catch { /* first run */ }
+
   // ── Presenter window ──────────────────────────────────────────────────────
   presenterWin = new BrowserWindow({
-    width:  1280,
-    height: 820,
-    x: primary.bounds.x + 40,
-    y: primary.bounds.y + 40,
+    width:  savedBounds.width || 1280,
+    height: savedBounds.height || 820,
+    x: savedBounds.x !== undefined ? savedBounds.x : primary.bounds.x + 40,
+    y: savedBounds.y !== undefined ? savedBounds.y : primary.bounds.y + 40,
     title: 'Scriptures in View — Presenter',
     icon:  getIcon(),
     webPreferences: {
@@ -379,6 +395,12 @@ async function createWindows(connectionMode) {
   presenterWin.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+  presenterWin.on('close', () => {
+    try {
+      const bounds = presenterWin.getBounds();
+      fs.writeFileSync(boundsPath, JSON.stringify(bounds));
+    } catch { /* ignore */ }
   });
   presenterWin.on('closed', () => { presenterWin = null; });
   presenterWin.webContents.on('render-process-gone', (_e, details) => {
@@ -456,18 +478,25 @@ ipcMain.handle('switch-connection-mode', async (_e, newMode) => {
   return { ok: true, mode: newMode.mode };
 });
 
-// ─── Auto-updater (only in packaged builds) ─────────────────────────────────
+ipcMain.handle('get-app-version', () => app.getVersion());
+
 function setupAutoUpdater() {
   if (isDev || !autoUpdater) return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  let _updateDownloadTimer = null;
+
   autoUpdater.on('error', (err) => {
+    if (_updateDownloadTimer) { clearTimeout(_updateDownloadTimer); _updateDownloadTimer = null; }
     console.error('Auto-updater error:', err);
   });
 
   autoUpdater.on('update-available', (info) => {
+    _updateDownloadTimer = setTimeout(() => {
+      logLifecycle('Auto-update download timed out after 5 minutes');
+    }, 5 * 60 * 1000);
     if (presenterWin && !presenterWin.isDestroyed()) {
       presenterWin.webContents.send('update-status', { status: 'available', version: info.version });
     }
@@ -520,6 +549,7 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', () => {
+    if (_updateDownloadTimer) { clearTimeout(_updateDownloadTimer); _updateDownloadTimer = null; }
     if (presenterWin && !presenterWin.isDestroyed()) {
       presenterWin.webContents.send('update-status', { status: 'downloaded' });
     }
@@ -561,6 +591,27 @@ app.whenReady().then(async () => {
     return;
   }
   logLifecycle('Backend started on port ' + process.env.PORT);
+
+  // CSP headers for all renderer windows
+  const { session: electronSession } = require('electron');
+  electronSession.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self' http://localhost:* https://cap-teyyko.live; " +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+          "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+          "font-src 'self' https://fonts.gstatic.com; " +
+          "img-src 'self' data: blob: https:; " +
+          "connect-src 'self' http://localhost:* https://cap-teyyko.live wss://cap-teyyko.live ws://localhost:*; " +
+          "media-src 'self' blob:; " +
+          "frame-src 'none'"
+        ]
+      }
+    });
+  });
+
   waitForServer(async () => {
     selectedMode = await selectConnectionMode();
     createWindows(selectedMode);

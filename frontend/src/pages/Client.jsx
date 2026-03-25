@@ -143,7 +143,7 @@ function Client() {
   const [presenterSessionLocked, setPresenterSessionLocked] = useState(false); // presenter disconnected but slot still held
   const [qrDataUrl, setQrDataUrl]               = useState('');       // /presenter?session= — for operator
   const [clientQrDataUrl, setClientQrDataUrl]   = useState('');       // /client?session=    — for audience
-  const [_qrError, setQrError]                  = useState(false);
+  const [qrError, setQrError]                    = useState(false);
   const [presenterJoining, setPresenterJoining] = useState(false); // "✓ connected" overlay
   const [publicOrigin, setPublicOrigin]         = useState('');
   const [_sessionExpired, setSessionExpired]    = useState(false);
@@ -152,6 +152,7 @@ function Client() {
 
   const [isKioskMode, setIsKioskMode] = useState(true); // true until first presenter join
   const [kioskRestart, setKioskRestart] = useState(0);  // incremented to retrigger kiosk after presenter leaves
+  const [fontScale, setFontScale] = useState(() => parseFloat(localStorage.getItem('scicp.client_font_scale') || '1'));
   const kioskTimerRef       = useRef(null);
   const kioskCurVerseRef    = useRef(null); // verse_id of the verse currently on-screen in kiosk
   const nowReadingOnRef     = useRef(false); // mirrors nowReadingOn state — readable in callbacks
@@ -165,6 +166,22 @@ function Client() {
 
   useEffect(() => { clientSessionIdRef.current = clientSessionId; }, [clientSessionId]);
   useEffect(() => { presenterJoinedRef.current = presenterJoined; }, [presenterJoined]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [toggleFullscreen]);
 
   const getStoredTvSession = () => {
     try { return sessionStorage.getItem(TV_SESSION_KEY) || ''; } catch { return ''; }
@@ -890,7 +907,8 @@ function Client() {
   const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
   const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
-  const computedFontSize = `${computedRem.toFixed(5)}rem`;
+  const scaledRem        = computedRem * fontScale;
+  const computedFontSize = `${scaledRem.toFixed(5)}rem`;
 
   const VOLUME_CLASS_MAP = {
     'Old Testament':          'volume-ot',
@@ -1062,6 +1080,9 @@ function Client() {
             {activeQr && (
               <img src={activeQr} alt={activeAlt} className="client-votd-qr-img" />
             )}
+            {qrError && !activeQr && (
+              <p className="qr-error-msg">QR unavailable — share session code: <strong>{clientSessionId}</strong></p>
+            )}
             <span className="client-votd-qr-label">{activeLabel}</span>
           </div>
         );
@@ -1074,6 +1095,14 @@ function Client() {
           <div className="client-qr-joining-text">Presenter connected</div>
         </div>
       )}
+
+      <div className="client-font-controls" aria-label="Font size controls">
+        <button onClick={() => { const s = Math.max(0.5, parseFloat((fontScale - 0.1).toFixed(1))); setFontScale(s); localStorage.setItem('scicp.client_font_scale', s); }} aria-label="Decrease font size">A−</button>
+        <button onClick={() => { const s = Math.min(2.0, parseFloat((fontScale + 0.1).toFixed(1))); setFontScale(s); localStorage.setItem('scicp.client_font_scale', s); }} aria-label="Increase font size">A+</button>
+        <button onClick={() => { setFontScale(1); localStorage.setItem('scicp.client_font_scale', '1'); }} aria-label="Reset font size">↺</button>
+      </div>
+
+      <button className="fullscreen-toggle" onClick={toggleFullscreen} aria-label="Toggle fullscreen" title="Toggle fullscreen (F11)">⛶</button>
     </div>
   );
 }
