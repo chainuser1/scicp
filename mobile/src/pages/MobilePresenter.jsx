@@ -3564,9 +3564,9 @@ const MobilePresenter = () => {
           <span>Display</span>
         </button>
 
-        {/* Center action — Go Live when staged, End when live, Browse otherwise */}
+        {/* Center action — Go Live when staged, End when live, open Search drawer otherwise */}
         <button
-          className={`prs-nav-btn prs-nav-btn--center${staged ? ' prs-nav-btn--golive' : liveVerse ? ' prs-nav-btn--live' : ''}`}
+          className={`prs-nav-btn prs-nav-btn--center${staged ? ' prs-nav-btn--golive' : liveVerse ? ' prs-nav-btn--live' : ' prs-nav-btn--idle'}`}
           onClick={() => {
             if (staged) goLive();
             else if (liveVerse) endLive();

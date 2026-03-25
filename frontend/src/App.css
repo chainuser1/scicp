@@ -7591,6 +7591,28 @@ button, [role="button"] {
   background: radial-gradient(circle, rgba(201, 168, 76, 0.22), rgba(201, 168, 76, 0.05) 70%);
   border: 1px solid rgba(201, 168, 76, 0.28);
   margin-bottom: 1rem;
+  position: relative;
+}
+
+.dl-card--detected {
+  outline: 2px solid rgba(201,168,76,0.6);
+  outline-offset: 2px;
+}
+
+.dl-card-detected-badge {
+  position: absolute;
+  bottom: -0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--gold, #c9a84c);
+  color: #0a0a0f;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-transform: uppercase;
 }
 
 .dl-card-icon {

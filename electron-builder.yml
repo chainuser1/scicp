@@ -28,6 +28,23 @@ files:
     to: "electron/node_modules"
     filter:
       - "**/*"
+  # Backend runtime deps (hoisted to root node_modules by npm workspaces)
+  - from: "node_modules/@fastify"
+    to: "node_modules/@fastify"
+    filter:
+      - "**/*"
+  - from: "node_modules/fastify"
+    to: "node_modules/fastify"
+    filter:
+      - "**/*"
+  - from: "node_modules/socket.io"
+    to: "node_modules/socket.io"
+    filter:
+      - "**/*"
+  - from: "node_modules/compromise"
+    to: "node_modules/compromise"
+    filter:
+      - "**/*"
   - from: "node_modules/@xenova"
     to: "node_modules/@xenova"
     filter:
