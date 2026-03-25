@@ -40,6 +40,27 @@ try {
   console.warn('electron-updater unavailable; auto-update disabled:', err.message);
 }
 
+// ─── Global error handlers ────────────────────────────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err);
+  dialog.showErrorBox('Unexpected Error', `${err.message}\n\nThe application will restart.`);
+  app.relaunch();
+  app.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason);
+});
+
+function logLifecycle(msg) {
+  const ts = new Date().toISOString();
+  const logDir = path.join(app.getPath('userData'), 'logs');
+  try {
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'app.log'), `[${ts}] ${msg}\n`);
+  } catch {}
+  console.log(`[${ts}] ${msg}`);
+}
+
 const isDev = !app.isPackaged;
 
 // ─── Path resolution ──────────────────────────────────────────────────────────
@@ -54,16 +75,48 @@ if (isDev) {
   const destDbDir = path.join(app.getPath('userData'), 'db');
   if (!fs.existsSync(destDbDir)) fs.mkdirSync(destDbDir, { recursive: true });
   for (const file of fs.readdirSync(srcDbDir)) {
+    const src = path.join(srcDbDir, file);
     const dest = path.join(destDbDir, file);
-    if (!fs.existsSync(dest)) {
-      fs.copyFileSync(path.join(srcDbDir, file), dest);
+    const srcStat = fs.statSync(src);
+    const needsCopy = !fs.existsSync(dest) || fs.statSync(dest).mtimeMs < srcStat.mtimeMs;
+    if (needsCopy) {
+      try {
+        fs.copyFileSync(src, dest);
+      } catch (err) {
+        console.error(`[DB] Failed to copy ${file}:`, err.message);
+      }
+    }
+  }
+  // Verify copied DBs are valid SQLite files
+  const mainDb = path.join(destDbDir, 'lds-scriptures-sqlite.db');
+  if (fs.existsSync(mainDb)) {
+    const header = Buffer.alloc(6);
+    const fd = fs.openSync(mainDb, 'r');
+    fs.readSync(fd, header, 0, 6, 0);
+    fs.closeSync(fd);
+    if (header.toString('utf8') !== 'SQLite') {
+      console.error('[DB] Main database is corrupt — re-copying from source');
+      fs.copyFileSync(path.join(srcDbDir, 'lds-scriptures-sqlite.db'), mainDb);
     }
   }
   process.env.DB_DIR             = destDbDir;
   process.env.FRONTEND_DIST_DIR  = path.join(process.resourcesPath, 'frontend-dist');
   process.env.USER_DATA_DIR      = app.getPath('userData');
 }
-process.env.PORT = process.env.PORT || '3000';
+// Find an available port (default 3000, try up to 3010)
+function findAvailablePort(start, max) {
+  const net = require('net');
+  return new Promise((resolve) => {
+    const tryPort = (port) => {
+      if (port > max) return resolve(start); // fallback to default
+      const server = net.createServer();
+      server.once('error', () => tryPort(port + 1));
+      server.once('listening', () => { server.close(() => resolve(port)); });
+      server.listen(port, '127.0.0.1');
+    };
+    tryPort(start);
+  });
+}
 
 // ─── Start embedded backend ───────────────────────────────────────────────────
 const { startElectron } = require('../backend/index.js');
@@ -71,8 +124,17 @@ const { startElectron } = require('../backend/index.js');
 // ─── Poll until the Fastify server is accepting connections ───────────────────
 function waitForServer(cb) {
   const attempt = () => {
-    http.get('http://127.0.0.1:3000/', () => cb())
-      .on('error', () => setTimeout(attempt, 200));
+    http.get(`http://127.0.0.1:${process.env.PORT}/health`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.status === 'ok') return cb();
+        } catch {}
+        setTimeout(attempt, 300);
+      });
+    }).on('error', () => setTimeout(attempt, 300));
   };
   attempt();
 }
@@ -176,7 +238,13 @@ async function selectConnectionMode() {
   return new Promise((resolve) => {
     ipcMain.once('online-mode-connect', (_e, serverUrl) => {
       if (!urlWin.isDestroyed()) urlWin.close();
-      resolve({ mode: 'online', serverUrl: serverUrl.replace(/\/+$/, '') });
+      const cleaned = String(serverUrl).replace(/\/+$/, '');
+      if (!/^https?:\/\/.+/.test(cleaned)) {
+        dialog.showErrorBox('Invalid URL', 'Please enter a valid HTTP or HTTPS URL.');
+        resolve({ mode: 'offline' });
+        return;
+      }
+      resolve({ mode: 'online', serverUrl: cleaned });
     });
     urlWin.on('closed', () => {
       ipcMain.removeAllListeners('online-mode-connect');
@@ -273,11 +341,12 @@ function openClientWindow(display) {
     else clientWin.setFullScreen(false);
     clientWin.show();
   });
-  clientWin.loadURL('http://127.0.0.1:3000/client?electron=1');
+  clientWin.loadURL(`http://127.0.0.1:${process.env.PORT}/client?electron=1`);
   clientWin.on('closed', () => { clientWin = null; });
 }
 
 async function createWindows(connectionMode) {
+  logLifecycle('Creating windows, mode: ' + connectionMode?.mode);
   const preload = path.join(__dirname, 'preload.js');
   const primary = screen.getPrimaryDisplay();
   const isOnline = connectionMode?.mode === 'online';
@@ -302,9 +371,9 @@ async function createWindows(connectionMode) {
   if (isOnline) {
     // Online: load presenter from local server but point socket at remote
     const serverUrl = encodeURIComponent(connectionMode.serverUrl);
-    presenterWin.loadURL(`http://127.0.0.1:3000/presenter?mode=online&server=${serverUrl}`);
+    presenterWin.loadURL(`http://127.0.0.1:${process.env.PORT}/presenter?mode=online&server=${serverUrl}`);
   } else {
-    presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL');
+    presenterWin.loadURL(`http://127.0.0.1:${process.env.PORT}/presenter?session=LOCAL`);
   }
 
   presenterWin.webContents.setWindowOpenHandler(({ url }) => {
@@ -312,6 +381,20 @@ async function createWindows(connectionMode) {
     return { action: 'deny' };
   });
   presenterWin.on('closed', () => { presenterWin = null; });
+  presenterWin.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[Crash] Presenter renderer gone:', details.reason);
+    if (details.reason !== 'clean-exit') {
+      dialog.showMessageBox({
+        type: 'error',
+        title: 'Renderer Crashed',
+        message: 'The presenter window crashed unexpectedly.',
+        detail: `Reason: ${details.reason}\nThe window will reload.`,
+        buttons: ['Reload'],
+      }).then(() => {
+        if (presenterWin && !presenterWin.isDestroyed()) presenterWin.reload();
+      });
+    }
+  });
 
   // ── Client / projection window (offline mode only) ────────────────────────
   if (!isOnline) {
@@ -356,9 +439,9 @@ ipcMain.handle('switch-connection-mode', async (_e, newMode) => {
   // Reload the presenter URL — the page saves state to sessionStorage before calling this
   if (isNowOnline) {
     const serverUrl = encodeURIComponent(newMode.serverUrl || '');
-    presenterWin.loadURL(`http://127.0.0.1:3000/presenter?mode=online&server=${serverUrl}&restored=1`);
+    presenterWin.loadURL(`http://127.0.0.1:${process.env.PORT}/presenter?mode=online&server=${serverUrl}&restored=1`);
   } else {
-    presenterWin.loadURL('http://127.0.0.1:3000/presenter?session=LOCAL&restored=1');
+    presenterWin.loadURL(`http://127.0.0.1:${process.env.PORT}/presenter?session=LOCAL&restored=1`);
   }
 
   // Open or close the client projection window as appropriate
@@ -377,8 +460,8 @@ ipcMain.handle('switch-connection-mode', async (_e, newMode) => {
 function setupAutoUpdater() {
   if (isDev || !autoUpdater) return;
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('error', (err) => {
     console.error('Auto-updater error:', err);
@@ -458,20 +541,26 @@ function setupAutoUpdater() {
     autoUpdater.checkForUpdates().catch((err) => {
       console.error('Auto-updater check failed:', err);
     });
-  }, 5000);
+  }, 30000);
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 let selectedMode = null;
 
 app.whenReady().then(async () => {
+  logLifecycle('App starting...');
+  const port = await findAvailablePort(3000, 3010);
+  process.env.PORT = String(port);
   try {
     await startElectron();
   } catch (err) {
     console.error('Backend failed to start:', err);
+    dialog.showErrorBox('Backend Failed to Start',
+      `The local server could not start.\n\n${err.message}\n\nCheck that database files exist in:\n${process.env.DB_DIR}`);
     app.quit();
     return;
   }
+  logLifecycle('Backend started on port ' + process.env.PORT);
   waitForServer(async () => {
     selectedMode = await selectConnectionMode();
     createWindows(selectedMode);
@@ -479,7 +568,7 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => { app.quit(); });
+app.on('window-all-closed', () => { logLifecycle('All windows closed, quitting.'); app.quit(); });
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {

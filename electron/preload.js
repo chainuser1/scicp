@@ -13,11 +13,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   changeProjectionDisplay: () => ipcRenderer.invoke('change-projection-display'),
 
   // Online mode: send chosen server URL back to main process
-  sendOnlineConnect: (url) => ipcRenderer.send('online-mode-connect', url),
+  sendOnlineConnect: (url) => {
+    if (typeof url === 'string' && url.trim()) ipcRenderer.send('online-mode-connect', url.trim());
+  },
 
   // Hot mode-switch: reload presenter URL preserving state via sessionStorage.
   // newMode: { mode: 'offline' } or { mode: 'online', serverUrl: '...' }
-  switchConnectionMode: (newMode) => ipcRenderer.invoke('switch-connection-mode', newMode),
+  switchConnectionMode: (newMode) => {
+    if (newMode && typeof newMode === 'object' && typeof newMode.mode === 'string') {
+      return ipcRenderer.invoke('switch-connection-mode', newMode);
+    }
+    return Promise.reject(new Error('Invalid mode'));
+  },
 
   // Auto-updater events — forward from main process to renderer
   onUpdateStatus: (cb) => {
