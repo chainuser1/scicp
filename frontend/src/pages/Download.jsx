@@ -19,12 +19,20 @@ const PLATFORM_META = [
     guide: ['Download the app file.', 'Open it and move the app to Applications.', 'Start the app and begin scripture display.'],
   },
   {
-    label: 'Linux',
-    platform: 'linux',
+    label: 'Linux (.AppImage)',
+    platform: 'linux-appimage',
     category: 'desktop',
     icon: '🐧',
-    note: 'Linux desktop computers',
-    guide: ['Download the app package.', 'Install using your system package tool.', 'Open from your applications menu.'],
+    note: 'All Linux distributions',
+    guide: ['Download the .AppImage file.', 'Make it executable: chmod +x *.AppImage', 'Double-click or run it — no install needed.'],
+  },
+  {
+    label: 'Linux (.deb)',
+    platform: 'linux-deb',
+    category: 'desktop',
+    icon: '🐧',
+    note: 'Debian, Ubuntu, Kali, Mint',
+    guide: ['Download the .deb package.', 'Install: sudo dpkg -i scriptures*.deb', 'Open from your applications menu.'],
   },
   {
     label: 'Android',
@@ -36,6 +44,20 @@ const PLATFORM_META = [
   },
 ];
 
+/** Detect the visitor's OS to pre-select the best platform. */
+function detectPlatform() {
+  const ua = navigator.userAgent.toLowerCase();
+  if (/android/.test(ua)) return 'android';
+  if (/iphone|ipad|ipod/.test(ua)) return null; // iOS not supported
+  if (/win/.test(ua)) return 'windows';
+  if (/mac/.test(ua)) return 'mac';
+  if (/linux/.test(ua)) {
+    // Debian/Ubuntu/Kali/Mint: default to .deb
+    return 'linux-deb';
+  }
+  return null;
+}
+
 const FALLBACK_BY_PLATFORM = {
   android: {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000059743/artifacts/5889562783',
@@ -45,7 +67,11 @@ const FALLBACK_BY_PLATFORM = {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889590639',
     sha256: '4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd',
   },
-  linux: {
+  'linux-appimage': {
+    url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
+    sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
+  },
+  'linux-deb': {
     url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
     sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
   },
@@ -66,6 +92,11 @@ export default function Download() {
       source: 'fallback',
     }))
   );
+
+  // Auto-select the tab matching the visitor's OS
+  const detectedPlatform = useMemo(() => detectPlatform(), []);
+  const detectedCategory = detectedPlatform === 'android' ? 'mobile' : detectedPlatform ? 'desktop' : 'desktop';
+  const [activeTab, setActiveTab] = useState(detectedCategory);
 
   useEffect(() => {
     document.title = 'Download | Scriptures in View';
@@ -103,7 +134,8 @@ export default function Download() {
           android: find(n => n.endsWith('.apk')),
           windows: find(n => n.endsWith('.exe')),
           mac: find(n => n.endsWith('.dmg')),
-          linux: find(n => n.endsWith('.appimage')) || find(n => n.endsWith('.deb')),
+          'linux-appimage': find(n => n.endsWith('.appimage')),
+          'linux-deb': find(n => n.endsWith('.deb')),
         };
         if (!active) return;
         setReleaseTag(data?.tag_name || 'latest');
@@ -186,7 +218,6 @@ export default function Download() {
     [downloadLinks]
   );
 
-  const [activeTab, setActiveTab] = useState('desktop');
   const visiblePlatforms = activeTab === 'desktop' ? groupedDownloads.desktop : groupedDownloads.mobile;
 
   return (
@@ -261,9 +292,12 @@ export default function Download() {
             {/* Cards */}
             <div className={`dl-grid dl-grid--${activeTab}`}>
               {visiblePlatforms.map(item => (
-                <div key={item.platform} className="dl-card">
+                <div key={item.platform} className={`dl-card${detectedPlatform === item.platform ? ' dl-card--detected' : ''}`}>
                   <div className="dl-card-icon-wrap">
                     <span className="dl-card-icon" aria-hidden="true">{item.icon}</span>
+                    {detectedPlatform === item.platform && (
+                      <span className="dl-card-detected-badge">Your system</span>
+                    )}
                   </div>
                   <h2 className="dl-card-title">{item.label}</h2>
                   <p className="dl-card-note">{item.note}</p>

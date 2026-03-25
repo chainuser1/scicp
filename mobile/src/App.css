@@ -9517,7 +9517,7 @@ button, [role="button"] {
 .prs-bottom-nav {
   display: flex;
   align-items: stretch;
-  height: 62px;
+  height: 68px;
   background: var(--ui-bg, #13131a);
   border-top: 1px solid rgba(201,168,76,0.15);
   position: fixed;
@@ -9534,18 +9534,18 @@ button, [role="button"] {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   background: none;
   border: none;
-  color: rgba(255,255,255,0.45);
-  font-size: 0.62rem;
+  color: rgba(255,255,255,0.5);
+  font-size: 0.68rem;
   letter-spacing: 0.02em;
   cursor: pointer;
-  padding: 6px 4px;
+  padding: 8px 2px;
   transition: color 0.15s, background 0.15s;
   position: relative;
 }
-.prs-nav-btn svg { width: 20px; height: 20px; }
+.prs-nav-btn svg { width: 22px; height: 22px; }
 .prs-nav-btn:active { background: rgba(201,168,76,0.08); }
 .prs-nav-btn--active { color: #c9a84c; }
 .prs-nav-btn--active svg { color: #c9a84c; }
@@ -9554,6 +9554,9 @@ button, [role="button"] {
 .prs-nav-btn--center {
   flex: 1.1;
   color: rgba(255,255,255,0.5);
+}
+.prs-nav-btn--idle {
+  color: rgba(255,255,255,0.3);
 }
 .prs-nav-btn--golive {
   color: #c9a84c !important;
