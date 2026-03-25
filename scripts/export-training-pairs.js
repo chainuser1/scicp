@@ -5,10 +5,12 @@
  * Pair sources (by training signal strength):
  *   1. Translation pairs   — same verse across LDS ↔ NRSVUE ↔ Tagalog ↔ ... (paraphrase)
  *   2. Topical guide        — topic name ↔ verse text (concept grounding)
- *   3. Cross-references     — theologically linked verses
- *   4. kNN top-3 neighbors  — semantically similar verses stay close
- *   5. Adjacent verses      — same-chapter continuity
- *   6. Same-topic verse pairs — two verses under the same topic are related
+ *   3. Triple Combination Index — topic name ↔ verse text (broader concept coverage)
+ *   4. Cross-references     — theologically linked verses
+ *   5. kNN top-3 neighbors  — semantically similar verses stay close
+ *   6. Adjacent verses      — same-chapter continuity
+ *   7. Same-topic verse pairs (TG) — two verses under the same TG topic
+ *   8. Same-topic verse pairs (Triple) — two verses under the same Triple Index topic
  *
  * Output: resources/training-pairs.json
  *   [ { "anchor": "...", "positive": "..." }, ... ]
@@ -88,7 +90,29 @@ try {
   }
   tg.close();
 } catch (e) { console.log('  topical-guide.db error:', e.message); }
-console.log(`3. Topical guide pairs: ${topicCount.toLocaleString()}`);
+console.log(`2. Topical guide pairs: ${topicCount.toLocaleString()}`);
+
+// ── 3. Triple Combination Index: topic name ↔ verse text ─────────────────────
+// Same pattern as topical guide but from the Triple Combination Index
+// (broader coverage: 3,059 topics, 44k mappings). Snippets are ignored.
+let tripleTopicCount = 0;
+try {
+  const ti = new Database(path.join(DB_DIR, 'triple-index.db'), { readonly: true });
+  const triTopics = new Map();
+  for (const r of ti.prepare('SELECT id, name FROM topics').all())
+    triTopics.set(r.id, r.name);
+
+  for (const r of ti.prepare('SELECT topic_id, verse_id FROM triple_index WHERE verse_id IS NOT NULL').all()) {
+    const topic = triTopics.get(r.topic_id);
+    const verse = ldsVerses.get(r.verse_id);
+    if (topic && verse) {
+      pairs.push({ anchor: topic, positive: verse });
+      tripleTopicCount++;
+    }
+  }
+  ti.close();
+} catch (e) { console.log('  triple-index.db error:', e.message); }
+console.log(`3. Triple Index pairs: ${tripleTopicCount.toLocaleString()}`);
 
 // ── 4. Cross-references: theologically linked verses ────────────────────────
 let crossRefCount = 0;
@@ -141,7 +165,7 @@ for (let i = 0; i < sortedIds.length - 1; i++) {
 }
 console.log(`6. Adjacent verse pairs: ${adjCount.toLocaleString()}`);
 
-// ── 7. Same-topic verse pairs (sampled): two verses under same topic ────────
+// ── 7. Same-topic verse pairs (TG): two verses under same topical guide topic
 let sameTopicCount = 0;
 try {
   const tg = new Database(path.join(DB_DIR, 'topical-guide.db'), { readonly: true });
@@ -169,7 +193,36 @@ try {
   }
   tg.close();
 } catch (e) { console.log('  same-topic error:', e.message); }
-console.log(`7. Same-topic verse pairs: ${sameTopicCount.toLocaleString()}`);
+console.log(`7. Same-topic verse pairs (TG): ${sameTopicCount.toLocaleString()}`);
+
+// ── 8. Same-topic verse pairs (Triple Index): two verses under same TI topic ─
+let sameTripleCount = 0;
+try {
+  const ti = new Database(path.join(DB_DIR, 'triple-index.db'), { readonly: true });
+  const triTopicVerses = new Map(); // topic_id → [verse_id, ...]
+  for (const r of ti.prepare('SELECT topic_id, verse_id FROM triple_index WHERE verse_id IS NOT NULL').all()) {
+    if (!ldsVerses.has(r.verse_id)) continue;
+    if (!triTopicVerses.has(r.topic_id)) triTopicVerses.set(r.topic_id, []);
+    triTopicVerses.get(r.topic_id).push(r.verse_id);
+  }
+  for (const [, vids] of triTopicVerses) {
+    if (vids.length < 2) continue;
+    const limit = Math.min(3, Math.floor(vids.length * (vids.length - 1) / 2));
+    const seen = new Set();
+    for (let p = 0; p < limit; p++) {
+      const i = Math.floor(Math.random() * vids.length);
+      let j = Math.floor(Math.random() * vids.length);
+      if (i === j) j = (j + 1) % vids.length;
+      const key = Math.min(vids[i], vids[j]) + ':' + Math.max(vids[i], vids[j]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({ anchor: ldsVerses.get(vids[i]), positive: ldsVerses.get(vids[j]) });
+      sameTripleCount++;
+    }
+  }
+  ti.close();
+} catch (e) { console.log('  same-triple error:', e.message); }
+console.log(`8. Same-topic verse pairs (Triple): ${sameTripleCount.toLocaleString()}`);
 
 // ── Shuffle and write ───────────────────────────────────────────────────────
 // Deterministic shuffle with seed
@@ -187,8 +240,10 @@ console.log(`══════════════════════�
 console.log(`\nBreakdown:`);
 console.log(`  Translation (LDS↔NRSVUE): ${translationCount.toLocaleString()}`);
 console.log(`  Topical guide:            ${topicCount.toLocaleString()}`);
+console.log(`  Triple Index:             ${tripleTopicCount.toLocaleString()}`);
 console.log(`  Cross-references:         ${crossRefCount.toLocaleString()}`);
 console.log(`  kNN neighbors:            ${knnCount.toLocaleString()}`);
 console.log(`  Adjacent verses:          ${adjCount.toLocaleString()}`);
-console.log(`  Same-topic verses:        ${sameTopicCount.toLocaleString()}`);
+console.log(`  Same-topic (TG):          ${sameTopicCount.toLocaleString()}`);
+console.log(`  Same-topic (Triple):      ${sameTripleCount.toLocaleString()}`);
 console.log(`\nNext: upload resources/training-pairs.json to Google Colab`);
