@@ -1,4 +1,4 @@
-const fastify = require('fastify')({ logger: true });
+const fastify = require('fastify')({ logger: true, bodyLimit: 1048576 });
 const { Server } = require("socket.io");
 const path = require('path');
 const fs = require('fs');
@@ -160,7 +160,19 @@ const fastifyStatic = require('@fastify/static');
 const hashPin = (pin) => crypto.createHash('sha256').update(String(pin)).digest('hex');
 
 fastify.register(require('@fastify/cors'), {
-  origin: "*",
+  origin: process.env.NODE_ENV === 'production'
+    ? [process.env.PUBLIC_ORIGIN || 'https://cap-teyyko.live']
+    : true,
+});
+
+fastify.register(require('@fastify/helmet'), {
+  contentSecurityPolicy: false,  // CSP conflicts with inline styles in React
+});
+
+fastify.register(require('@fastify/rate-limit'), {
+  max: 100,
+  timeWindow: '1 minute',
+  allowList: ['127.0.0.1', '::1'],
 });
 
 fastify.register(fastifyStatic, {
@@ -579,7 +591,11 @@ const SERVICE_CONFIG = {
 };
 
 const io = new Server(fastify.server, {
-  cors: { origin: '*' },
+  cors: {
+    origin: process.env.NODE_ENV === 'production'
+      ? [process.env.PUBLIC_ORIGIN || 'https://cap-teyyko.live']
+      : '*',
+  },
   pingInterval: SERVICE_CONFIG.PING_INTERVAL_MS,
   pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
 });
@@ -4009,8 +4025,15 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     }
   }, 5 * 60 * 1000);
 
+  io.engine.on('connection_error', (err) => {
+    fastify.log.warn({ err: err.message, code: err.code }, '[Socket.IO] connection error');
+  });
+
   io.on('connection', (socket) => {
     console.log('a user connected');
+    socket.on('error', (err) => {
+      fastify.log.warn({ err: err.message, socketId: socket.id }, '[Socket.IO] socket error');
+    });
     let activeSessionId = DEFAULT_SESSION_ID;
     let activeRole = 'viewer';
     socket.join(activeSessionId);
@@ -4545,7 +4568,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
     socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId, secondaryLanguage}) => {
       const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID;
       if (!ensurePresenterAccess(sessionId, socket)) return;
-      console.log('go-live triggered', verse, theme, language, sessionId);
+      fastify.log.info({ sessionId }, '[Socket.IO] go-live triggered');
 
       let scriptureText = verse.scripture_text;
       let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
