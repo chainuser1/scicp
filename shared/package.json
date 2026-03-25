@@ -1,0 +1,11 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared scripture engine and DB adapters",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest --forceExit"
+  },
+  "devDependencies": {}
+}

@@ -365,7 +365,7 @@ export async function search(query, page = 0, pageSize = 10, language = 'en') {
   let embDb = getDb('embeddings');
   if (!embDb) {
     // Trigger lazy load in background for next search (don't block this search)
-    loadEmbeddingsDb().catch(() => {});
+    loadEmbeddingsDb().catch(err => console.warn('[scicp]', err.message || err));
   }
   if (embDb) {
     try {

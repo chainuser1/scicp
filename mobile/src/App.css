@@ -4979,14 +4979,15 @@ button, [role="button"] {
   .history-item:hover::before { transform: scaleY(0); }
 
   /* Minimum touch targets */
-  .preview-nav-btn, .hdr-btn { min-width: 42px; min-height: 42px; }
-  .result-live-icon, .result-add-icon { min-width: 42px; min-height: 42px; }
+  .preview-nav-btn, .hdr-btn { min-width: 44px; min-height: 44px; }
+  .result-live-icon, .result-add-icon, .result-translation-toggle { min-width: 44px; min-height: 44px; }
   .go-live-button { min-height: 52px; }
   .search-input { min-height: 48px; }
   .pagination-arrow { min-width: 44px; min-height: 44px; }
   .pagination-pip  { min-width: 28px; min-height: 28px; }
   .drawer-close    { min-width: 44px; min-height: 44px; }
   .mobile-font-btn, .mobile-endlive-btn { min-height: 44px; min-width: 40px; }
+  .setlist-move-btn, .setlist-live-btn, .setlist-remove-btn { min-width: 44px; min-height: 44px; }
 
   /* Hide scrollbars on touch — momentum is enough */
   .drawer-body, .results-list, .main-panel {
@@ -7985,10 +7986,10 @@ button, [role="button"] {
 
 .presenter-ui--dark .mobile-menu-label { color: var(--text-dim); }
 .presenter-ui--dark .mobile-menu-divider { background: var(--gold-border); }
-
+/* 
 
    SIMPLE PRESENTER — clean guided UI for non-technical users
-   ============================================================ */
+   ============================================================ */ */
 
 .simple-presenter {
   display: flex;

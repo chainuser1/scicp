@@ -73,8 +73,8 @@ export default function CastingControl({ className = '', compact = false, label 
     return () => {
       mounted = false;
       clearInterval(pollInterval);
-      onConnect.then(h => h.remove()).catch(() => {});
-      onDisconnect.then(h => h.remove()).catch(() => {});
+      onConnect.then(h => h.remove()).catch(err => console.warn('[scicp]', err.message || err));
+      onDisconnect.then(h => h.remove()).catch(err => console.warn('[scicp]', err.message || err));
     };
   }, []);
 
