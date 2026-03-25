@@ -21,6 +21,17 @@ jobs:
         with:
           lfs: true
 
+      - name: Cache Git LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-${{ github.sha }}
+          restore-keys: |
+            lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-
+
+      - name: Pull LFS objects (uses cache when available)
+        run: git lfs pull
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
