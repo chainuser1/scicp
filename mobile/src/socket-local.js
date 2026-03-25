@@ -36,6 +36,14 @@ let _presentationActive = false;
 let _castMode = null; // 'native' | 'web' | null
 let _webConnection = null;
 
+// M38: Reset casting state if the external display disconnects unexpectedly.
+if (typeof ExternalDisplay.addListener === 'function') {
+  ExternalDisplay.addListener('displayDisconnected', () => {
+    _presentationActive = false;
+    console.warn('[scicp] External display disconnected');
+  });
+}
+
 function supportsWebPresentation() {
   return typeof window !== 'undefined' && typeof window.PresentationRequest === 'function';
 }

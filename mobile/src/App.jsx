@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { App as CapApp } from '@capacitor/app';
+import { Network } from '@capacitor/network';
+import { SplashScreen } from '@capacitor/splash-screen';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
 import { initAllDatabases } from './db-manager';
@@ -11,6 +13,9 @@ import ScriptureReader from './pages/ScriptureReader.jsx';
 
 const MODE_KEY  = 'scicp.conn_mode';    // 'offline' | 'online'
 const URL_KEY   = 'scicp.server_url';
+// M35: @capacitor/preferences is not installed in this project. localStorage is used
+// intentionally — Capacitor 4+ wraps localStorage natively on Android/iOS, so no
+// migration is needed.
 
 // Upgrade http:// to https:// for non-local hosts (tunnels/proxies strip TLS)
 function ensureHttps(origin) {
@@ -35,6 +40,7 @@ export default function App() {
   const [scannerOpen, setScannerOpen] = useState(false);
   // Hot mode-switch: shows an overlay *over* MobilePresenter without unmounting it
   const [modeSwitchOpen, setModeSwitchOpen] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState('online');
   const [startupChecks, setStartupChecks] = useState({ camera: 'checking', cast: 'checking', online: 'checking' });
   const [checksBusy, setChecksBusy] = useState(false);
   const videoRef   = useRef(null);
@@ -270,6 +276,46 @@ export default function App() {
     return () => { listener.then(l => l.remove()); };
   }, [runStartupChecks]);
 
+  // ── Android back button handler (H15) ──
+  useEffect(() => {
+    const handler = CapApp.addListener('backButton', ({ canGoBack }) => {
+      if (scannerOpen) {
+        setScannerOpen(false);
+        stopCamera();
+        return;
+      }
+      if (modeSwitchOpen) {
+        setModeSwitchOpen(false);
+        return;
+      }
+      if (mode && ready) {
+        setMode(null);
+        setReady(false);
+        return;
+      }
+      CapApp.minimizeApp();
+    });
+    return () => { handler.then(h => h.remove()).catch(err => console.warn('[scicp] back button cleanup:', err.message || err)); };
+  }, [scannerOpen, modeSwitchOpen, mode, ready, stopCamera]);
+
+  // ── Network state monitoring (H16) ──
+  useEffect(() => {
+    let listener;
+    Network.getStatus().then(s => setNetworkStatus(s.connected ? 'online' : 'offline')).catch(() => {});
+    Network.addListener('networkStatusChange', (status) => {
+      setNetworkStatus(status.connected ? 'online' : 'offline');
+      if (status.connected && mode === 'online' && remoteSocket && !remoteSocket.connected) {
+        remoteSocket.connect();
+      }
+    }).then(l => { listener = l; }).catch(() => {});
+    return () => { if (listener) listener.remove(); };
+  }, [mode]);
+
+  // ── Splash screen hide (H17) ──
+  useEffect(() => {
+    SplashScreen.hide().catch(() => {});
+  }, []);
+
   const requestCameraPermission = useCallback(async () => {
     try {
       // Check if already permanently denied
@@ -410,6 +456,9 @@ export default function App() {
   if (ready && mode && mode !== 'reader') {
     return (
       <SocketCtx.Provider value={ctxValue}>
+        {networkStatus === 'offline' && (
+          <div className="network-offline-banner" role="alert">No internet connection</div>
+        )}
         <MobilePresenter />
         {/* Mode-switch overlay — floats above MobilePresenter without unmounting it */}
         {modeSwitchOpen && (
@@ -540,6 +589,9 @@ export default function App() {
   // ── Mode selection screen ──
   return (
     <div className="mode-screen">
+      {networkStatus === 'offline' && (
+        <div className="network-offline-banner" role="alert">No internet connection</div>
+      )}
       <div className="mode-logo">📖</div>
       <h1 className="mode-title">Scriptures in View</h1>
       <p className="mode-subtitle">Choose how to present</p>

@@ -47,6 +47,19 @@ vi.mock('../socket-remote', () => ({
   },
 }));
 
+vi.mock('@capacitor/network', () => ({
+  Network: {
+    getStatus: vi.fn().mockResolvedValue({ connected: true }),
+    addListener: vi.fn().mockResolvedValue({ remove: vi.fn() }),
+  },
+}));
+
+vi.mock('@capacitor/splash-screen', () => ({
+  SplashScreen: {
+    hide: vi.fn().mockResolvedValue(),
+  },
+}));
+
 vi.mock('../db-manager', () => ({
   initAllDatabases: vi.fn().mockResolvedValue(),
   getDb: vi.fn(),

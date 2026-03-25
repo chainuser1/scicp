@@ -3,11 +3,19 @@
   "appName": "Scriptures in View",
   "webDir": "dist",
   "server": {},
+  "ios": {
+    "contentInset": "always",
+    "allowsLinkPreview": false,
+    "scrollEnabled": false
+  },
   "plugins": {
     "LocalNotifications": {
       "smallIcon": "ic_notification",
       "iconColor": "#C9A84C",
       "sound": null
+    },
+    "App": {
+      "launchUrl": "scicp://"
     }
   }
 }

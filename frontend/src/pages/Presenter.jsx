@@ -246,7 +246,7 @@ const SOURCE_LABELS = {
 
 // SearchResults — results are already the correct page from the server.
 // No client-side slicing. onPageChange(newPage) triggers a fresh socket request.
-const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalPages, onSelect, onGoLive, onPageChange: _onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang, sentinelRef }) => {
+const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalPages, total, pageSize, onSelect, onGoLive, onPageChange: _onPageChange, onAddToSetlist, stagedVerseId, onToggleTranslation, expandedTranslations, translationCache, currentLanguage: srLang, sentinelRef }) => {
   if (results.length === 0) return null;
 
   return (
@@ -290,6 +290,9 @@ const SearchResults = ({ results, currentPage: _currentPage, totalPages: _totalP
         })}
       </ul>
       <div ref={sentinelRef} data-sentinel="search" style={{ height: 1 }} />
+      {results.length > 0 && total > pageSize && (
+        <div className="results-progress">{results.length} of {total} verses</div>
+      )}
     </>
   );
 };
@@ -501,10 +504,10 @@ const QrScannerModal = ({ onCode, onClose }) => {
 
   return (
     <div className="qr-scanner-backdrop" onClick={onClose}>
-      <div className="qr-scanner-modal" onClick={e => e.stopPropagation()}>
+      <div className="qr-scanner-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
         <div className="qr-scanner-header">
           <span className="qr-scanner-title">Scan TV QR Code</span>
-          <button className="qr-scanner-close" onClick={onClose} aria-label="Close scanner">✕</button>
+          <button className="qr-scanner-close" autoFocus onClick={onClose} aria-label="Close scanner">✕</button>
         </div>
 
         <div className="qr-scanner-viewport">
@@ -583,7 +586,10 @@ const Presenter = () => {
       description: '882 chapters now have rich summaries from GospelDoctrine.com with doctrinal insights and quotes from Church leaders — covering all five volumes of scripture.',
     },
   ];
-  const [query, setQuery]                   = useState('');
+  const [query, setQuery]                   = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('q') || '';
+  });
   const [results, setResults]               = useState([]);
   const [searchMeta, setSearchMeta]         = useState(null);
   const [totalResults, setTotalResults]     = useState(0);
@@ -908,6 +914,7 @@ const Presenter = () => {
   const adjacentAbortRef = useRef(null); // cancels in-flight fetchAdjacent when a newer one fires
   const resultsListRef  = useRef(null);
   const [resultsScrolled, setResultsScrolled] = useState(false);
+  const [searchPending, setSearchPending] = useState(false);
 
   // Persist display preferences — must be after fontSizeRem/uiFontSize declarations
   useEffect(() => {
@@ -1207,6 +1214,7 @@ const Presenter = () => {
       setConnectionState('error');
     };
     const handleSearchResults = ({ results, total, nextCursor, meta }) => {
+      setSearchPending(false);
       if (searchAppendRef.current) {
         setResults(prev => {
           const seen = new Set(prev.map(v => v.verse_id));
@@ -1323,6 +1331,8 @@ const Presenter = () => {
   const handleSearch = e => {
     const q = e.target.value;
     setQuery(q);
+    if (q) window.history.replaceState({}, '', `${window.location.pathname}?q=${encodeURIComponent(q)}`);
+    else window.history.replaceState({}, '', window.location.pathname);
     setCurrentPage(0);
     setTotalResults(0);
     setResults([]);
@@ -1331,6 +1341,7 @@ const Presenter = () => {
     searchAppendRef.current = false;
     clearTimeout(searchDebounce.current);
     searchDebounce.current = setTimeout(() => {
+      setSearchPending(true);
       emitWithSession('search', { query: q, page: 0, pageSize: PAGE_SIZE, language: currentLanguage });
     }, 250);
     clearTimeout(suggestDebounce.current);
@@ -1954,7 +1965,7 @@ const Presenter = () => {
   };
   const saveSetlist = async () => {
     const name = setlistSaveName.trim();
-    if (!name) return;
+    if (!name) { showToast('Please enter a setlist name'); return; }
     try {
       const r = await fetch(`${API_URL}/setlists`, {
         method: 'POST',
@@ -2153,6 +2164,8 @@ const Presenter = () => {
           onClick={() => setLeaveConfirmOpen(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
             style={{
               background: '#1e1e1e', border: '1px solid #444', borderRadius: '0.75rem',
               padding: '1.75rem 2rem', maxWidth: '22rem', width: '90%', textAlign: 'center',
@@ -2175,6 +2188,7 @@ const Presenter = () => {
               </button>
               <button
                 className="theme-btn"
+                autoFocus
                 style={{ minWidth: '7rem' }}
                 onClick={() => setLeaveConfirmOpen(false)}
               >
@@ -2789,7 +2803,7 @@ const Presenter = () => {
       {/* ════════════════════════════════════════
           SLIDE-IN DRAWER  (search + history)
           ════════════════════════════════════════ */}
-      <div className={`search-drawer${drawerOpen ? ' search-drawer--open' : ''}`}>
+      <div className={`search-drawer${drawerOpen ? ' search-drawer--open' : ''}`} role="dialog" aria-modal="true" aria-label="Scripture search and setlist drawer">
         <div className="drawer-header">
           <div className="drawer-tabs">
             <button className={`drawer-tab${drawerTab === 'search' ? ' active' : ''}`} onClick={() => setDrawerTab('search')} aria-label="Search" title="Search">
@@ -2867,6 +2881,7 @@ const Presenter = () => {
                 )}
               </div>
               <div className="results-list-wrap">
+                {searchPending && <div className="search-pending-indicator">Searching…</div>}
                 <SearchIntelligence meta={searchMeta} query={query} />
                 <SearchFacets meta={searchMeta} onFacetClick={facet => {
                   const facetQuery = facet.terms.slice(0, 3).join(' ');
@@ -2886,6 +2901,8 @@ const Presenter = () => {
                         currentPage={currentPage}
                         totalPages={totalPages}
                         totalResults={totalResults}
+                        total={totalResults}
+                        pageSize={PAGE_SIZE}
                         onSelect={selectVerse}
                         onGoLive={goLiveDirectly}
                         onAddToSetlist={addToSetlist}
@@ -3280,7 +3297,7 @@ const Presenter = () => {
                 ))}
               </div>
             )}
-            <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive}>● Go Live</button>
+            <button className={`go-live-button${activeTourTarget === 'golive' ? ' tour-focus' : ''}`} onClick={goLive} disabled={connectionState !== 'connected'}>● Go Live</button>
           </section>
         )}
 
@@ -3596,7 +3613,7 @@ const Presenter = () => {
       {/* PIN Entry Modal — shown when a password-protected session requires a PIN */}
       {pinEntryOpen && (
         <div className="pin-modal-backdrop" onClick={() => { setPinEntryOpen(false); setSessionMessage(''); }}>
-          <div className="pin-modal" onClick={e => e.stopPropagation()}>
+          <div className="pin-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="pin-modal-title">Session PIN Required</div>
             <div className="pin-modal-hint">This session is protected. Ask the operator for the PIN.</div>
             <input
@@ -3623,7 +3640,7 @@ const Presenter = () => {
       {/* PIN Management Modal — set / change / remove the PIN for this session */}
       {pinManageOpen && (
         <div className="pin-modal-backdrop" onClick={() => setPinManageOpen(false)}>
-          <div className="pin-modal" onClick={e => e.stopPropagation()}>
+          <div className="pin-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="pin-modal-title">{sessionPinActive ? 'Change Session PIN' : 'Set Session PIN'}</div>
             <div className="pin-modal-hint">4–8 digit PIN. Required for future presenters joining this session.</div>
             <input
@@ -3666,7 +3683,7 @@ const Presenter = () => {
       {/* Context Expansion Modal — Chapter view and semantic related scriptures */}
       {contextOpen && (
         <div className="ctx-backdrop" onClick={() => setContextOpen(false)}>
-          <div className="ctx-modal" onClick={e => e.stopPropagation()}>
+          <div className="ctx-modal" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div className="ctx-header">
               <span className="ctx-title">
                 {contextTab === 'chapter' && bookChapters[ctxChapterIdx]
@@ -3677,7 +3694,7 @@ const Presenter = () => {
                       ? 'Peoples and Places'
                       : `${liveVerse.book_title} ${liveVerse.chapter_number}:${liveVerse.verse_number}`}
               </span>
-              <button className="ctx-close" onClick={() => setContextOpen(false)}>✕</button>
+              <button className="ctx-close" autoFocus onClick={() => setContextOpen(false)}>✕</button>
             </div>
 
             <div className="ctx-tabs">

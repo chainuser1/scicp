@@ -33,4 +33,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateDownloadProgress: (cb) => {
     ipcRenderer.on('update-download-progress', (_e, data) => cb(data));
   },
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
 });
