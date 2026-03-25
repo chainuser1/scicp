@@ -114,57 +114,7 @@ jobs:
           echo "✓ Android versionCode=$VCODE versionName=$VERSION"
 
       - name: Patch AndroidManifest — deep links + permissions
-        run: |
-          MANIFEST="mobile/android/app/src/main/AndroidManifest.xml"
-          # Inject deep link intent-filters + required permissions after cap add regenerates the manifest
-          python3 - "$MANIFEST" << 'PYEOF'
-import sys, re
-
-path = sys.argv[1]
-with open(path) as f:
-    content = f.read()
-
-DEEP_LINKS = '''
-            <!-- Deep link: scicp://session/CODE -->
-            <intent-filter android:autoVerify="false">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="scicp" />
-            </intent-filter>
-
-            <!-- Deep link: https://cap-teyyko.live/client?session=CODE -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="cap-teyyko.live" android:pathPrefix="/client" />
-            </intent-filter>'''
-
-PERMISSIONS = '''
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />'''
-
-# Insert deep links before closing </activity> if not already present
-if 'scicp' not in content:
-    content = content.replace('        </activity>', DEEP_LINKS + '\n        </activity>', 1)
-    print('✓ Deep link intent-filters injected')
-else:
-    print('✓ Deep links already present')
-
-# Inject permissions before </manifest> if not already present
-if 'POST_NOTIFICATIONS' not in content:
-    content = content.replace('</manifest>', PERMISSIONS + '\n</manifest>', 1)
-    print('✓ Notification permissions injected')
-else:
-    print('✓ Permissions already present')
-
-with open(path, 'w') as f:
-    f.write(content)
-PYEOF
-          echo "✓ AndroidManifest patched"
+        run: python3 .github/scripts/patch_android_manifest.py mobile/android/app/src/main/AndroidManifest.xml
 
       - name: Apply custom Android launcher icon
         run: |
@@ -276,48 +226,7 @@ PYEOF
         run: npx cap sync ios
 
       - name: Patch iOS Info.plist — deep link URL scheme + NSCameraUsageDescription
-        run: |
-          PLIST="mobile/ios/App/App/Info.plist"
-          python3 - "$PLIST" << 'PYEOF'
-import sys
-
-path = sys.argv[1]
-with open(path) as f:
-    content = f.read()
-
-URL_SCHEME = '''
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.scripturesinview.mobile</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>scicp</string>
-			</array>
-		</dict>
-	</array>'''
-
-CAMERA_USAGE = '''
-	<key>NSCameraUsageDescription</key>
-	<string>Scriptures in View uses the camera to scan QR codes for session joining.</string>'''
-
-if 'CFBundleURLTypes' not in content:
-    content = content.replace('</dict>\n</plist>', URL_SCHEME + '\n</dict>\n</plist>', 1)
-    print('✓ CFBundleURLTypes (scicp://) injected')
-else:
-    print('✓ URL scheme already present')
-
-if 'NSCameraUsageDescription' not in content:
-    content = content.replace('</dict>\n</plist>', CAMERA_USAGE + '\n</dict>\n</plist>', 1)
-    print('✓ NSCameraUsageDescription injected')
-else:
-    print('✓ Camera usage already present')
-
-with open(path, 'w') as f:
-    f.write(content)
-PYEOF
-          echo "✓ iOS Info.plist patched"
+        run: python3 .github/scripts/patch_ios_plist.py mobile/ios/App/App/Info.plist
 
       - name: Build iOS archive
         working-directory: mobile/ios/App
