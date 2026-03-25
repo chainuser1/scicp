@@ -33,7 +33,7 @@ const LANG_DBS = {
   cebuano: 'cebuano-scriptures-sqlite.db',
   spanish: 'spanish-scriptures-sqlite.db',
   ilocano: 'ilocano-scriptures-sqlite.db',
-  waray:   'waray-scriptures-sqlite.db',
+  // waray omitted — incomplete text for triple combinations (only 28k/42k verses)
   japanese:'japanese-scriptures-sqlite.db',
   greek:   'greek-scriptures-sqlite.db',
 };
