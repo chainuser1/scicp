@@ -86,4 +86,20 @@ export class ExternalDisplayWeb extends WebPlugin {
       return { status: 'denied' };
     }
   }
+
+  async acquireWakeLock() {
+    // Use Screen Wake Lock API in browser if available
+    if ('wakeLock' in navigator) {
+      try {
+        this._wakeLock = await navigator.wakeLock.request('screen');
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  async releaseWakeLock() {
+    if (this._wakeLock) {
+      try { await this._wakeLock.release(); } catch { /* ignore */ }
+      this._wakeLock = null;
+    }
+  }
 }

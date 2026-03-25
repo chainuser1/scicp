@@ -5,11 +5,13 @@ import android.app.Presentation;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
 import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
@@ -70,6 +72,7 @@ public class ExternalDisplayPlugin extends Plugin {
     private ExternalPresentation presentation;
     private DisplayManager.DisplayListener displayListener;
     private LocalDisplayServer localServer;
+    private PowerManager.WakeLock presenterWakeLock;
 
     @Override
     public void load() {
@@ -86,7 +89,34 @@ public class ExternalDisplayPlugin extends Plugin {
         Log.d(TAG, "isAvailable called, display=" + (d != null ? d.getName() + " id=" + d.getDisplayId() : "null"));
         JSObject result = new JSObject();
         result.put("available", d != null);
+        result.put("displayName", d != null ? d.getName() : "");
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void acquireWakeLock(PluginCall call) {
+        try {
+            if (presenterWakeLock == null || !presenterWakeLock.isHeld()) {
+                PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                presenterWakeLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                    "scicp:PresenterWakeLock"
+                );
+                presenterWakeLock.acquire(3 * 60 * 60 * 1000L); // max 3 hours
+            }
+            call.resolve();
+        } catch (Exception e) {
+            Log.w(TAG, "acquireWakeLock failed: " + e.getMessage());
+            call.resolve(); // non-fatal
+        }
+    }
+
+    @PluginMethod
+    public void releaseWakeLock(PluginCall call) {
+        if (presenterWakeLock != null && presenterWakeLock.isHeld()) {
+            presenterWakeLock.release();
+        }
+        call.resolve();
     }
 
     @PluginMethod
@@ -112,6 +142,9 @@ public class ExternalDisplayPlugin extends Plugin {
                     presentation.dismiss();
                 }
                 presentation = new ExternalPresentation(getContext(), display, url);
+                // Fire 'displayReady' event once the external WebView page has loaded —
+                // JS side uses this as the handshake signal to push current verse state.
+                presentation.onReady = () -> notifyListeners("displayReady", new JSObject());
                 presentation.show();
                 call.resolve();
             } catch (Exception e) {
@@ -507,6 +540,7 @@ public class ExternalDisplayPlugin extends Plugin {
         private final String url;
         private boolean pageReady = false;
         private final List<String> pendingMessages = new ArrayList<>();
+        Runnable onReady = null; // called once page loads — used for state sync handshake
 
         ExternalPresentation(Context context, Display display, String url) {
             super(context, display);
@@ -516,6 +550,16 @@ public class ExternalDisplayPlugin extends Plugin {
         @Override
         protected void onCreate(Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
+
+            // TVs and projectors are always landscape — force orientation
+            getWindow().setAttributes(new WindowManager.LayoutParams());
+            try {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.screenOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+                getWindow().setAttributes(lp);
+            } catch (Exception e) {
+                Log.w(TAG, "Could not force landscape: " + e.getMessage());
+            }
 
             webView = new WebView(getContext());
             WebSettings settings = webView.getSettings();
@@ -566,6 +610,7 @@ public class ExternalDisplayPlugin extends Plugin {
                     pageReady = true;
                     flushPendingMessages();
                     Log.d(TAG, "External display page ready: " + loadedUrl);
+                    if (onReady != null) { onReady.run(); onReady = null; }
                 }
 
                 @Override
