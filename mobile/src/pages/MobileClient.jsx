@@ -390,11 +390,8 @@ export default function MobileClient() {
   const secLength = weightedLength(secondaryText);
 
   const viewportMaxCap = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
-  // Honor font_size from presenter's theme — A- / A+ buttons on Presenter control this
+  // Presenter's explicit font_size request (from TEXT SIZE −/+ control)
   const themeFontSizeRem = verse.theme?.font_size ? parseFloat(verse.theme.font_size) : null;
-  const maxCap        = (themeFontSizeRem && !isNaN(themeFontSizeRem))
-    ? Math.min(viewportMaxCap, themeFontSizeRem)
-    : viewportMaxCap;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = !customData && layout === 'lower-third'
@@ -425,7 +422,8 @@ export default function MobileClient() {
   const SEC_MARGIN_EM  = 0.55; // margin-top in em of primary font
 
   const fontSizeThatFits = (() => {
-    let lo = 0.55, hi = maxCap;
+    // Always search against viewport cap so result is a pure overflow guard
+    let lo = 0.55, hi = viewportMaxCap;
     for (let i = 0; i < 36; i++) {
       const mid   = (lo + hi) / 2;
       const midPx = mid * PX_PER_REM;
@@ -445,12 +443,16 @@ export default function MobileClient() {
     return lo;
   })();
 
-  const fittingRem       = fontSizeThatFits * 0.95;
+  const fittingRem       = fontSizeThatFits * 0.95;  // viewport overflow guard
   const hour = new Date().getHours();
   const timeFloorAdj = (hour >= 20 || hour < 6) ? -0.08 : (hour >= 10 && hour < 18) ? 0.05 : 0;
   const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
-  const computedRem      = Math.min(maxCap, Math.max(rawFloor, fittingRem));
+  // If presenter set an explicit size, use it as target; auto-fit only reduces it for overflow.
+  const targetRem        = (themeFontSizeRem && !isNaN(themeFontSizeRem))
+    ? themeFontSizeRem
+    : Math.max(rawFloor, fittingRem);
+  const computedRem      = Math.min(targetRem, Math.max(0.55, fittingRem));
   const computedFontSize = `${computedRem.toFixed(5)}rem`;
 
   const VOLUME_CLASS_MAP = {
