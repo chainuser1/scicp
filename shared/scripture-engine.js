@@ -9,8 +9,15 @@
 // Functions that don't touch the DB are pure helpers (expandBookName,
 // segmentVerseText, parseScriptureReference, etc.).
 
-const { BOOK_ABBREVIATIONS, CANONICAL_BOOK_IDS } = require('./data/book-abbreviations');
-const { BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES, VOTD_POOL } = require('./data/citations');
+let BOOK_ABBREVIATIONS, CANONICAL_BOOK_IDS, BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES, VOTD_POOL;
+try {
+  ({ BOOK_ABBREVIATIONS, CANONICAL_BOOK_IDS } = require('./data/book-abbreviations'));
+  ({ BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES, VOTD_POOL } = require('./data/citations'));
+} catch (err) {
+  console.error('[scripture-engine] Failed to load data files:', err.message);
+  BOOK_ABBREVIATIONS = {}; CANONICAL_BOOK_IDS = {};
+  BIBLE_CITATIONS = []; TRIPLE_CITATIONS = []; LANGUAGE_NAMES = {}; VOTD_POOL = [];
+}
 
 // ── Book name expansion ─────────────────────────────────────────────────────
 function expandBookName(bookRef) {
@@ -22,6 +29,7 @@ function expandBookName(bookRef) {
 // ── Text segmentation ───────────────────────────────────────────────────────
 function segmentVerseText(text, wordsPerSegment = 200) {
   if (!text) return [];
+  if (!wordsPerSegment || wordsPerSegment < 1) wordsPerSegment = 200;
   const words = text.split(/\s+/).filter(w => w.length > 0);
   const segments = [];
   for (let i = 0; i < words.length; i += wordsPerSegment) {

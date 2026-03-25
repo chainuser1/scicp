@@ -1249,7 +1249,7 @@ const MobilePresenter = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
-      }).catch(() => {});
+      }).catch(err => console.warn('[scicp]', err.message || err));
     }
   };
 
@@ -1267,7 +1267,7 @@ const MobilePresenter = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
-      }).catch(() => {});
+      }).catch(err => console.warn('[scicp]', err.message || err));
     }
   };
 

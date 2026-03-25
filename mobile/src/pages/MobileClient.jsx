@@ -12,7 +12,7 @@ const waitForFonts = () => {
   return Promise.all([
     document.fonts.load('italic 1em "Cormorant Garamond"'),
     document.fonts.load('1em "Cinzel"'),
-  ]).catch(() => {});
+  ]).catch(err => console.warn('[scicp]', err.message || err));
 };
 
 const DEFAULT_BG =
@@ -300,7 +300,7 @@ export default function MobileClient() {
           connection.addEventListener?.('message', handlePresentationMessage);
         });
         list.addEventListener?.('connectionavailable', handleConnectionAvailable);
-      }).catch(() => {});
+      }).catch(err => console.warn('[scicp]', err.message || err));
     }
 
     return () => {

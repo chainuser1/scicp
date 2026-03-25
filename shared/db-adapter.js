@@ -47,35 +47,34 @@ class SqlJsAdapter {
 
     return {
       all(...params) {
+        const stmt = dbRef.prepare(sql);
         try {
-          const stmt = dbRef.prepare(sql);
           if (params.length) stmt.bind(params);
           const rows = [];
-          while (stmt.step()) {
-            rows.push(stmt.getAsObject());
-          }
-          stmt.free();
+          while (stmt.step()) rows.push(stmt.getAsObject());
           return rows;
         } catch (err) {
-          // Re-throw with the SQL for debugging
           err.message = `${err.message} (SQL: ${sql.slice(0, 100)})`;
           throw err;
+        } finally {
+          stmt.free();
         }
       },
 
       get(...params) {
+        const stmt = dbRef.prepare(sql);
         try {
-          const stmt = dbRef.prepare(sql);
           if (params.length) stmt.bind(params);
           let result = null;
           if (stmt.step()) {
             result = stmt.getAsObject();
           }
-          stmt.free();
           return result;
         } catch (err) {
           err.message = `${err.message} (SQL: ${sql.slice(0, 100)})`;
           throw err;
+        } finally {
+          stmt.free();
         }
       },
 

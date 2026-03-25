@@ -39,6 +39,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Security audit
+        run: npm audit --omit=dev --audit-level=high || true
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:

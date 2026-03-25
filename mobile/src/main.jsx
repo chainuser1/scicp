@@ -18,6 +18,11 @@ try {
   </div>`;
 }
 
+// Catch unhandled promise rejections
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[scicp] Unhandled rejection:', e.reason);
+});
+
 // Catch unhandled errors that crash after mount
 window.addEventListener('error', (e) => {
   if (root && !root.children.length) {

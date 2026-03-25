@@ -216,7 +216,7 @@ export default function ScriptureReader({ onExit }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).catch(() => {});
+      }).catch(err => console.warn('[scicp]', err.message || err));
     } catch { /* ignore */ }
   }, [serverUrl, lang]);
 
@@ -270,7 +270,7 @@ export default function ScriptureReader({ onExit }) {
         for (const row of rows) map.set(row.chapter_id, row);
         setCoverage(map);
       })
-      .catch(() => {});
+      .catch(err => console.warn('[scicp]', err.message || err));
   }, [serverUrl]);
 
   useEffect(() => {
@@ -279,7 +279,7 @@ export default function ScriptureReader({ onExit }) {
     fetch(`${base}/spaced-review?limit=3`)
       .then(r => r.ok ? r.json() : { verses: [] })
       .then(({ verses }) => setSpacedReview(verses || []))
-      .catch(() => {});
+      .catch(err => console.warn('[scicp]', err.message || err));
   }, [serverUrl]);
   // ── Chapter loading ───────────────────────────────────────────────────────
   const loadChapter = useCallback((book, chapters, idx, anchorVerseId, forceLang) => {

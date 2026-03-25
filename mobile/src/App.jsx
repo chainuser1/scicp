@@ -65,7 +65,7 @@ export default function App() {
 
   // ── Always load local DBs so context modals work in any mode ──
   useEffect(() => {
-    initAllDatabases().catch(() => {});
+    initAllDatabases().catch(err => console.warn('[scicp] DB pre-init:', err.message || err));
   }, []);
 
   // ── QR scanner ──
@@ -202,7 +202,7 @@ export default function App() {
     try {
       await remoteSocket.init(cleanUrl);
       // Also init local databases so context modals (summaries, footnotes, entities) work
-      initAllDatabases().catch(() => {});
+      initAllDatabases().catch(err => console.warn('[scicp] DB pre-init:', err.message || err));
       localStorage.setItem(MODE_KEY, 'online');
       localStorage.setItem(URL_KEY, cleanUrl);
       setServerUrl(cleanUrl);
@@ -252,7 +252,7 @@ export default function App() {
       setStartupChecks({ camera, cast, online });
 
       // Pre-request notification permission (for download progress notifications)
-      requestNotificationPermission().catch(() => {});
+      requestNotificationPermission().catch(err => console.warn('[scicp] Notification permission:', err.message || err));
     } finally {
       setChecksBusy(false);
     }
