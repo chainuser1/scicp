@@ -1,3 +1,5 @@
+@import './fonts.css';
+
 /* ===================================================
    SCRIPTURE PROJECTOR — Sacred Luxury Design System
    Aesthetic: Dark editorial / gold sacred / cinematic
@@ -10,8 +12,6 @@
   font-style: normal;
   font-display: swap;
 }
-
-@import './fonts.css';
 
 /* ===== CSS VARIABLES ===== */
 :root {

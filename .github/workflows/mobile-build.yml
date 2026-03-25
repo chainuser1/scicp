@@ -96,7 +96,7 @@ jobs:
 
       - name: Add Capacitor Android platform
         working-directory: mobile
-        run: npx cap add android
+        run: rm -rf android && npx cap add android
 
       - name: Sync Capacitor Android
         working-directory: mobile
@@ -219,7 +219,7 @@ jobs:
 
       - name: Add Capacitor iOS platform
         working-directory: mobile
-        run: npx cap add ios
+        run: rm -rf ios && npx cap add ios
 
       - name: Sync Capacitor iOS
         working-directory: mobile
