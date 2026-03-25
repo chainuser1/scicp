@@ -32,8 +32,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          lfs: true
+        # No lfs: true — Electron build only needs frontend source, not DB files
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
