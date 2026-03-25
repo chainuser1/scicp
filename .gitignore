@@ -44,3 +44,5 @@ release.keystore
 # Fine-tuned model (large binary files — store in Drive or object storage)
 resources/models/
 resources/training-pairs.json
+# Generated training data (regenerate with: node scripts/export-training-pairs.js)
+resources/training-pairs.json
