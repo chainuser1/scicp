@@ -1,4 +1,4 @@
-# .git is needed in build stage for git-lfs pull (excluded from final image via multi-stage)
+.git
 .github
 .vscode
 node_modules
