@@ -2533,7 +2533,7 @@ button,
 /* Cast hint popover */
 .cast-hint-popover {
   position: absolute;
-  top: calc(100% + 0.6rem);
+  bottom: calc(100% + 0.6rem);
   right: 0;
   z-index: 9000;
   width: min(20rem, 90vw);
@@ -2542,7 +2542,7 @@ button,
   border-radius: 0.75rem;
   padding: 1rem 1.1rem 1rem;
   box-shadow: 0 12px 40px rgba(0,0,0,0.6);
-  animation: ctx-slide-in 0.2s cubic-bezier(0.22,1,0.36,1);
+  animation: popover-slide-up 0.2s cubic-bezier(0.22,1,0.36,1);
   color: var(--text-primary);
 }
 .cast-hint-close {
@@ -6709,6 +6709,10 @@ button, [role="button"] {
   from { opacity: 0; transform: translateY(18px) scale(0.975); }
   to   { opacity: 1; transform: none; }
 }
+@keyframes popover-slide-up {
+  from { opacity: 0; transform: translateY(-12px) scale(0.975); }
+  to   { opacity: 1; transform: none; }
+}
 @keyframes ctx-slide-up {
   from { transform: translateY(100%); opacity: 0.85; }
   to   { transform: translateY(0); opacity: 1; }
@@ -7920,7 +7924,7 @@ button, [role="button"] {
 
 .ctv-popover {
   position: absolute;
-  top: calc(100% + 0.55rem);
+  bottom: calc(100% + 0.55rem);
   right: 0;
   z-index: 9100;
   width: min(22rem, 92vw);
@@ -7930,7 +7934,7 @@ button, [role="button"] {
   box-shadow: 0 16px 48px rgba(0,0,0,0.65);
   padding: 0;
   overflow: hidden;
-  animation: ctx-slide-in 0.2s cubic-bezier(0.22,1,0.36,1);
+  animation: popover-slide-up 0.2s cubic-bezier(0.22,1,0.36,1);
 }
 .ctv-header {
   display: flex; align-items: center; justify-content: space-between;
