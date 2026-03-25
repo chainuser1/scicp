@@ -10,6 +10,7 @@ import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadSta
 import { notify, cancelNotification } from '../notify';
 import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
 import CastingControl from '../components/CastingControl';
+import ConnectTV from '../components/ConnectTV';
 import SimplePresenter from '../components/SimplePresenter';
 
 function groupByVolume(results) {
@@ -2229,13 +2230,13 @@ const MobilePresenter = () => {
           {/* Cast to external display */}
           <CastingControl compact={false} currentVerse={liveVerse} currentTheme={currentTheme} />
 
-          {/* LAN server URL — last resort for TV browsers (offline only) */}
-          {lanServerUrl && (
-            <div className="lan-server-banner" title="Open this URL in your TV browser to display scriptures">
-              <span className="lan-server-label">📺 TV Browser:</span>
-              <span className="lan-server-url">{lanServerUrl}</span>
-            </div>
-          )}
+          {/* Connect TV — covers online session share, local Wi-Fi, and hotspot scenarios */}
+          <ConnectTV
+            isOnline={isOnline}
+            serverUrl={serverUrl}
+            sessionId={sessionId}
+            lanServerUrl={lanServerUrl}
+          />
 
           {/* F8 — Language & secondary language popover */}
           <div className="hdr-lang-wrap">
@@ -2545,6 +2546,12 @@ const MobilePresenter = () => {
               <div className="mobile-menu-label">Display</div>
               <div className="mobile-menu-row">
                 <CastingControl compact={false} currentVerse={liveVerse} currentTheme={currentTheme} />
+                <ConnectTV
+                  isOnline={isOnline}
+                  serverUrl={serverUrl}
+                  sessionId={sessionId}
+                  lanServerUrl={lanServerUrl}
+                />
               </div>
             </div>
 
