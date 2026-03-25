@@ -2834,7 +2834,7 @@ const Presenter = () => {
                   inputMode="search"
                   enterKeyHint="search"
                   className={`search-input${query.trim().startsWith('"') ? ' search-input--phrase' : query.trim().startsWith('~') ? ' search-input--semantic' : ''}`}
-                  placeholder={'Search… or "quote" for phrase · ~idea for semantic'}
+                  placeholder={'Search scriptures… e.g. faith, John 3:16, anger issues'}
                   value={query}
                   onChange={handleSearch}
                   onKeyDown={handleSearchKeyDown}
