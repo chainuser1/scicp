@@ -43,6 +43,11 @@ release.keystore
 
 # Fine-tuned model (large binary files — store in Drive or object storage)
 resources/models/
-resources/training-pairs.json
 # Generated training data (regenerate with: node scripts/export-training-pairs.js)
 resources/training-pairs.json
+
+# Runtime user data (created by backend at startup)
+resources/db/user-data.db
+
+# Mobile prebake artifact (regenerate with: node scripts/prebake-search-graph.js)
+resources/db/search-graph.db
