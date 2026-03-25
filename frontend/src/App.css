@@ -1350,8 +1350,19 @@ button,
   }
 
   /* Push main-panel content up so the bar doesn't hide the bottom card */
-  .main-panel {
-    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  .has-golive-bar .main-panel {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  /* Push drawer scroll area up so the golive bar doesn't obscure results */
+  .has-golive-bar .drawer-body,
+  .has-golive-bar .results-list {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  /* Pull the search drawer top edge up above the golive bar */
+  .has-golive-bar .search-drawer {
+    bottom: calc(72px + env(safe-area-inset-bottom));
   }
 }
 
