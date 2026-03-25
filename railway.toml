@@ -1,8 +1,11 @@
 [build]
-builder = "DOCKERFILE"
+# Image is built by GitHub Actions and pushed to GHCR (with LFS files).
+# Railway pulls the pre-built image — no source build needed.
 dockerfilePath = "Dockerfile"
 
 [deploy]
+# GHCR image reference — set RAILWAY_DOCKER_IMAGE in Railway dashboard:
+#   ghcr.io/chainuser1/scicp:latest
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

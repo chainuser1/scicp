@@ -1,7 +1,5 @@
 FROM node:20-bookworm-slim AS build
 
-RUN apt-get update && apt-get install -y git git-lfs && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 COPY package*.json ./
@@ -12,18 +10,9 @@ RUN npm ci --include=dev
 
 COPY . .
 
-# If DB files are LFS pointers, pull the real content.
-# Railway clones repos without LFS — this resolves the pointers at build time.
-RUN git lfs install --skip-repo && \
-    if head -c 7 resources/db/lds-scriptures-sqlite.db | grep -q 'version'; then \
-      echo "LFS pointers detected — pulling real files..." && \
-      git lfs pull; \
-    fi
-
-# Final sanity check: ensure DBs are real SQLite files, not pointers.
+# Sanity check: ensure DBs are real SQLite files, not LFS pointers.
 RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; then \
-      echo "ERROR: resources/db/*.db are still Git LFS pointers after pull." && \
-      echo "Check that git-lfs can access the LFS storage." && \
+      echo "ERROR: DB files are Git LFS pointers. Build with 'lfs: true' in checkout." && \
       exit 1; \
     fi
 
