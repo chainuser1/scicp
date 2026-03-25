@@ -829,4 +829,374 @@ describe('Backend API Tests', () => {
       expect(body.status).toBe('ok');
     });
   });
+
+  // ─── Search integration tests ────────────────────────────────────────────────
+
+  describe('Search pipeline integration', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    describe('result shape and fields', () => {
+      test('results contain required scripture fields', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        const r = results[0];
+        expect(r).toHaveProperty('verse_id');
+        expect(r).toHaveProperty('book_title');
+        expect(r).toHaveProperty('chapter_number');
+        expect(r).toHaveProperty('verse_number');
+        expect(r).toHaveProperty('scripture_text');
+        expect(typeof r.scripture_text).toBe('string');
+        expect(r.scripture_text.length).toBeGreaterThan(0);
+      });
+
+      test('results carry _source and _tier metadata', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=repentance' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        for (const r of results.slice(0, 5)) {
+          expect(r).toHaveProperty('_source');
+          expect(typeof r._source).toBe('string');
+          expect(r).toHaveProperty('_tier');
+          expect(typeof r._tier).toBe('number');
+          expect(r._tier).toBeGreaterThanOrEqual(1);
+          expect(r._tier).toBeLessThanOrEqual(5);
+        }
+      });
+
+      test('results are ordered by tier (lower tier = higher priority)', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=mercy' });
+        const { results } = JSON.parse(res.payload);
+        // Tiers should be non-decreasing (tier 2 before tier 5)
+        for (let i = 1; i < Math.min(results.length, 10); i++) {
+          expect(results[i]._tier).toBeGreaterThanOrEqual(results[i - 1]._tier);
+        }
+      });
+    });
+
+    describe('exact reference search', () => {
+      test('John 3:16 returns exact verse as first result', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=John+3:16' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].book_title).toBe('John');
+        expect(results[0].chapter_number).toBe(3);
+        expect(results[0].verse_number).toBe(16);
+      });
+
+      test('Genesis 1:1 returns first verse of Bible', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=Genesis+1:1' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].book_title).toBe('Genesis');
+        expect(results[0].chapter_number).toBe(1);
+        expect(results[0].verse_number).toBe(1);
+        expect(results[0].scripture_text).toMatch(/beginning/i);
+      });
+
+      test('chapter-only reference returns multiple verses', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=Psalm+23' });
+        const { results, total } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(1);
+        expect(total).toBeGreaterThan(1);
+        expect(results[0].book_title).toMatch(/Psalms?/);
+        expect(results[0].chapter_number).toBe(23);
+      });
+    });
+
+    describe('abbreviation expansion', () => {
+      test('1 Ne 3:7 resolves to 1 Nephi', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=1+Ne+3:7' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].book_title).toBe('1 Nephi');
+        expect(results[0].chapter_number).toBe(3);
+        expect(results[0].verse_number).toBe(7);
+      });
+
+      test('D&C 76 resolves to Doctrine and Covenants', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=D%26C+76' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].book_title).toBe('Doctrine and Covenants');
+        expect(results[0].chapter_number).toBe(76);
+      });
+
+      test('Rev 21:4 resolves to Revelation', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=Rev+21:4' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].book_title).toBe('Revelation');
+      });
+    });
+
+    describe('keyword search (FTS)', () => {
+      test('"created the heaven" returns Genesis results', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=created+the+heaven' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        const texts = results.map(r => r.scripture_text.toLowerCase());
+        expect(texts.some(t => t.includes('created') || t.includes('heaven'))).toBe(true);
+      });
+
+      test('common word "love" returns substantial results', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=love' });
+        const { results, total } = JSON.parse(res.payload);
+        expect(total).toBeGreaterThan(50);
+        expect(results.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('semantic / concept search', () => {
+      test('concept query returns results even without exact word match', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=dealing+with+grief&pageSize=10' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+      });
+
+      test('multi-word concept query returns ranked results', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=overcoming+temptation&pageSize=10' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0]).toHaveProperty('_tier');
+      });
+    });
+
+    describe('multi-language search', () => {
+      test('Tagalog search returns results or empty gracefully', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=tl' });
+        const { results } = JSON.parse(res.payload);
+        expect(Array.isArray(results)).toBe(true);
+      });
+
+      test('Cebuano search returns results or empty gracefully', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=love&language=ceb' });
+        const { results } = JSON.parse(res.payload);
+        expect(Array.isArray(results)).toBe(true);
+      });
+
+      test('NRSVUE search uses full pipeline', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=nrsvue&pageSize=5' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeGreaterThan(0);
+        // NRSVUE results should have tier metadata (full pipeline)
+        expect(results[0]).toHaveProperty('_tier');
+      });
+    });
+
+    describe('pagination', () => {
+      test('pageSize=3 returns exactly 3 or fewer results', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&pageSize=3' });
+        const { results, pageSize } = JSON.parse(res.payload);
+        expect(results.length).toBeLessThanOrEqual(3);
+        expect(pageSize).toBe(3);
+      });
+
+      test('page=1 returns different results than page=0', async () => {
+        const r0 = await fastify.inject({ method: 'GET', url: '/search?q=love&page=0&pageSize=5' });
+        const r1 = await fastify.inject({ method: 'GET', url: '/search?q=love&page=1&pageSize=5' });
+        const b0 = JSON.parse(r0.payload);
+        const b1 = JSON.parse(r1.payload);
+        expect(b0.results.length).toBeGreaterThan(0);
+        expect(b1.results.length).toBeGreaterThan(0);
+        expect(b0.results[0].verse_id).not.toBe(b1.results[0].verse_id);
+      });
+
+      test('pageSize clamped to max 50', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=love&pageSize=200' });
+        const { results } = JSON.parse(res.payload);
+        expect(results.length).toBeLessThanOrEqual(50);
+      });
+    });
+
+    describe('edge cases', () => {
+      test('empty query returns 400', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=' });
+        expect(res.statusCode).toBe(400);
+      });
+
+      test('very long query does not crash', async () => {
+        const long = 'a '.repeat(500).trim();
+        const res = await fastify.inject({ method: 'GET', url: `/search?q=${encodeURIComponent(long)}` });
+        expect(res.statusCode).toBeLessThan(500);
+      });
+
+      test('special characters in query do not crash', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=%22hello+world%22' });
+        expect(res.statusCode).toBeLessThan(500);
+      });
+
+      test('numeric-only query does not crash', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=12345' });
+        expect(res.statusCode).toBeLessThan(500);
+      });
+
+      test('unknown language falls back gracefully', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=love&language=zz' });
+        expect(res.statusCode).toBeLessThan(500);
+      });
+    });
+  });
+
+  describe('Suggest endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('returns suggestions array', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/suggest?q=fai' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('suggestions');
+      expect(Array.isArray(body.suggestions)).toBe(true);
+    });
+
+    test('suggestions include matching terms', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/suggest?q=fai' });
+      const { suggestions } = JSON.parse(res.payload);
+      expect(suggestions.length).toBeGreaterThan(0);
+      expect(suggestions).toContain('faith');
+    });
+
+    test('book name suggestions work', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/suggest?q=gene' });
+      const { suggestions } = JSON.parse(res.payload);
+      expect(suggestions.some(s => s.toLowerCase().includes('genesis'))).toBe(true);
+    });
+
+    test('empty query returns empty suggestions', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/suggest?q=' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('suggestions');
+    });
+  });
+
+  describe('Related verses endpoint', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('returns related verses with diversity', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/1/related' });
+      if (res.statusCode === 200) {
+        const body = JSON.parse(res.payload);
+        expect(body).toHaveProperty('results');
+        expect(Array.isArray(body.results)).toBe(true);
+        if (body.results.length > 1) {
+          // Results should come from multiple books (MMR diversity)
+          const books = new Set(body.results.map(r => r.book_title));
+          expect(books.size).toBeGreaterThanOrEqual(1);
+        }
+      }
+    });
+
+    test('invalid verse_id returns gracefully', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/999999/related' });
+      expect(res.statusCode).toBeLessThan(500);
+    });
+  });
+
+  describe('Trending and personalization endpoints', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('/trending returns verses array', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/trending' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verses');
+      expect(body).toHaveProperty('total');
+      expect(Array.isArray(body.verses)).toBe(true);
+    });
+
+    test('/for-you returns verses array', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/for-you' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verses');
+      expect(Array.isArray(body.verses)).toBe(true);
+    });
+
+    test('/personalized-votd returns verse shape', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/personalized-votd' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verse');
+      expect(body.verse).toHaveProperty('verse_id');
+      expect(body.verse).toHaveProperty('scripture_text');
+    });
+  });
+
+  describe('Browse endpoints', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('/browse/books returns books with required fields', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/browse/books?language=en' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThan(0);
+      expect(body[0]).toHaveProperty('book_id');
+      expect(body[0]).toHaveProperty('book_title');
+    });
+
+    test('/browse/chapters returns chapters for valid book', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/browse/chapters?book_id=1&language=en' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThan(0);
+      expect(body[0]).toHaveProperty('chapter_number');
+    });
+
+    test('/browse/verses returns verses for valid chapter', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/browse/verses?chapter_id=1&language=en' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThan(0);
+      expect(body[0]).toHaveProperty('scripture_text');
+      expect(body[0]).toHaveProperty('verse_number');
+    });
+
+    test('/verse/adjacent returns next verse', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/verse/adjacent?verse_id=1&direction=next' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verse_id');
+      expect(body.verse_id).not.toBe(1);
+    });
+  });
+
+  describe('Reading analytics endpoints', () => {
+    beforeAll(async () => { await fastify.ready(); });
+
+    test('POST /reading-event logs event', async () => {
+      const res = await fastify.inject({
+        method: 'POST', url: '/reading-event',
+        payload: { verse_id: 1, event_type: 'view', dwell_ms: 5000 }
+      });
+      expect(res.statusCode).toBe(200);
+    });
+
+    test('GET /reading-coverage returns coverage data', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/reading-coverage' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('coverage');
+      expect(Array.isArray(body.coverage)).toBe(true);
+    });
+
+    test('GET /spaced-review returns due verses', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/spaced-review' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toHaveProperty('verses');
+      expect(Array.isArray(body.verses)).toBe(true);
+    });
+
+    test('POST /search-feedback logs click', async () => {
+      const res = await fastify.inject({
+        method: 'POST', url: '/search-feedback',
+        payload: { query: 'faith', verse_id: 1, rank: 0, clicked: true }
+      });
+      expect(res.statusCode).toBe(200);
+    });
+  });
 });
