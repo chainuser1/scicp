@@ -1,5 +1,10 @@
-# Build Docker image with LFS files and push to GHCR.
+# Build Docker image and push to GHCR.
 # Railway deploys the pre-built image (no source build needed).
+#
+# DB files strategy: instead of fetching from Git LFS (which consumes bandwidth),
+# we extract the DB files from the last good GHCR image. The DBs are static
+# scripture databases that don't change between most deploys. If no previous
+# image exists (first deploy), fall back to LFS.
 name: Deploy
 
 on:
@@ -19,29 +24,8 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout with LFS
+      - name: Checkout (no LFS — DBs come from previous image)
         uses: actions/checkout@v5
-        with:
-          lfs: true
-
-      - name: Cache Git LFS objects
-        uses: actions/cache@v4
-        with:
-          path: .git/lfs
-          key: lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-${{ github.sha }}
-          restore-keys: |
-            lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-
-
-      - name: Pull LFS objects (uses cache when available)
-        run: git lfs pull
-
-      - name: Validate DB files are real SQLite
-        run: |
-          if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; then
-            echo "ERROR: DB files are LFS pointers, not real databases"
-            exit 1
-          fi
-          echo "✓ DB files are valid SQLite"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -49,6 +33,25 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract DBs from previous GHCR image
+        run: |
+          echo "Attempting to extract DBs from ghcr.io/${{ env.IMAGE_NAME }}:latest ..."
+          if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+            container=$(docker create ghcr.io/${{ env.IMAGE_NAME }}:latest)
+            docker cp "$container:/app/resources/db/." resources/db/
+            docker rm "$container"
+            echo "✓ DBs extracted from previous image"
+            head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite' \
+              && echo "✓ SQLite header verified" \
+              || (echo "ERROR: extracted DB is not valid SQLite" && exit 1)
+          else
+            echo "No previous image found — falling back to Git LFS"
+            git lfs pull
+            head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite' \
+              && echo "✓ LFS DBs verified" \
+              || (echo "ERROR: LFS DB is not valid SQLite (LFS pointer?)" && exit 1)
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
