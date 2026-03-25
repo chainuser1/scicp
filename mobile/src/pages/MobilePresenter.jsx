@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ExternalDisplay } from 'capacitor-external-display';
 import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { Share } from '@capacitor/share';
 import { useSocketCtx } from '../socket-context';
 import { isDisplayAvailable, isCasting, startLocalServer, stopLocalServer, getLocalServerUrl } from '../socket-local';
 import * as svc from '../scripture-service';
@@ -9,6 +12,7 @@ import { createServiceProxy } from '../scripture-service-proxy';
 import { isLanguageAvailable, isLanguageBundled, downloadLanguage, onDownloadStateChange, getDownloadStates } from '../db-manager';
 import { notify, cancelNotification } from '../notify';
 import { isEnhancedSearchEnabled, setEnhancedSearch, initPipeline, getStatus as getEmbeddingStatus } from '../embedding-engine';
+import { prefGet, prefSet } from '../prefs';
 import CastingControl from '../components/CastingControl';
 import ConnectTV from '../components/ConnectTV';
 import SimplePresenter from '../components/SimplePresenter';
@@ -533,6 +537,7 @@ const MobilePresenter = () => {
   const [nowReading,      setNowReading]      = useState(false); // "Now Reading" TV label toggle
   const [enhancedAI,      setEnhancedAI]      = useState(isEnhancedSearchEnabled());
   const [aiModelStatus,   setAiModelStatus]   = useState(getEmbeddingStatus()); // idle|loading|ready|error
+  const [showAiDownloadConfirm, setShowAiDownloadConfirm] = useState(false);
   const [langDownloads,   setLangDownloads]   = useState(getDownloadStates());
   // Topic navigation history inside the Related tab: [{label, verses, concept, total, page, pageSize, type, payload}]
   const [ctxTopicHistory,    setCtxTopicHistory]    = useState([]);
@@ -648,14 +653,17 @@ const MobilePresenter = () => {
   useEffect(() => {
     try { window.localStorage.setItem('scicp.presenter_setlist_v1', JSON.stringify(setlist)); }
     catch { /* ignore */ }
+    prefSet('scicp.presenter_setlist_v1', JSON.stringify(setlist));
   }, [setlist]);
 
   useEffect(() => {
     try { localStorage.setItem('scicp.verse_notes_v1', JSON.stringify(verseNotes)); } catch { /* ignore */ }
+    prefSet('scicp.verse_notes_v1', JSON.stringify(verseNotes));
   }, [verseNotes]);
 
   useEffect(() => {
     try { localStorage.setItem('scicp.secondary_language_v1', secondaryLanguage); } catch { /* ignore */ }
+    prefSet('scicp.secondary_language_v1', secondaryLanguage);
   }, [secondaryLanguage]);
 
   // Watch OS theme changes at runtime and sync if user hasn't customized the theme
@@ -704,6 +712,7 @@ const MobilePresenter = () => {
       if (prev.some(v => v.verse_id != null && v.verse_id === verse.verse_id)) return prev; // no duplicates
       const updated = [...prev, { ...verse, theme: themeForVerse(currentTheme, verse) }];
       showToast(`Added to setlist`);
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
       return updated;
     });
   };
@@ -757,9 +766,11 @@ const MobilePresenter = () => {
 
   // Persist display preferences
   useEffect(() => {
+    const data = JSON.stringify({ theme: currentTheme, fontScale, uiFontSize });
     try {
-      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontScale, uiFontSize }));
+      localStorage.setItem('scicp.display_prefs_v1', data);
     } catch { /* ignore */ }
+    prefSet('scicp.display_prefs_v1', data);
   }, [currentTheme, fontScale, uiFontSize]);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
@@ -993,6 +1004,24 @@ const MobilePresenter = () => {
     };
   }, [isOnline]);
 
+  // Session keepalive: reconnect socket when app returns to foreground (iOS severs on background)
+  useEffect(() => {
+    if (!isOnline) return; // offline mode uses local socket — no reconnect needed
+    const listener = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive) return;
+      // App came to foreground — heal the socket and re-join session if needed
+      if (socket.disconnected) {
+        socket.connect();
+      } else if (sessionId && connectionState !== 'connected') {
+        const savedToken = (() => { try { return sessionStorage.getItem('scicp.presenter_token') || ''; } catch { return ''; } })();
+        socket.emit('join-session', { sessionId, role: 'presenter', presenterToken: savedToken }, (res) => {
+          if (res?.ok) setConnectionState('connected');
+        });
+      }
+    });
+    return () => { listener.then(l => l.remove()); };
+  }, [isOnline, socket, sessionId, connectionState]);
+
   const endLive = () => {
     if (!clearArmed) {
       setClearArmed(true);
@@ -1003,6 +1032,7 @@ const MobilePresenter = () => {
     }
     clearTimeout(clearArmTimer.current);
     setClearArmed(false);
+    Haptics.notification({ type: NotificationType.Warning }).catch(() => {});
     emitWithSession('clear-screen');
     setLiveVerse(null);
     setHighlightedText('');
@@ -1027,9 +1057,18 @@ const MobilePresenter = () => {
   const adjustUiFontSize = (delta) => {
     setUiFontSize(prev => Math.min(2.2, Math.max(0.75, parseFloat((prev + delta).toFixed(2)))));
   };
-  const copyVerseText = (verseObj, label = '') => {
+  const copyVerseText = async (verseObj, label = '') => {
     if (!verseObj) return;
     const text = `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}\n"${verseObj.scripture_text}"`;
+    // Use native share sheet on device; fall back to clipboard on web
+    const canShare = await Share.canShare().then(r => r.value).catch(() => false);
+    if (canShare) {
+      try {
+        await Share.share({ text, title: `${verseObj.book_title} ${verseObj.chapter_number}:${verseObj.verse_number}` });
+        Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+        return;
+      } catch { /* user dismissed — not an error */ return; }
+    }
     navigator.clipboard.writeText(text).then(() => {
       showToast(`Copied${label ? ' ' + label : ''}`);
     }).catch(() => showToast('Copy failed -- clipboard not available'));
@@ -1305,6 +1344,7 @@ const MobilePresenter = () => {
 
   const goLiveDirectly = verse => {
     const v = { ...verse, theme: themeForVerse(currentTheme, verse) };
+    Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
     emitGoLiveWithRetry({ verse: v, theme: v.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(v);
     setCurrentSegment(0);
@@ -1323,6 +1363,7 @@ const MobilePresenter = () => {
 
   const goLive = () => {
     if (!staged) return;
+    Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {});
     emitGoLiveWithRetry({ verse: staged, theme: staged.theme, language: currentLanguage, secondaryLanguage: secondaryLanguage || null });
     setLiveVerse(staged);
     setCurrentSegment(0);
@@ -1340,15 +1381,25 @@ const MobilePresenter = () => {
   // Toggle Enhanced AI Search (downloads MiniLM model on first enable)
   const toggleEnhancedAI = async () => {
     const next = !enhancedAI;
+    if (next && getEmbeddingStatus() !== 'ready') {
+      // Warn before the ~23MB MiniLM model download
+      setShowAiDownloadConfirm(true);
+      return;
+    }
     setEnhancedSearch(next);
     setEnhancedAI(next);
-    if (next && getEmbeddingStatus() !== 'ready') {
-      setAiModelStatus('loading');
-      const ok = await initPipeline((p) => {
-        if (p.status === 'progress') setAiModelStatus('loading');
-      });
-      setAiModelStatus(ok ? 'ready' : 'error');
-    }
+  };
+
+  const confirmAiDownload = async () => {
+    setShowAiDownloadConfirm(false);
+    setEnhancedSearch(true);
+    setEnhancedAI(true);
+    setAiModelStatus('loading');
+    const ok = await initPipeline((p) => {
+      if (p.status === 'progress') setAiModelStatus('loading');
+    });
+    setAiModelStatus(ok ? 'ready' : 'error');
+    if (!ok) { setEnhancedSearch(false); setEnhancedAI(false); }
   };
 
   // Subscribe to language download state changes — fire toasts + Android notifications
@@ -3443,6 +3494,16 @@ const MobilePresenter = () => {
         <div className="presenter-takeover-alert presenter-evicted-alert" role="alert" aria-live="assertive">
           ⛔ You have been removed — another presenter took over this session.
           <button className="presenter-takeover-dismiss" onClick={() => setEvictedAlert(false)}>✕</button>
+        </div>
+      )}
+      {showAiDownloadConfirm && (
+        <div className="presenter-takeover-alert" role="dialog" aria-modal="true" style={{ flexDirection: 'column', gap: '0.6rem', maxWidth: '80vw', textAlign: 'center', padding: '1rem' }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Enable Full AI Search?</span>
+          <span style={{ fontSize: '0.78rem', opacity: 0.8 }}>This downloads the MiniLM model (~23 MB). Required only once. Use Wi-Fi if available.</span>
+          <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'center' }}>
+            <button className="presenter-takeover-dismiss" style={{ background: 'rgba(255,255,255,0.12)', borderRadius: 6, padding: '0.4rem 0.9rem', fontSize: '0.8rem' }} onClick={() => setShowAiDownloadConfirm(false)}>Cancel</button>
+            <button className="presenter-takeover-dismiss" style={{ background: '#c9a84c', color: '#0a0a0f', borderRadius: 6, padding: '0.4rem 0.9rem', fontSize: '0.8rem', fontWeight: 700 }} onClick={confirmAiDownload}>Download</button>
+          </div>
         </div>
       )}
       {/* Toast notification */}
