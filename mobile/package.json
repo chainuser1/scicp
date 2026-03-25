@@ -1,7 +1,7 @@
 {
-  "name": "scicp-mobile",
+  "name": "scriptures-in-view-mobile",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -45,5 +45,8 @@
     "terser": "^5.46.1",
     "vite": "^7.3.1",
     "vitest": "^4.1.0"
-  }
+  },
+  "description": "Scriptures in View mobile app \u2014 Capacitor/React",
+  "author": "Scriptures in View",
+  "license": "UNLICENSED"
 }

@@ -6,8 +6,8 @@
     "frontend",
     "shared"
   ],
-  "version": "1.0.0",
-  "description": "A high-performance, web-based scripture projection engine.",
+  "version": "2.2.0",
+  "description": "Real-time scripture presentation engine for church and worship services.",
   "main": "electron/main.js",
   "scripts": {
     "dev": "npm run dev --workspace=backend  && npm run dev --workspace=frontend",
@@ -49,6 +49,6 @@
     "rollup-plugin-visualizer": "^7.0.1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "author": "Scriptures in View",
+  "license": "UNLICENSED"
 }

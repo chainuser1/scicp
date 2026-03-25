@@ -1,6 +1,6 @@
-appId: com.scriptures-in-view.desktop
+appId: com.scripturesinview.desktop
 productName: Scriptures in View
-copyright: Copyright © 2026 Scriptures in View
+copyright: Copyright © 2026 Scriptures in View. All rights reserved.
 
 # ── Auto-update via GitHub Releases ──────────────────────────────────────────
 publish:
@@ -94,7 +94,7 @@ linux:
   category: Education
 
 deb:
-  maintainer: "Scriptures in View <scriptures-in-view@localhost>"
+  maintainer: "Scriptures in View <support@scripturesinview.app>"
 
 # ── Windows installer options ─────────────────────────────────────────────────
 nsis:
