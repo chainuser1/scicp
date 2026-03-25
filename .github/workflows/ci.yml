@@ -15,23 +15,31 @@ env:
 jobs:
   check-prod:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v5
-        with:
-          lfs: false    # Don't auto-fetch LFS — we restore from cache first
 
-      - name: Restore Git LFS cache
-        id: lfs-cache
-        uses: actions/cache@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          path: .git/lfs
-          key: lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-${{ github.sha }}
-          restore-keys: |
-            lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull LFS objects (only fetches what's not in cache)
-        run: git lfs pull
+      - name: Extract DBs from GHCR image (no LFS bandwidth)
+        run: |
+          if docker pull ghcr.io/${{ github.repository }}:latest 2>/dev/null; then
+            container=$(docker create ghcr.io/${{ github.repository }}:latest)
+            docker cp "$container:/app/resources/db/." resources/db/
+            docker rm "$container"
+            echo "✓ DBs extracted from GHCR image"
+          else
+            echo "No GHCR image found — falling back to Git LFS"
+            git lfs pull
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -51,7 +59,3 @@ jobs:
 
       - name: Run production readiness check
         run: npm run check:prod
-
-      # Prune orphaned LFS objects so old DB versions don't accumulate
-      - name: Prune old LFS objects
-        run: git lfs prune --verify-remote || true
