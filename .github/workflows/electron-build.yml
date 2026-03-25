@@ -10,12 +10,49 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # Emergency fallback: set repository variable ALLOW_UNSECURE_NODE20=true
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: ${{ vars.ALLOW_UNSECURE_NODE20 == 'true' && 'true' || 'false' }}
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 permissions:
   contents: write              # Required to create GitHub Releases
+  packages: read               # Required to pull from GHCR
 
 jobs:
+  # ── Extract DBs from GHCR image (Linux only — runs before platform builds) ──
+  fetch-dbs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract DBs from GHCR image (no LFS bandwidth used)
+        run: |
+          if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+            container=$(docker create ghcr.io/${{ env.IMAGE_NAME }}:latest)
+            mkdir -p resources/db
+            docker cp "$container:/app/resources/db/." resources/db/
+            docker rm "$container"
+            head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite' \
+              && echo "✓ DBs extracted from GHCR image" \
+              || (echo "ERROR: extracted DB is not valid SQLite" && exit 1)
+          else
+            echo "No GHCR image found — falling back to Git LFS"
+            git lfs pull
+          fi
+
+      - name: Upload DBs as workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: scicp-databases
+          path: resources/db/
+          retention-days: 1
+
   build:
+    needs: fetch-dbs
     strategy:
       matrix:
         include:
@@ -32,7 +69,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-        # No lfs: true — Electron build only needs frontend source, not DB files
+        # No lfs: true — DBs come from the fetch-dbs job artifact
+
+      - name: Download DBs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: scicp-databases
+          path: resources/db/
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
