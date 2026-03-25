@@ -1,7 +1,5 @@
 FROM node:20-bookworm-slim AS build
 
-RUN apt-get update && apt-get install -y git-lfs && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 COPY package*.json ./
@@ -12,11 +10,13 @@ RUN npm ci --include=dev
 
 COPY . .
 
-# Ensure LFS pointer files are replaced with actual content
-RUN git lfs install --skip-repo \
-  && if git lfs pointer --check resources/db/lds-scriptures-sqlite.db 2>/dev/null; then \
-       echo "ERROR: LFS pointers detected — actual DB files required in build context" && exit 1; \
-     fi
+# Fail fast if DB files are LFS pointers (130 bytes) instead of real SQLite files.
+# Real SQLite files start with "SQLite format 3"; pointers start with "version https://git-lfs".
+RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; then \
+      echo "ERROR: resources/db/*.db are Git LFS pointers, not real databases." && \
+      echo "Enable Git LFS in your deployment platform (Railway: Settings → Git LFS)." && \
+      exit 1; \
+    fi
 
 RUN npm run build --workspace=frontend
 
