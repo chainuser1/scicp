@@ -8195,6 +8195,43 @@ button, [role="button"] {
   opacity: 0;
   pointer-events: none;
 }
+.rd-nav-wrap {
+  position: relative;
+}
+.rd-nav-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--rd-toolbar, #1e1e2e);
+  border: 1px solid var(--rd-border, rgba(255,255,255,0.12));
+  border-radius: 10px;
+  min-width: 170px;
+  z-index: 300;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  overflow: hidden;
+  animation: popover-in 0.18s ease both;
+}
+.rd-nav-item {
+  display: block;
+  padding: 0.65rem 1rem;
+  text-decoration: none;
+  color: var(--rd-text, #e0e0e8);
+  font-size: 0.83rem;
+  transition: background 0.15s;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.rd-nav-item:hover {
+  background: rgba(255,255,255,0.08);
+}
+.rd-nav-divider {
+  height: 1px;
+  background: var(--rd-border, rgba(255,255,255,0.08));
+  margin: 0.2rem 0;
+}
 .rd-tb-back {
   background: none;
   border: none;

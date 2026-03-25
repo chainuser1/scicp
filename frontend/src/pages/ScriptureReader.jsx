@@ -109,6 +109,7 @@ export default function ScriptureReader({ onExit }) {
 
   // Sheets
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [rdNavOpen,    setRdNavOpen]    = useState(false);
   const [ctx,          setCtx]          = useState(null);
   const [ctxData,      setCtxData]      = useState({});
   const ctxCacheRef = useRef({});
@@ -243,6 +244,15 @@ export default function ScriptureReader({ onExit }) {
     window.addEventListener('offline', off);
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   }, []);
+
+  // Close nav menu on outside click
+  useEffect(() => {
+    if (!rdNavOpen) return;
+    const handler = e => { if (!e.target.closest('.rd-nav-wrap')) setRdNavOpen(false); };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler, { passive: true });
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler); };
+  }, [rdNavOpen]);
 
   // ── Coverage + spaced review fetches ─────────────────────────────────────
   useEffect(() => {
@@ -529,6 +539,21 @@ export default function ScriptureReader({ onExit }) {
               </span>
             )}
             <button className="rd-settings-btn" onClick={() => setSettingsOpen(true)}>Aa</button>
+            <div className="rd-nav-wrap">
+              <button className="rd-settings-btn" onClick={() => setRdNavOpen(o => !o)} title="Navigation" aria-label="Open navigation menu">☰</button>
+              {rdNavOpen && (
+                <div className="rd-nav-menu" role="menu">
+                  <a href="/presenter" className="rd-nav-item">🎙 Present</a>
+                  <a href="/client" className="rd-nav-item">📺 Display</a>
+                  <a href="/" className="rd-nav-item">🏠 Home</a>
+                  <div className="rd-nav-divider" />
+                  <a href="/about" className="rd-nav-item">About</a>
+                  <a href="/contact" className="rd-nav-item">Contact</a>
+                  <a href="/privacy" className="rd-nav-item">Privacy</a>
+                  <a href="/terms" className="rd-nav-item">Terms</a>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="rd-search-wrap">
@@ -668,6 +693,21 @@ export default function ScriptureReader({ onExit }) {
             <div className="rd-tb-right">
               <button className="rd-tb-btn" title="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
               <button className="rd-tb-btn" onClick={() => setSettingsOpen(true)}>Aa</button>
+              <div className="rd-nav-wrap">
+                <button className="rd-tb-btn" onClick={() => setRdNavOpen(o => !o)} title="Navigation" aria-label="Open navigation menu">☰</button>
+                {rdNavOpen && (
+                  <div className="rd-nav-menu" role="menu">
+                    <a href="/presenter" className="rd-nav-item">🎙 Present</a>
+                    <a href="/client" className="rd-nav-item">📺 Display</a>
+                    <a href="/" className="rd-nav-item">🏠 Home</a>
+                    <div className="rd-nav-divider" />
+                    <a href="/about" className="rd-nav-item">About</a>
+                    <a href="/contact" className="rd-nav-item">Contact</a>
+                    <a href="/privacy" className="rd-nav-item">Privacy</a>
+                    <a href="/terms" className="rd-nav-item">Terms</a>
+                  </div>
+                )}
+              </div>
               <button className="rd-tb-exit" onClick={onExit} title="Exit Reader">✕</button>
             </div>
           </div>

@@ -1,6 +1,9 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
+const isElectronApp  = !!window.electronAPI?.isElectron;
+const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
+
 export default function Footer() {
   return (
     <footer className="home-footer" style={{padding: '0.75rem 0'}}>
@@ -18,8 +21,9 @@ export default function Footer() {
           <li><Link to="/">Home</Link></li>
           <li><Link to="/presenter">Present</Link></li>
           <li><Link to="/client">Display</Link></li>
+          <li><Link to="/reader">Reader</Link></li>
           <li><Link to="/about">About</Link></li>
-          <li><Link to="/download">Downloads</Link></li>
+          {!isElectronApp && !isCapacitorApp && <li><Link to="/download">Downloads</Link></li>}
           <li><Link to="/contact">Contact</Link></li>
           <li><Link to="/privacy">Privacy Policy</Link></li>
           <li><Link to="/terms">Terms of Service</Link></li>
