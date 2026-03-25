@@ -1,15 +1,17 @@
 import React, {useEffect, useState} from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
-import Presenter from './pages/Presenter';
-import Client from './pages/Client';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
-import Download from './pages/Download';
-import ScriptureReader from './pages/ScriptureReader';
 import './App.css';
 import Footer from './components/Footer';
+import ErrorBoundary from './components/ErrorBoundary';
+
+const Presenter = React.lazy(() => import('./pages/Presenter'));
+const Client = React.lazy(() => import('./pages/Client'));
+const ScriptureReader = React.lazy(() => import('./pages/ScriptureReader'));
+const Download = React.lazy(() => import('./pages/Download'));
 
 /* ─── Cross / Emblem SVG ─── */
 const EmblemSVG = ({ size = 72 }) => (
@@ -135,21 +137,35 @@ function ReaderPage() {
   return <ScriptureReader onExit={() => navigate('/')} />;
 }
 
+function NotFound() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
+      <h1>Page not found</h1>
+      <Link to="/">Go back home</Link>
+    </div>
+  );
+}
+
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/reader" element={<ReaderPage />} />
-        <Route path="/presenter" element={<Presenter />} />
-        <Route path="/client" element={<Client />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/contact" element={<Contact />} />
-        <Route path="/privacy" element={<Privacy />} />
-        <Route path="/terms" element={<Terms />} />
-        <Route path="/download" element={<Download />} />
-      </Routes>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <React.Suspense fallback={<div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}><p>Loading…</p></div>}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/reader" element={<ReaderPage />} />
+            <Route path="/presenter" element={<Presenter />} />
+            <Route path="/client" element={<Client />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/download" element={<Download />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </React.Suspense>
+      </Router>
+    </ErrorBoundary>
   );
 }
 
