@@ -2137,7 +2137,7 @@ const Presenter = () => {
 
   /* ── Render ── */
   return (
-    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+    <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}${(staged || liveVerse) ? ' has-golive-bar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
 
       {/* Phase 1: Presenter takeover alert — unobtrusive amber banner */}
       {takeoverAlert && (
