@@ -2497,6 +2497,11 @@ const Presenter = () => {
                   {[
                     { value: 'crossfade',  label: '⊙ Fade' },
                     { value: 'slide-up',   label: '↑ Slide' },
+                    { value: 'push',       label: '⇑ Push' },
+                    { value: 'zoom',       label: '⊕ Zoom' },
+                    { value: 'blur',       label: '◎ Morph' },
+                    { value: 'wipe',       label: '▷ Wipe' },
+                    { value: 'split',      label: '⊞ Split' },
                     { value: 'fade-black', label: '◼ Black' },
                     { value: 'cut',        label: '⚡ Cut' },
                   ].map(({ value, label }) => (
@@ -2798,6 +2803,25 @@ const Presenter = () => {
                   style={{ width: '100%' }}
                 >
                   {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Transition</div>
+                <select
+                  className="lang-select lang-select--mobile"
+                  value={currentTheme?.transition_mode || 'crossfade'}
+                  onChange={e => { handleThemeChange({ ...currentTheme, transition_mode: e.target.value }); }}
+                  style={{ width: '100%' }}
+                >
+                  {[
+                    { value: 'crossfade',  label: '⊙ Fade' },
+                    { value: 'slide-up',   label: '↑ Slide' },
+                    { value: 'push',       label: '⇑ Push' },
+                    { value: 'zoom',       label: '⊕ Zoom' },
+                    { value: 'blur',       label: '◎ Morph' },
+                    { value: 'wipe',       label: '▷ Wipe' },
+                    { value: 'split',      label: '⊞ Split' },
+                    { value: 'fade-black', label: '◼ Black' },
+                    { value: 'cut',        label: '⚡ Cut' },
+                  ].map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
 
@@ -3538,6 +3562,11 @@ const Presenter = () => {
                 {[
                   { value: 'crossfade',  label: '⊙ Fade' },
                   { value: 'slide-up',   label: '↑ Slide' },
+                  { value: 'push',       label: '⇑ Push' },
+                  { value: 'zoom',       label: '⊕ Zoom' },
+                  { value: 'blur',       label: '◎ Morph' },
+                  { value: 'wipe',       label: '▷ Wipe' },
+                  { value: 'split',      label: '⊞ Split' },
                   { value: 'fade-black', label: '◼ Black' },
                   { value: 'cut',        label: '⚡ Cut' },
                 ].map(({ value, label }) => (

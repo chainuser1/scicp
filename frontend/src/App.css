@@ -1033,6 +1033,53 @@ button,
   transform: translateY(0);
 }
 
+/* ── Push — verse enters from below, exits upward ── */
+.verse-text-body.verse-text-transition--push {
+  transform: translateY(48px);
+  transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.verse-text-body.verse-text-transition--push.verse-text-visible {
+  transform: translateY(0);
+}
+
+/* ── Zoom — gentle scale-in with fade ── */
+.verse-text-body.verse-text-transition--zoom {
+  transform: scale(0.93);
+  transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.verse-text-body.verse-text-transition--zoom.verse-text-visible {
+  transform: scale(1);
+}
+
+/* ── Blur — gaussian blur dissolve (Morph-like) ── */
+.verse-text-body.verse-text-transition--blur {
+  filter: blur(12px);
+  transition: opacity 0.55s ease, filter 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.verse-text-body.verse-text-transition--blur.verse-text-visible {
+  filter: blur(0px);
+}
+
+/* ── Wipe — clip-path left-to-right reveal ── */
+.verse-text-body.verse-text-transition--wipe {
+  clip-path: inset(0 100% 0 0);
+  transition: opacity 0.1s ease, clip-path 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.verse-text-body.verse-text-transition--wipe.verse-text-visible {
+  clip-path: inset(0 0% 0 0);
+  opacity: 1;
+}
+
+/* ── Split — reveal from center outward ── */
+.verse-text-body.verse-text-transition--split {
+  clip-path: inset(0 50% 0 50%);
+  transition: opacity 0.1s ease, clip-path 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.verse-text-body.verse-text-transition--split.verse-text-visible {
+  clip-path: inset(0 0% 0 0%);
+  opacity: 1;
+}
+
 /* ── Instant cut — no animation ── */
 .verse-text-body.verse-text-transition--cut {
   transition: none !important;
@@ -1061,6 +1108,8 @@ button,
   opacity: 1 !important;
   transition: none !important;
   transform: none !important;
+  filter: none !important;
+  clip-path: none !important;
 }
 .client-view.reduce-motion-auto .verse-caption {
   animation: none !important;
