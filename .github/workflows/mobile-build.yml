@@ -102,6 +102,17 @@ jobs:
         working-directory: mobile
         run: npx cap sync android
 
+      - name: Patch Android versionCode + versionName
+        run: |
+          GRADLE="mobile/android/app/build.gradle"
+          VERSION=$(node -p "require('./mobile/package.json').version")
+          # versionCode: major*10000 + minor*100 + patch (e.g. 2.2.0 → 20200)
+          IFS='.' read -r MAJ MIN PAT <<< "$VERSION"
+          VCODE=$(( MAJ * 10000 + MIN * 100 + PAT ))
+          sed -i "s/versionCode [0-9]*/versionCode $VCODE/" "$GRADLE"
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" "$GRADLE"
+          echo "✓ Android versionCode=$VCODE versionName=$VERSION"
+
       - name: Apply custom Android launcher icon
         run: |
           SRC="mobile/public/emblem-512.png"

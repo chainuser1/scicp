@@ -1,7 +1,7 @@
 {
   "name": "backend",
-  "version": "1.0.0",
-  "description": "",
+  "version": "2.2.0",
+  "description": "Scriptures in View \u2014 Fastify + Socket.IO backend",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -11,8 +11,8 @@
     "build": "echo 'Backend is a Node.js server - no build step required'"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Scriptures in View",
+  "license": "UNLICENSED",
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
