@@ -321,8 +321,15 @@ fastify.post('/search-feedback', async (request, reply) => {
       'INSERT INTO search_feedback (query, verse_id, rank_shown, source) VALUES (?, ?, ?, ?)'
     ).run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null);
 
+    if (request.body.tier != null && request.body.raw_score != null) {
+      db_user.prepare(
+        'INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, ?)'
+      ).run(Date.now(), Number(request.body.tier), Number(request.body.raw_score), 1);
+    }
+
     const count = db_user.prepare('SELECT COUNT(*) AS n FROM search_feedback WHERE ts > ?').get(Date.now() - 3600000).n;
     if (count % 20 === 0 && count > 0) updateLearnedWeights();
+    if (count % 20 === 0 && count > 0) fitCalibrationCurves();
 
     return { ok: true };
   } catch (err) {
@@ -2699,7 +2706,10 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         }
 
         // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
-        const specificityScore = (6 - tier) + tierScore;
+        let specificityScore = (6 - tier) + tierScore;
+        if (calibrationCurves.size > 0) {
+          specificityScore = calibrateScore(tier, specificityScore);
+        }
         return { ...r, _specificity_score: specificityScore, _tier: tier };
       });
       results.sort((a, b) => (b._specificity_score || 0) - (a._specificity_score || 0));
@@ -3546,7 +3556,7 @@ fastify.get('/for-you', async (request, reply) => {
 
     // ── Step 1: Get user's reading history verse_ids ──
     const readRows = db_user.prepare(
-      'SELECT DISTINCT verse_id FROM reading_events WHERE event_type = "read" ORDER BY ts DESC LIMIT 200'
+      'SELECT DISTINCT verse_id FROM reading_events WHERE event_type = \'read\' ORDER BY ts DESC LIMIT 200'
     ).all();
     const readSet = new Set(readRows.map(r => r.verse_id));
 
@@ -3716,7 +3726,7 @@ fastify.get('/personalized-votd', async (request, reply) => {
     if (recentCount >= 5 && db_graph) {
       const clusterFreq = new Map();
       const readRows = db_user.prepare(
-        'SELECT verse_id FROM reading_events WHERE event_type = "read" ORDER BY ts DESC LIMIT 50'
+        'SELECT verse_id FROM reading_events WHERE event_type = \'read\' ORDER BY ts DESC LIMIT 50'
       ).all();
       const readSet = new Set(readRows.map(r => r.verse_id));
 
