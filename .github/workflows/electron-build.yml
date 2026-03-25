@@ -52,6 +52,12 @@ jobs:
       - name: Build frontend
         run: npm run build --workspace=frontend
 
+      - name: Verify native module
+        run: ls electron/node_modules/better-sqlite3/build/Release/*.node
+
+      - name: Verify frontend dist
+        run: test -f frontend/dist/index.html || (echo "Frontend build failed" && exit 1)
+
       - name: Build Electron (${{ matrix.platform }})
         run: npx electron-builder --${{ matrix.platform }} --publish never
         env:
