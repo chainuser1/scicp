@@ -943,6 +943,8 @@ const Presenter = () => {
   const resultsListRef  = useRef(null);
   const [resultsScrolled, setResultsScrolled] = useState(false);
   const [searchPending, setSearchPending] = useState(false);
+  const previewBoxRef   = useRef(null);
+  const [previewBoxWidth, setPreviewBoxWidth] = useState(0);
 
   // Persist display preferences — must be after fontSizeRem/uiFontSize declarations
   useEffect(() => {
@@ -950,6 +952,18 @@ const Presenter = () => {
       localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
     } catch { /* ignore */ }
   }, [currentTheme, fontSizeRem, uiFontSize]);
+
+  // Track preview box width for dynamic font scaling
+  useEffect(() => {
+    const el = previewBoxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width;
+      if (w > 0) setPreviewBoxWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
@@ -3467,6 +3481,7 @@ const Presenter = () => {
               </button>
             </div>
             <div
+              ref={previewBoxRef}
               className={`preview-box${currentTheme?.background_url ? ' preview-box--has-bg' : ''}`}
               onMouseUp={handlePreviewTextSelection}
               style={{
@@ -3476,7 +3491,15 @@ const Presenter = () => {
                 fontFamily: currentTheme?.font_family || undefined,
               }}
             >
-              <div className="preview-text">{renderPreviewText()}</div>
+              {/* Scale preview text proportionally to actual client font size.
+                  CLIENT_REF_W = 1280px (typical TV/wide display target width). */}
+              <div
+                className="preview-text"
+                style={previewBoxWidth > 0 ? {
+                  fontSize: `${Math.max(0.62, fontSizeRem * (previewBoxWidth / 1280)).toFixed(4)}rem`,
+                  lineHeight: 1.55,
+                } : undefined}
+              >{renderPreviewText()}</div>
               {(liveVerse.secondary_segments?.[currentSegment] || liveVerse.secondary_text) && (
                 <p className="preview-secondary-text">
                   {liveVerse.secondary_segments?.[currentSegment] || liveVerse.secondary_text}
