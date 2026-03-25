@@ -522,15 +522,8 @@ fastify.get('/suggest', async (request, reply) => {
        WHERE lower(book_title) LIKE ? LIMIT 5`
     ).all(`%${term}%`);
 
-    // 3. Doctrine aliases (keys starting with the typed prefix)
-    const DOCTRINE_ALIASES = {};
-    const aliasMatches = Object.keys(DOCTRINE_ALIASES)
-      .filter(k => k.startsWith(term))
-      .slice(0, 3)
-      .map(k => ({ term: k }));
-
     const seen = new Set();
-    const suggestions = [...vocabRows, ...bookRows, ...aliasMatches]
+    const suggestions = [...vocabRows, ...bookRows]
       .map(r => r.term)
       .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
       .slice(0, limit);
