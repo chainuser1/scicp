@@ -13,16 +13,59 @@ env:
 
 permissions:
   contents: write
+  packages: read
 
 jobs:
+  # ── Extract DBs from GHCR image (Linux only — shared by Android + iOS) ──
+  fetch-dbs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract DBs from GHCR image (no LFS bandwidth)
+        run: |
+          if docker pull ghcr.io/${{ github.repository }}:latest 2>/dev/null; then
+            container=$(docker create ghcr.io/${{ github.repository }}:latest)
+            mkdir -p mobile-dbs
+            docker cp "$container:/app/resources/db/." mobile-dbs/
+            docker rm "$container"
+            head -c 6 mobile-dbs/lds-scriptures-sqlite.db | grep -q 'SQLite' \
+              && echo "✓ DBs extracted from GHCR image" \
+              || (echo "ERROR: extracted DB is not valid SQLite" && exit 1)
+          else
+            echo "No GHCR image found — falling back to Git LFS"
+            mkdir -p mobile-dbs
+            git lfs pull
+            cp resources/db/*.db mobile-dbs/
+          fi
+
+      - name: Upload DBs as workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: scicp-mobile-databases
+          path: mobile-dbs/
+          retention-days: 1
+
   # ── Android APK ─────────────────────────────────────────────────────────
   android:
+    needs: fetch-dbs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
+      - name: Download DBs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: scicp-mobile-databases
+          path: mobile/public/assets/db/
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -125,12 +168,19 @@ jobs:
 
   # ── iOS Archive ─────────────────────────────────────────────────────────
   ios:
+    needs: fetch-dbs
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
+      - name: Download DBs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: scicp-mobile-databases
+          path: mobile/public/assets/db/
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
