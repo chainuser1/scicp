@@ -930,7 +930,9 @@ const Presenter = () => {
   const clearArmTimer                          = React.useRef(null);
   const [clearArmed, setClearArmed]           = useState(false);
   const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
-  const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
+  // fontScale: remote scale multiplier sent to client (0.5–2.0, default 1.0).
+  // The client applies this on top of its own auto-fit; both paths share the same fontScale state.
+  const [fontScale, setFontScale]             = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontScale ?? 1.0; } catch { return 1.0; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
   const [autoAdvance, setAutoAdvance]         = useState(false);
   const [autoAdvanceSec, setAutoAdvanceSec]   = useState(5);
@@ -946,12 +948,12 @@ const Presenter = () => {
   const previewBoxRef   = useRef(null);
   const [previewBoxWidth, setPreviewBoxWidth] = useState(0);
 
-  // Persist display preferences — must be after fontSizeRem/uiFontSize declarations
+  // Persist display preferences — must be after fontScale/uiFontSize declarations
   useEffect(() => {
     try {
-      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
+      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontScale, uiFontSize }));
     } catch { /* ignore */ }
-  }, [currentTheme, fontSizeRem, uiFontSize]);
+  }, [currentTheme, fontScale, uiFontSize]);
 
   // Track preview box width for dynamic font scaling
   useEffect(() => {
@@ -1000,9 +1002,9 @@ const Presenter = () => {
   };
 
   const adjustFontSize = (delta) => {
-    setFontSizeRem(prev => {
-      const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
-      const updatedTheme = { ...currentTheme, font_size: next + 'rem' };
+    setFontScale(prev => {
+      const next = parseFloat(Math.min(2.0, Math.max(0.5, prev + delta)).toFixed(2));
+      const updatedTheme = { ...currentTheme, font_scale: next };
       handleThemeChange(updatedTheme);
       return next;
     });
@@ -1274,9 +1276,8 @@ const Presenter = () => {
     const handleThemeReceived = theme => {
       setCurrentTheme(theme);
       setStaged(prev => prev ? { ...prev, theme: themeForVerse(theme, prev) } : prev);
-      if (theme?.font_size) {
-        const parsed = parseFloat(theme.font_size);
-        if (!isNaN(parsed)) setFontSizeRem(parsed);
+      if (theme?.font_scale != null && !isNaN(theme.font_scale)) {
+        setFontScale(theme.font_scale);
       }
     };
     socket.on('search-results', handleSearchResults);
@@ -1363,10 +1364,9 @@ const Presenter = () => {
     setCurrentTheme(nextTheme);
     if (staged) setStaged(prev => ({ ...prev, theme: themeForVerse(nextTheme, prev) }));
     emitWithSession('update-theme', { theme: nextTheme });
-    // Keep fontSizeRem slider in sync when theme is changed externally
-    if (nextTheme.font_size) {
-      const parsed = parseFloat(nextTheme.font_size);
-      if (!isNaN(parsed)) setFontSizeRem(parsed);
+    // Keep fontScale slider in sync when theme is changed externally
+    if (nextTheme.font_scale != null && !isNaN(nextTheme.font_scale)) {
+      setFontScale(nextTheme.font_scale);
     }
   };
 
@@ -3496,7 +3496,8 @@ const Presenter = () => {
               <div
                 className="preview-text"
                 style={previewBoxWidth > 0 ? {
-                  fontSize: `${Math.max(0.62, fontSizeRem * (previewBoxWidth / 1280)).toFixed(4)}rem`,
+                  // Mirror client: auto-fit base ≈ 4.1rem at 1280px, scaled by fontScale and preview width ratio
+                  fontSize: `${Math.max(0.62, 4.1 * fontScale * (previewBoxWidth / 1280)).toFixed(4)}rem`,
                   lineHeight: 1.55,
                 } : undefined}
               >{renderPreviewText()}</div>
@@ -3615,12 +3616,12 @@ const Presenter = () => {
                   {staged?.scripture_text?.slice(0, 60) || liveVerse?.scripture_text?.slice(0, 60) || 'Scripture preview…'}
                 </span>
               </div>
-              {/* Font size control */}
+              {/* Font size control — remotely drives client fontScale */}
               <div className="font-size-controls">
                 <span className="font-size-label">Text Size</span>
-                <button className="font-size-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">−</button>
-                <span className="font-size-badge">{fontSizeRem.toFixed(1)}rem</span>
-                <button className="font-size-btn" onClick={() => adjustFontSize(0.3)} title="Larger text" aria-label="Increase font size">+</button>
+                <button className="font-size-btn" onClick={() => adjustFontSize(-0.05)} title="Smaller text" aria-label="Decrease font size">−</button>
+                <span className="font-size-badge">{fontScale.toFixed(2)}×</span>
+                <button className="font-size-btn" onClick={() => adjustFontSize(0.05)} title="Larger text" aria-label="Increase font size">+</button>
               </div>
               <div className="font-size-controls">
                 <span className="font-size-label">Reading Size</span>
@@ -3725,8 +3726,8 @@ const Presenter = () => {
           <div className="mobile-golive-actions">
             {liveVerse && (
               <>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">A−</button>
-                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.3)} title="Larger text"  aria-label="Increase font size">A+</button>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize(-0.05)} title="Smaller text" aria-label="Decrease font size">A−</button>
+                <button className="mobile-font-btn" onClick={() => adjustFontSize( 0.05)} title="Larger text"  aria-label="Increase font size">A+</button>
                 <button className={`mobile-endlive-btn${clearArmed ? ' end-live-btn--armed' : ''}`} onClick={endLive} title="End live">{clearArmed ? '?' : '◼ End'}</button>
               </>
             )}
