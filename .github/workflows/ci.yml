@@ -50,3 +50,7 @@ jobs:
 
       - name: Run production readiness check
         run: npm run check:prod
+
+      # Prune orphaned LFS objects so old DB versions don't accumulate
+      - name: Prune old LFS objects
+        run: git lfs prune --verify-remote || true
