@@ -76,6 +76,7 @@ const SK = {
   lastRead:   'scicp.reader_last_read',
   highlights: 'scicp.reader_highlights',
   bookmarks:  'scicp.reader_bookmarks',
+  bookmarksMeta: 'scicp.reader_bookmarks_meta',
   setlist:    'scicp.presenter_setlist_v1',
 };
 
@@ -113,7 +114,8 @@ export default function ScriptureReader({ onExit }) {
 
   // ── Annotations ───────────────────────────────────────────────────────────
   const [highlights, setHighlights] = useState(() => recall(SK.highlights, {}));
-  const [bookmarks,  setBookmarks]  = useState(() => new Set(recall(SK.bookmarks, [])));
+  const [bookmarks,      setBookmarks]      = useState(() => new Set(recall(SK.bookmarks, [])));
+  const [bookmarksMeta,  setBookmarksMeta]  = useState(() => new Map(Object.entries(recall(SK.bookmarksMeta, {}))));
 
   // ── Screen state ──────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('home'); // 'home' | 'chapter'
@@ -543,11 +545,23 @@ export default function ScriptureReader({ onExit }) {
     setLpMenu(null);
   }, []);
 
-  const toggleBookmark = useCallback((verseId) => {
+  const toggleBookmark = useCallback((verseOrId) => {
+    const verseId = typeof verseOrId === 'object' ? verseOrId.verse_id : verseOrId;
     setBookmarks(b => {
       const next = new Set(b);
       if (next.has(verseId)) next.delete(verseId); else next.add(verseId);
       store(SK.bookmarks, [...next]);
+      return next;
+    });
+    setBookmarksMeta(m => {
+      const next = new Map(m);
+      if (next.has(verseId)) {
+        next.delete(verseId);
+      } else if (typeof verseOrId === 'object') {
+        const { book_title, chapter_number, verse_number, scripture_text } = verseOrId;
+        next.set(verseId, { book_title, chapter_number, verse_number, scripture_text });
+      }
+      store(SK.bookmarksMeta, Object.fromEntries(next));
       return next;
     });
     setLpMenu(null);
@@ -658,11 +672,10 @@ export default function ScriptureReader({ onExit }) {
                   <h2 className="rd-section-hd">🔖 Bookmarks <span className="rd-section-sub">— tap to open chapter</span></h2>
                   <div className="rd-setlist-list">
                     {[...bookmarks].slice(0, 12).map(vid => {
-                      // Scan setlist + lastRead for verse metadata; fall back to ID display
-                      const meta = setlist.find(v => v.verse_id === vid);
+                      const meta = bookmarksMeta.get(vid) || setlist.find(v => v.verse_id === vid);
                       if (!meta) return null;
                       return (
-                        <button key={vid} className="rd-setlist-row" onClick={() => openVerseInReader(meta)}>
+                        <button key={vid} className="rd-setlist-row" onClick={() => openVerseInReader({ verse_id: vid, ...meta })}>
                           <span className="rd-setlist-ref">{meta.book_title} {meta.chapter_number}:{meta.verse_number}</span>
                           <p className="rd-setlist-text">{meta.scripture_text}</p>
                         </button>
@@ -1123,7 +1136,7 @@ export default function ScriptureReader({ onExit }) {
 
             {/* Actions */}
             <div className="rd-lp-actions">
-              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse.verse_id); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>
+              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>
                 {bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}
               </button>
               <button className="rd-lp-act" onClick={async () => {
