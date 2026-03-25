@@ -7887,6 +7887,172 @@ button, [role="button"] {
   user-select: all;
 }
 
+/* ── ConnectTV ── */
+.ctv-wrap {
+  position: relative;
+}
+.ctv-btn {
+  display: flex; align-items: center; gap: 0.35rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
+  color: var(--text-secondary, #aaa);
+  padding: 0.38rem 0.7rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.ctv-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary, #fff); }
+.ctv-btn--active {
+  background: rgba(201,168,76,0.15);
+  border-color: rgba(201,168,76,0.5);
+  color: #c9a84c;
+}
+.ctv-btn-label { font-weight: 600; letter-spacing: 0.02em; }
+
+.ctv-popover {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 9100;
+  width: min(22rem, 92vw);
+  background: var(--surface, #14141f);
+  border: 1px solid rgba(201,168,76,0.3);
+  border-radius: 0.9rem;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.65);
+  padding: 0;
+  overflow: hidden;
+  animation: ctx-slide-in 0.2s cubic-bezier(0.22,1,0.36,1);
+}
+.ctv-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1rem 0.6rem;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.ctv-header-title {
+  font-size: 0.85rem; font-weight: 700;
+  color: var(--text-primary, #fff);
+  letter-spacing: 0.02em;
+}
+.ctv-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary, #888);
+  font-size: 0.9rem; padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.ctv-close:hover { color: var(--text-primary, #fff); }
+
+.ctv-tabs {
+  display: flex; gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.ctv-tab {
+  flex: 1; text-align: center;
+  padding: 0.45rem 0;
+  font-size: 0.74rem; font-weight: 600;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ctv-tab--active {
+  color: #c9a84c;
+  border-bottom-color: #c9a84c;
+}
+
+.ctv-scenario {
+  padding: 0.85rem 1rem 0.8rem;
+}
+.ctv-scenario-title {
+  font-size: 0.78rem; font-weight: 700;
+  color: var(--text-primary, #fff);
+  margin: 0 0 0.55rem;
+}
+.ctv-steps {
+  margin: 0 0 0.45rem 1.1rem;
+  padding: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary, #aaa);
+  line-height: 1.5;
+}
+.ctv-steps li { margin-bottom: 0.2rem; }
+.ctv-steps strong { color: var(--text-primary, #ddd); }
+
+.ctv-url-row, .ctv-code-row {
+  display: flex; align-items: center;
+  gap: 0.4rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem 0.35rem 0.65rem;
+  margin-bottom: 0.5rem;
+}
+.ctv-url-text, .ctv-code-text {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.82rem;
+  color: #e0d4a8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+.ctv-code-text {
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  color: #c9a84c;
+  font-weight: 700;
+}
+.ctv-copy-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary, #888);
+  display: flex; align-items: center;
+  padding: 0.15rem;
+  border-radius: 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.ctv-copy-btn:hover { color: #c9a84c; }
+
+.ctv-note {
+  font-size: 0.7rem;
+  color: var(--text-tertiary, #777);
+  margin: 0.4rem 0 0;
+  line-height: 1.45;
+}
+.ctv-note-alt {
+  font-size: 0.7rem;
+  color: var(--text-secondary, #999);
+  margin: 0 0 0.3rem;
+}
+.ctv-note-alt code {
+  font-family: monospace;
+  background: rgba(255,255,255,0.06);
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+}
+.ctv-warn {
+  color: #ffb347;
+}
+.ctv-fallback {
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding: 0.5rem 1rem 0.6rem;
+}
+.ctv-fallback summary {
+  font-size: 0.73rem;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.ctv-fallback summary::-webkit-details-marker { display: none; }
+.ctv-fallback summary::before { content: '▸ '; font-size: 0.65rem; }
+.ctv-fallback[open] summary::before { content: '▾ '; }
+.ctv-fallback .ctv-scenario {
+  padding: 0.6rem 0 0;
+}
+
 /* ── Presenter UI mode — controls ONLY the operator panel, not client display ── */
 .presenter-ui--light .presenter-header,
 .presenter-ui--light .presenter-sidebar,
