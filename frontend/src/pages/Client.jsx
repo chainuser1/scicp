@@ -909,12 +909,13 @@ function Client() {
   const timeFloorAdj = (hour >= 20 || hour < 6) ? -0.08 : (hour >= 10 && hour < 18) ? 0.05 : 0;
   const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
-  // If presenter set an explicit size, use it as target; auto-fit only reduces it for overflow.
-  // If no explicit size, use auto-fit with floor (original behaviour).
-  const targetRem        = (themeFontSizeRem && !isNaN(themeFontSizeRem))
-    ? themeFontSizeRem
-    : Math.max(rawFloor, fittingRem);
-  const computedRem      = Math.min(targetRem, Math.max(0.55, fittingRem));
+  // Two distinct modes:
+  //   Presenter explicit size → use it as the target; auto-fit is the overflow-only safety ceiling.
+  //     Text will not be clipped; presenter's intent is honoured as closely as possible.
+  //   No explicit size → classic auto-fit: largest size that fits, clamped between rawFloor and viewportMaxCap.
+  const computedRem      = (themeFontSizeRem && !isNaN(themeFontSizeRem))
+    ? Math.min(themeFontSizeRem, Math.max(0.55, fittingRem))          // presenter target, clipped by overflow guard
+    : Math.min(viewportMaxCap,   Math.max(rawFloor, fittingRem));     // original auto-fit with floor + viewport cap
   const scaledRem        = computedRem * fontScale;
   const computedFontSize = `${scaledRem.toFixed(5)}rem`;
 
