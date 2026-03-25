@@ -1,5 +1,9 @@
 import React, {useEffect, useState} from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
+
+// Platform detection — download page/card is web-only
+const isElectronApp  = !!window.electronAPI?.isElectron;
+const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
@@ -98,11 +102,13 @@ function Home() {
             <span className="home-card-label">Display</span>
             <span className="home-card-desc">Show scriptures on the<br />screen for everyone</span>
           </Link>
+          {!isElectronApp && !isCapacitorApp && (
           <Link to="/download" className="home-card">
             <span className="home-card-icon">⬇️</span>
             <span className="home-card-label">Offline Downloads</span>
             <span className="home-card-desc">Get desktop and mobile apps<br />for offline church use</span>
           </Link>
+          )}
           <Link to="/reader" className="home-card home-card--reader">
             <span className="home-card-icon">📖</span>
             <span className="home-card-label">Read Scriptures</span>
@@ -164,7 +170,7 @@ function App() {
               <Route path="/contact" element={<Contact />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
-              <Route path="/download" element={<Download />} />
+              <Route path="/download" element={isElectronApp || isCapacitorApp ? <Navigate to="/" replace /> : <Download />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </React.Suspense>
