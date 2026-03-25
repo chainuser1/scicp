@@ -35,12 +35,29 @@ function fire(event, data) {
 let _presentationActive = false;
 let _castMode = null; // 'native' | 'web' | null
 let _webConnection = null;
+let _displayName = '';
+let _reconnectAttempts = 0;
+let _reconnectTimer = null;
+let _lastClientUrl = null;
+const MAX_RECONNECT = 3;
+const RECONNECT_DELAY_MS = 2000;
+
+// Track the current verse/theme for re-send after displayReady
+let _lastVerse = null;
+let _lastTheme = null;
+
+// Called by CastingControl after startCasting to subscribe events
+export function onDisplayReady(callback) {
+  if (typeof ExternalDisplay.addListener !== 'function') return;
+  ExternalDisplay.addListener('displayReady', callback);
+}
 
 // M38: Reset casting state if the external display disconnects unexpectedly.
 if (typeof ExternalDisplay.addListener === 'function') {
   ExternalDisplay.addListener('displayDisconnected', () => {
     _presentationActive = false;
-    console.warn('[scicp] External display disconnected');
+    console.warn('[scicp] External display disconnected — attempting reconnect');
+    _scheduleReconnect();
   });
 }
 
@@ -88,12 +105,20 @@ async function sendToDisplay(message) {
 
 /** Start presenting on an external display. Called by CastingControl. */
 export async function startCasting(clientUrl) {
+  _lastClientUrl = clientUrl;
+  _reconnectAttempts = 0;
+  clearTimeout(_reconnectTimer);
+  return _attemptStartCasting(clientUrl);
+}
+
+async function _attemptStartCasting(clientUrl) {
   const nativeUrls = candidateClientUrls(clientUrl);
   for (const url of nativeUrls) {
     try {
       await ExternalDisplay.startPresentation({ url });
       _presentationActive = true;
       _castMode = 'native';
+      try { await ExternalDisplay.acquireWakeLock(); } catch { /* non-critical */ }
       return true;
     } catch (err) {
       console.warn(`startCasting failed for ${url}:`, err);
@@ -109,6 +134,7 @@ export async function startCasting(clientUrl) {
       _presentationActive = false;
       _castMode = null;
       _webConnection = null;
+      _scheduleReconnect();
     };
     connection.onterminate = () => {
       _presentationActive = false;
@@ -125,12 +151,27 @@ export async function startCasting(clientUrl) {
   }
 }
 
+function _scheduleReconnect() {
+  if (!_lastClientUrl || _reconnectAttempts >= MAX_RECONNECT) return;
+  _reconnectAttempts++;
+  _reconnectTimer = setTimeout(async () => {
+    console.log(`[scicp] Reconnect attempt ${_reconnectAttempts}/${MAX_RECONNECT}`);
+    const ok = await _attemptStartCasting(_lastClientUrl);
+    if (ok && _lastVerse) sendToDisplay({ type: 'verse', ..._lastVerse });
+    if (ok && _lastTheme) sendToDisplay({ type: 'theme', ..._lastTheme });
+    if (!ok) _scheduleReconnect();
+  }, RECONNECT_DELAY_MS * _reconnectAttempts);
+}
+
 /** Stop the external display presentation. */
 export async function stopCasting() {
+  clearTimeout(_reconnectTimer);
+  _reconnectAttempts = MAX_RECONNECT; // prevent auto-reconnect after manual stop
   if (_castMode === 'native') {
     try {
       await ExternalDisplay.stopPresentation();
     } catch { /* ignore */ }
+    try { await ExternalDisplay.releaseWakeLock(); } catch { /* non-critical */ }
   } else if (_castMode === 'web' && _webConnection) {
     try {
       await _webConnection.terminate();
@@ -143,11 +184,14 @@ export async function stopCasting() {
   _castMode = null;
 }
 
-/** Check if an external display is connected. */
+/** Check if an external display is connected. Returns { available, displayName }. */
 export async function isDisplayAvailable(clientUrl = null) {
   try {
-    const { available } = await ExternalDisplay.isAvailable();
-    if (available) return true;
+    const result = await ExternalDisplay.isAvailable();
+    if (result.available) {
+      _displayName = result.displayName || '';
+      return true;
+    }
   } catch {
     // ignore and try web fallback
   }
@@ -160,6 +204,17 @@ export async function isDisplayAvailable(clientUrl = null) {
   } catch {
     return false;
   }
+}
+
+/** Returns the display name from the last isAvailable / startCasting call. */
+export function getDisplayName() {
+  return _displayName;
+}
+
+/** Cache last verse/theme so reconnect can restore display state. */
+export function setLastCastState(verse, theme) {
+  if (verse !== undefined) _lastVerse = verse;
+  if (theme !== undefined) _lastTheme = theme;
 }
 
 /** Check if we're actively presenting. */

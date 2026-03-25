@@ -2227,7 +2227,7 @@ const MobilePresenter = () => {
           </HdrBtn>
 
           {/* Cast to external display */}
-          <CastingControl compact={false} />
+          <CastingControl compact={false} currentVerse={liveVerse} currentTheme={currentTheme} />
 
           {/* LAN server URL — last resort for TV browsers (offline only) */}
           {lanServerUrl && (
@@ -2544,7 +2544,7 @@ const MobilePresenter = () => {
             <div className="mobile-menu-section">
               <div className="mobile-menu-label">Display</div>
               <div className="mobile-menu-row">
-                <CastingControl compact={false} />
+                <CastingControl compact={false} currentVerse={liveVerse} currentTheme={currentTheme} />
               </div>
             </div>
 
@@ -3455,7 +3455,7 @@ const MobilePresenter = () => {
           <span>{staged ? 'Go Live' : liveVerse ? 'Live' : 'Browse'}</span>
         </button>
 
-        <CastingControl className="prs-nav-btn prs-nav-btn--cast" label="Cast" />
+        <CastingControl className="prs-nav-btn prs-nav-btn--cast" label="Cast" currentVerse={liveVerse} currentTheme={currentTheme} />
 
         <button
           className={`prs-nav-btn${mobileMenuOpen ? ' prs-nav-btn--active' : ''}`}

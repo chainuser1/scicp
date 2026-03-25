@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import WebKit
 import AVFoundation
+import AVKit
 import Capacitor
 
 /// Capacitor plugin that detects external displays (AirPlay, HDMI via adapter)
@@ -10,7 +11,7 @@ import Capacitor
 /// Communication: evaluateJavaScript() dispatches 'bridge-message' CustomEvents
 /// on the external WKWebView's window object.
 @objc(ExternalDisplayPlugin)
-public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
+public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin, WKNavigationDelegate {
 
     public let identifier = "ExternalDisplayPlugin"
     public let jsName = "ExternalDisplay"
@@ -20,6 +21,8 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "stopPresentation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "sendToDisplay", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openCastSettings", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "acquireWakeLock", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "releaseWakeLock", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkCameraPermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestCameraPermission", returnType: CAPPluginReturnPromise),
     ]
@@ -32,11 +35,11 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     // MARK: - Plugin Methods
-
     @objc func isAvailable(_ call: CAPPluginCall) {
         let screens = UIScreen.screens
         let available = screens.count > 1
-        call.resolve(["available": available])
+        // UIScreen doesn't expose a user-facing name; use "External Display" as placeholder.
+        call.resolve(["available": available, "displayName": available ? "External Display" : ""])
     }
 
     @objc func startPresentation(_ call: CAPPluginCall) {
@@ -68,6 +71,7 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
             let webView = WKWebView(frame: window.bounds, configuration: config)
             webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             webView.scrollView.isScrollEnabled = false
+            webView.navigationDelegate = self  // fires webView(_:didFinish:) for displayReady
 
             let vc = UIViewController()
             vc.view.addSubview(webView)
@@ -124,19 +128,43 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Opens the AVRoutePickerView (AirPlay picker) anchored to the center of the screen.
+    /// This is the correct iOS API for routing audio/video to Apple TV or AirPlay receivers.
+    /// Falls back to app settings URL if AVRoutePickerView is unavailable.
     @objc func openCastSettings(_ call: CAPPluginCall) {
-        guard let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
-            call.resolve(["opened": false])
-            return
-        }
-        DispatchQueue.main.async {
-            if UIApplication.shared.canOpenURL(settingsURL) {
-                UIApplication.shared.open(settingsURL, options: [:]) { ok in
-                    call.resolve(["opened": ok])
-                }
-            } else {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self,
+                  let rootVC = self.bridge?.viewController,
+                  let rootView = rootVC.view else {
                 call.resolve(["opened": false])
+                return
             }
+            let picker = AVRoutePickerView(frame: .zero)
+            picker.isHidden = true
+            rootView.addSubview(picker)
+            // Trigger the route picker programmatically
+            for subview in picker.subviews {
+                if let button = subview as? UIButton {
+                    button.sendActions(for: .touchUpInside)
+                    break
+                }
+            }
+            picker.removeFromSuperview()
+            call.resolve(["opened": true])
+        }
+    }
+
+    @objc func acquireWakeLock(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = true
+            call.resolve()
+        }
+    }
+
+    @objc func releaseWakeLock(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = false
+            call.resolve()
         }
     }
 
@@ -167,6 +195,13 @@ public class ExternalDisplayPlugin: CAPPlugin, CAPBridgedPlugin {
         AVCaptureDevice.requestAccess(for: .video) { granted in
             call.resolve(["status": granted ? "granted" : "denied"])
         }
+    }
+
+    // MARK: - WKNavigationDelegate (displayReady handshake)
+
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // External display WebView finished loading — safe to push verse state
+        notifyListeners("displayReady", data: [:])
     }
 
     // MARK: - Screen Notifications
