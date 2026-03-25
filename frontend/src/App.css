@@ -1080,6 +1080,35 @@ button,
   opacity: 1;
 }
 
+/* ── Scroll — unrolls from a compressed center strip like opening a papyrus scroll ──
+ *
+ * Hidden state: text is clipped to a thin band at vertical center and
+ * scaleY-compressed to near-zero, with rounded clip ends (the rolled-up edges).
+ *
+ * Visible state: clip expands top and bottom symmetrically while scaleY
+ * returns to 1.0 — giving the weighted, organic feel of a physical scroll
+ * being unrolled. The expo-out easing (0.16, 1, 0.3, 1) mimics the slight
+ * resistance and release of real parchment.
+ *
+ * On exit, the same clip collapses back — the scroll "rolls up" around the
+ * verse before the new one opens.
+ * ───────────────────────────────────────────────────────────────────────── */
+.verse-text-body.verse-text-transition--scroll {
+  clip-path: inset(49% 4% 49% 4% round 12px 12px);
+  transform: scaleY(0.06);
+  transform-origin: center center;
+  /* Keep opacity reset fast so the scroll motion drives the reveal, not a fade */
+  transition:
+    opacity 0.12s ease,
+    clip-path 0.72s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.verse-text-body.verse-text-transition--scroll.verse-text-visible {
+  clip-path: inset(0% 0% 0% 0% round 0px);
+  transform: scaleY(1);
+  opacity: 1;
+}
+
 /* ── Instant cut — no animation ── */
 .verse-text-body.verse-text-transition--cut {
   transition: none !important;

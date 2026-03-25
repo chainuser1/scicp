@@ -2502,6 +2502,7 @@ const Presenter = () => {
                     { value: 'blur',       label: '◎ Morph' },
                     { value: 'wipe',       label: '▷ Wipe' },
                     { value: 'split',      label: '⊞ Split' },
+                    { value: 'scroll',     label: '📜 Scroll' },
                     { value: 'fade-black', label: '◼ Black' },
                     { value: 'cut',        label: '⚡ Cut' },
                   ].map(({ value, label }) => (
@@ -2819,6 +2820,7 @@ const Presenter = () => {
                     { value: 'blur',       label: '◎ Morph' },
                     { value: 'wipe',       label: '▷ Wipe' },
                     { value: 'split',      label: '⊞ Split' },
+                    { value: 'scroll',     label: '📜 Scroll' },
                     { value: 'fade-black', label: '◼ Black' },
                     { value: 'cut',        label: '⚡ Cut' },
                   ].map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -3567,6 +3569,7 @@ const Presenter = () => {
                   { value: 'blur',       label: '◎ Morph' },
                   { value: 'wipe',       label: '▷ Wipe' },
                   { value: 'split',      label: '⊞ Split' },
+                    { value: 'scroll',     label: '📜 Scroll' },
                   { value: 'fade-black', label: '◼ Black' },
                   { value: 'cut',        label: '⚡ Cut' },
                 ].map(({ value, label }) => (
