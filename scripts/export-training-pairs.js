@@ -29,13 +29,9 @@ const OUT     = path.join(ROOT, 'resources/training-pairs.json');
 const LANG_DBS = {
   lds:     'lds-scriptures-sqlite.db',
   nrsvue:  'nrsvue-scriptures-sqlite.db',
-  tagalog: 'tagalog-scriptures-sqlite.db',
-  cebuano: 'cebuano-scriptures-sqlite.db',
-  spanish: 'spanish-scriptures-sqlite.db',
-  ilocano: 'ilocano-scriptures-sqlite.db',
-  // waray omitted — incomplete text for triple combinations (only 28k/42k verses)
-  japanese:'japanese-scriptures-sqlite.db',
-  greek:   'greek-scriptures-sqlite.db',
+  // Only English sources — non-English translations risk contaminating
+  // the embedding space with bad translations and split capacity across
+  // languages we don't use for semantic search.
 };
 
 // verse_id → { lang: scripture_text }
@@ -70,28 +66,9 @@ for (const [lang, map] of versesByLang) {
     }
   }
 }
-console.log(`\n1. Translation pairs: ${translationCount.toLocaleString()}`);
+console.log(`\n1. Translation pairs (LDS↔NRSVUE): ${translationCount.toLocaleString()}`);
 
-// ── 2. NRSVUE ↔ other languages (cross-translation without LDS) ─────────────
-// Reinforces that ALL translations of the same verse should cluster
-let crossTransCount = 0;
-const nrsvueVerses = versesByLang.get('nrsvue');
-if (nrsvueVerses) {
-  for (const [lang, map] of versesByLang) {
-    if (lang === 'lds' || lang === 'nrsvue') continue;
-    // Sample 1/3 to avoid overwhelming the dataset with translation pairs
-    let i = 0;
-    for (const [vid, text] of map) {
-      if (i++ % 3 !== 0) continue;
-      const nText = nrsvueVerses.get(vid);
-      if (nText) {
-        pairs.push({ anchor: nText, positive: text });
-        crossTransCount++;
-      }
-    }
-  }
-}
-console.log(`2. Cross-translation pairs: ${crossTransCount.toLocaleString()}`);
+// (Cross-translation pairs removed — English-only training)
 
 // ── 3. Topical guide: topic name ↔ verse text ───────────────────────────────
 let topicCount = 0;
@@ -208,11 +185,10 @@ console.log(`Total pairs: ${pairs.length.toLocaleString()}`);
 console.log(`File: ${OUT} (${sizeMB} MB)`);
 console.log(`════════════════════════════════════════`);
 console.log(`\nBreakdown:`);
-console.log(`  Translation (LDS↔langs): ${translationCount.toLocaleString()}`);
-console.log(`  Cross-translation:       ${crossTransCount.toLocaleString()}`);
-console.log(`  Topical guide:           ${topicCount.toLocaleString()}`);
-console.log(`  Cross-references:        ${crossRefCount.toLocaleString()}`);
-console.log(`  kNN neighbors:           ${knnCount.toLocaleString()}`);
-console.log(`  Adjacent verses:         ${adjCount.toLocaleString()}`);
-console.log(`  Same-topic verses:       ${sameTopicCount.toLocaleString()}`);
+console.log(`  Translation (LDS↔NRSVUE): ${translationCount.toLocaleString()}`);
+console.log(`  Topical guide:            ${topicCount.toLocaleString()}`);
+console.log(`  Cross-references:         ${crossRefCount.toLocaleString()}`);
+console.log(`  kNN neighbors:            ${knnCount.toLocaleString()}`);
+console.log(`  Adjacent verses:          ${adjCount.toLocaleString()}`);
+console.log(`  Same-topic verses:        ${sameTopicCount.toLocaleString()}`);
 console.log(`\nNext: upload resources/training-pairs.json to Google Colab`);
