@@ -3,6 +3,7 @@
  * Uses the backend REST API. Same UX as mobile reader.
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 const api = async (path) => {
@@ -74,6 +75,7 @@ const PAGE_SIZE = 20;
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ScriptureReader({ onExit }) {
+  const navigate = useNavigate();
   // Prefs
   const [theme,      setThemeId]    = useState(() => recallStr(SK.theme, 'night'));
   const [fontSize,   setFontSize]   = useState(() => recall(SK.fontSize, 18));
@@ -103,6 +105,7 @@ export default function ScriptureReader({ onExit }) {
 
   // Toolbar auto-hide
   const [toolbarVisible, setToolbarVisible] = useState(true);
+  const [scrollPercent,  setScrollPercent]  = useState(0);
   const scrollRef   = useRef(null);
   const lastScrollY = useRef(0);
   const tbTimer     = useRef(null);
@@ -392,6 +395,29 @@ export default function ScriptureReader({ onExit }) {
     } catch { /* ignore */ }
   }, [chapterIdx, allChapters, currentBook, books, bookIdx, lang, loadChapter]);
 
+  // ── Keyboard navigation ───────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight' && screen === 'chapter' && !isLastChapter)  { e.preventDefault(); goChapter(1);  }
+      if (e.key === 'ArrowLeft'  && screen === 'chapter' && !isFirstChapter) { e.preventDefault(); goChapter(-1); }
+      if (e.key === 'Escape') {
+        if (settingsOpen) { setSettingsOpen(false); return; }
+        if (ctx)          { setCtx(null); return; }
+        if (rdNavOpen)    { setRdNavOpen(false); return; }
+        if (screen === 'chapter') { setScreen('home'); setToolbarVisible(true); }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setScreen('home');
+        setToolbarVisible(true);
+        setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [screen, goChapter, isFirstChapter, isLastChapter, settingsOpen, ctx, rdNavOpen]);
+
   // ── Toolbar auto-hide ─────────────────────────────────────────────────────
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -401,6 +427,8 @@ export default function ScriptureReader({ onExit }) {
     lastScrollY.current = y;
     if (dy > 8 && y > 100) setToolbarVisible(false);
     else if (dy < -8 || y < 80) { setToolbarVisible(true); clearTimeout(tbTimer.current); }
+    const max = el.scrollHeight - el.clientHeight;
+    setScrollPercent(max > 0 ? Math.min(100, (y / max) * 100) : 0);
   }, []);
 
   const revealToolbar = useCallback(() => {
@@ -543,14 +571,14 @@ export default function ScriptureReader({ onExit }) {
               <button className="rd-settings-btn" onClick={() => setRdNavOpen(o => !o)} title="Navigation" aria-label="Open navigation menu">☰</button>
               {rdNavOpen && (
                 <div className="rd-nav-menu" role="menu">
-                  <a href="/presenter" className="rd-nav-item">🎙 Present</a>
-                  <a href="/client" className="rd-nav-item">📺 Display</a>
-                  <a href="/" className="rd-nav-item">🏠 Home</a>
+                  <button className="rd-nav-item" onClick={() => navigate('/presenter')}>🎙 Present</button>
+                  <button className="rd-nav-item" onClick={() => navigate('/client')}>📺 Display</button>
+                  <button className="rd-nav-item" onClick={() => navigate('/')}>🏠 Home</button>
                   <div className="rd-nav-divider" />
-                  <a href="/about" className="rd-nav-item">About</a>
-                  <a href="/contact" className="rd-nav-item">Contact</a>
-                  <a href="/privacy" className="rd-nav-item">Privacy</a>
-                  <a href="/terms" className="rd-nav-item">Terms</a>
+                  <button className="rd-nav-item" onClick={() => navigate('/about')}>About</button>
+                  <button className="rd-nav-item" onClick={() => navigate('/contact')}>Contact</button>
+                  <button className="rd-nav-item" onClick={() => navigate('/privacy')}>Privacy</button>
+                  <button className="rd-nav-item" onClick={() => navigate('/terms')}>Terms</button>
                 </div>
               )}
             </div>
@@ -630,6 +658,22 @@ export default function ScriptureReader({ onExit }) {
                   </div>
                 </section>
               )}
+              {bookmarks.size > 0 && (() => {
+                const bkdVerses = setlist.filter(v => bookmarks.has(v.verse_id));
+                return bkdVerses.length > 0 ? (
+                  <section className="rd-section">
+                    <h2 className="rd-section-hd">🔖 Bookmarks</h2>
+                    <div className="rd-setlist-list">
+                      {bkdVerses.slice(0, 8).map((v, i) => (
+                        <button key={v.verse_id || i} className="rd-setlist-row" onClick={() => openVerseInReader(v)}>
+                          <span className="rd-setlist-ref">{v.book_title} {v.chapter_number}:{v.verse_number}</span>
+                          <p className="rd-setlist-text">{v.scripture_text}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null;
+              })()}
               {spacedReview.length > 0 && (
                 <section className="rd-section rd-spaced-section">
                   <h2 className="rd-section-hd">📖 For Review <span className="rd-section-sub">— revisit these verses</span></h2>
@@ -697,19 +741,23 @@ export default function ScriptureReader({ onExit }) {
                 <button className="rd-tb-btn" onClick={() => setRdNavOpen(o => !o)} title="Navigation" aria-label="Open navigation menu">☰</button>
                 {rdNavOpen && (
                   <div className="rd-nav-menu" role="menu">
-                    <a href="/presenter" className="rd-nav-item">🎙 Present</a>
-                    <a href="/client" className="rd-nav-item">📺 Display</a>
-                    <a href="/" className="rd-nav-item">🏠 Home</a>
+                    <button className="rd-nav-item" onClick={() => navigate('/presenter')}>🎙 Present</button>
+                    <button className="rd-nav-item" onClick={() => navigate('/client')}>📺 Display</button>
+                    <button className="rd-nav-item" onClick={() => navigate('/')}>🏠 Home</button>
                     <div className="rd-nav-divider" />
-                    <a href="/about" className="rd-nav-item">About</a>
-                    <a href="/contact" className="rd-nav-item">Contact</a>
-                    <a href="/privacy" className="rd-nav-item">Privacy</a>
-                    <a href="/terms" className="rd-nav-item">Terms</a>
+                    <button className="rd-nav-item" onClick={() => navigate('/about')}>About</button>
+                    <button className="rd-nav-item" onClick={() => navigate('/contact')}>Contact</button>
+                    <button className="rd-nav-item" onClick={() => navigate('/privacy')}>Privacy</button>
+                    <button className="rd-nav-item" onClick={() => navigate('/terms')}>Terms</button>
                   </div>
                 )}
               </div>
               <button className="rd-tb-exit" onClick={onExit} title="Exit Reader">✕</button>
             </div>
+          </div>
+
+          <div className="rd-progress-bar" aria-hidden="true">
+            <div className="rd-progress-fill" style={{ width: `${scrollPercent}%` }} />
           </div>
 
           <div className="rd-scroll" ref={scrollRef} onScroll={handleScroll} onClick={revealToolbar}>

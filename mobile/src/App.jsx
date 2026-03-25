@@ -657,7 +657,11 @@ export default function App() {
 
   // ── Reader mode ──
   if (mode === 'reader' && ready) {
-    return <ScriptureReader onExit={() => { setMode(null); setReady(false); try { localStorage.removeItem('scicp.conn_mode'); } catch {} }} />;
+    return (
+      <SocketCtx.Provider value={ctxValue}>
+        <ScriptureReader onExit={() => { setMode(null); setReady(false); try { localStorage.removeItem('scicp.conn_mode'); } catch {} }} />
+      </SocketCtx.Provider>
+    );
   }
 
   // ── Mode selection screen ──

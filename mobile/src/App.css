@@ -3,6 +3,14 @@
    Aesthetic: Dark editorial / gold sacred / cinematic
    =================================================== */
 
+@font-face {
+  font-family: 'OpenDyslexic';
+  src: url('https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/fonts/OpenDyslexic-Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @import './fonts.css';
 
 /* ===== CSS VARIABLES ===== */
@@ -8824,6 +8832,21 @@ button, [role="button"] {
   opacity: 0;
   pointer-events: none;
 }
+.rd-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 1002;
+  background: transparent;
+  pointer-events: none;
+}
+.rd-progress-fill {
+  height: 100%;
+  background: var(--rd-accent, #7c6af7);
+  transition: width 0.1s linear;
+}
 .rd-tb-back {
   background: none;
   border: none;
@@ -9050,6 +9073,7 @@ button, [role="button"] {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .rd-ch-nav-btn {
   flex: 1;
