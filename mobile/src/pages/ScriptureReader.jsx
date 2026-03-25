@@ -14,6 +14,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as svc from '../scripture-service';
 import { useSocketCtx } from '../socket-context';
+import { Share } from '@capacitor/share';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { prefSet } from '../prefs';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -75,7 +79,11 @@ const SK = {
   setlist:    'scicp.presenter_setlist_v1',
 };
 
-const store  = (k, v) => { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch {} };
+const store  = (k, v) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  try { localStorage.setItem(k, s); } catch {}
+  prefSet(k, s); // durable write — survives iOS storage pressure
+};
 const recall = (k, fb) => { try { const r = localStorage.getItem(k); return r === null ? fb : JSON.parse(r); } catch { return fb; } };
 const recallStr = (k, fb) => { try { return localStorage.getItem(k) || fb; } catch { return fb; } };
 
@@ -112,9 +120,11 @@ export default function ScriptureReader({ onExit }) {
 
   // ── Toolbar auto-hide ─────────────────────────────────────────────────────
   const [toolbarVisible, setToolbarVisible] = useState(true);
-  const scrollRef    = useRef(null);
+  const [scrollPercent,  setScrollPercent]  = useState(0);
+  const [rdNavOpen,      setRdNavOpen]      = useState(false);
+  const tbHideTimer = useRef(null);
+    const scrollRef    = useRef(null);
   const lastScrollY  = useRef(0);
-  const tbHideTimer  = useRef(null);
 
   // ── Sheets ────────────────────────────────────────────────────────────────
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -195,6 +205,13 @@ export default function ScriptureReader({ onExit }) {
       setTimeout(() => loadChapter(currentBook, allChapters, chapterIdx, null, l), 0);
     }
   };
+
+  // ── StatusBar sync: match system bar to reader theme ──────────────────────
+  useEffect(() => {
+    const isDark = themeObj.ui === 'dark';
+    StatusBar.setStyle({ style: isDark ? Style.Light : Style.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: themeObj.bg }).catch(() => {});
+  }, [themeObj]);
 
   // ── Reading event emission ─────────────────────────────────────────────────
   const emitReadingEvent = useCallback(async (verse, dwellMs = 0, eventType = 'read') => {
@@ -404,6 +421,9 @@ export default function ScriptureReader({ onExit }) {
       setToolbarVisible(true);
       clearTimeout(tbHideTimer.current);
     }
+    // Scroll progress indicator (0–100)
+    const max = el.scrollHeight - el.clientHeight;
+    setScrollPercent(max > 0 ? Math.min(100, (y / max) * 100) : 0);
   }, []);
 
   const revealToolbar = useCallback(() => {
@@ -411,6 +431,25 @@ export default function ScriptureReader({ onExit }) {
     clearTimeout(tbHideTimer.current);
     tbHideTimer.current = setTimeout(() => setToolbarVisible(false), 5000);
   }, []);
+
+  // ── Swipe-to-chapter (horizontal swipe on chapter scroll area) ────────────
+  const swipeTouchX = useRef(null);
+  const onTouchStart = useCallback((e) => {
+    if (e.touches.length === 1) swipeTouchX.current = e.touches[0].clientX;
+  }, []);
+  const onTouchEnd = useCallback((e) => {
+    if (swipeTouchX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeTouchX.current;
+    swipeTouchX.current = null;
+    if (Math.abs(dx) < 60) return; // threshold 60px
+    if (dx < 0 && !isLastChapter) {
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+      goChapter(1);
+    } else if (dx > 0 && !isFirstChapter) {
+      Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
+      goChapter(-1);
+    }
+  }, [goChapter, isFirstChapter, isLastChapter]);
 
   // ── Search ────────────────────────────────────────────────────────────────
   const doSearch = useCallback((q, p = 0, append = false) => {
@@ -613,6 +652,26 @@ export default function ScriptureReader({ onExit }) {
                 </section>
               )}
 
+              {/* Bookmarks */}
+              {bookmarks.size > 0 && (
+                <section className="rd-section">
+                  <h2 className="rd-section-hd">🔖 Bookmarks <span className="rd-section-sub">— tap to open chapter</span></h2>
+                  <div className="rd-setlist-list">
+                    {[...bookmarks].slice(0, 12).map(vid => {
+                      // Scan setlist + lastRead for verse metadata; fall back to ID display
+                      const meta = setlist.find(v => v.verse_id === vid);
+                      if (!meta) return null;
+                      return (
+                        <button key={vid} className="rd-setlist-row" onClick={() => openVerseInReader(meta)}>
+                          <span className="rd-setlist-ref">{meta.book_title} {meta.chapter_number}:{meta.verse_number}</span>
+                          <p className="rd-setlist-text">{meta.scripture_text}</p>
+                        </button>
+                      );
+                    }).filter(Boolean)}
+                  </div>
+                </section>
+              )}
+
               {/* Setlist (from presenter) */}
               {setlist.length > 0 && (
                 <section className="rd-section">
@@ -686,6 +745,11 @@ export default function ScriptureReader({ onExit }) {
       {screen === 'chapter' && (
         <div className="rd-chapter-root">
 
+          {/* Scroll progress bar — pinned below toolbar */}
+          <div className="rd-progress-bar">
+            <div className="rd-progress-fill" style={{ width: `${scrollPercent}%` }} />
+          </div>
+
           {/* Auto-hiding top toolbar */}
           <div className={`rd-toolbar${toolbarVisible ? '' : ' rd-toolbar--hidden'}`}>
             {/* Left: back to reader home */}
@@ -718,10 +782,20 @@ export default function ScriptureReader({ onExit }) {
               aria-label="Next chapter"
             >››</button>
 
-            {/* Right actions: search + settings + exit */}
+            {/* Right actions: search + settings + nav menu + exit */}
             <div className="rd-tb-right">
               <button className="rd-tb-btn" aria-label="Search" onClick={() => { setScreen('home'); setToolbarVisible(true); setTimeout(() => document.querySelector('.rd-search-input')?.focus(), 80); }}>🔍</button>
               <button className="rd-tb-btn" onClick={() => setSettingsOpen(true)} aria-label="Settings">Aa</button>
+              <div className="rd-nav-wrap">
+                <button className="rd-tb-btn" onClick={() => setRdNavOpen(o => !o)} aria-label="Navigation menu">☰</button>
+                {rdNavOpen && (
+                  <div className="rd-nav-menu" role="menu">
+                    <button className="rd-nav-item" onClick={() => { onExit(); }}>🎙 Present / Home</button>
+                    <div className="rd-nav-divider" />
+                    <button className="rd-nav-item" onClick={() => setRdNavOpen(false)}>✕ Close</button>
+                  </div>
+                )}
+              </div>
               <button className="rd-tb-exit" onClick={onExit} aria-label="Exit Reader">✕</button>
             </div>
           </div>
@@ -732,6 +806,8 @@ export default function ScriptureReader({ onExit }) {
             ref={scrollRef}
             onScroll={handleScroll}
             onClick={revealToolbar}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
           >
             {/* Chapter heading */}
             <div className="rd-ch-heading">
@@ -1050,10 +1126,17 @@ export default function ScriptureReader({ onExit }) {
               <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse.verse_id); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>
                 {bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}
               </button>
-              <button className="rd-lp-act" onClick={() => {
-                try { navigator.clipboard.writeText(`${lpMenu.verse.scripture_text} — ${lpMenu.verse.book_title} ${lpMenu.verse.chapter_number}:${lpMenu.verse.verse_number}`); } catch {}
+              <button className="rd-lp-act" onClick={async () => {
+                const v = lpMenu.verse;
+                const text = `${v.book_title} ${v.chapter_number}:${v.verse_number}\n"${v.scripture_text}"`;
                 setLpMenu(null);
-              }}>📋 Copy verse</button>
+                const canShare = await Share.canShare().then(r => r.value).catch(() => false);
+                if (canShare) {
+                  Share.share({ text, title: `${v.book_title} ${v.chapter_number}:${v.verse_number}` }).catch(() => {});
+                } else {
+                  try { navigator.clipboard.writeText(text); } catch {}
+                }
+              }}>📤 Share verse</button>
               <button className="rd-lp-act" onClick={() => { openVerseCtx(lpMenu.verse); setLpMenu(null); }}>
                 🔗 View context &amp; related
               </button>
