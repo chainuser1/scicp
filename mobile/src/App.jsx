@@ -11,6 +11,28 @@ import SocketCtx from './socket-context';
 import MobilePresenter from './pages/MobilePresenter.jsx';
 import ScriptureReader from './pages/ScriptureReader.jsx';
 
+/** Catches any unhandled render error and shows a recovery screen instead of a blank page. */
+export class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[scicp] Render error:', error, info?.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'100dvh',padding:'2rem',background:'#0d0d1a',color:'#e0d4a8',textAlign:'center',gap:'1rem' }}>
+        <div style={{ fontSize:'2.5rem' }}>⚠️</div>
+        <h2 style={{ fontSize:'1.1rem',margin:0 }}>Something went wrong</h2>
+        <p style={{ fontSize:'0.85rem',color:'#aaa',maxWidth:'22rem',margin:0 }}>{this.state.error?.message || 'An unexpected error occurred.'}</p>
+        <button
+          onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+          style={{ marginTop:'0.5rem',padding:'0.6rem 1.4rem',borderRadius:'8px',background:'#c9a84c',color:'#0d0d1a',border:'none',fontWeight:700,fontSize:'0.9rem',cursor:'pointer' }}>
+          Reload App
+        </button>
+      </div>
+    );
+  }
+}
+
 const MODE_KEY  = 'scicp.conn_mode';    // 'offline' | 'online'
 const URL_KEY   = 'scicp.server_url';
 // M35: @capacitor/preferences is not installed in this project. localStorage is used

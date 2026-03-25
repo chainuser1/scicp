@@ -16,7 +16,6 @@
  * possible instruction for the AV team / worship leader.
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Clipboard } from '@capacitor/clipboard';
 
 const IconTV = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -68,9 +67,16 @@ export default function ConnectTV({ isOnline, serverUrl, sessionId, lanServerUrl
 
   const copyText = useCallback(async (text, key) => {
     try {
-      await Clipboard.write({ string: text });
+      await navigator.clipboard.writeText(text);
     } catch {
-      try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+      // Fallback: execCommand for older WebViews
+      try {
+        const el = document.createElement('textarea');
+        el.value = text; el.style.position = 'fixed'; el.style.opacity = '0';
+        document.body.appendChild(el); el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      } catch { /* ignore */ }
     }
     setCopied(key);
     setTimeout(() => setCopied(null), 2000);

@@ -642,9 +642,12 @@ const MobilePresenter = () => {
     const media = window.matchMedia('(prefers-color-scheme: light)');
     const onOsThemeChange = (e) => {
       setCurrentTheme(prev => {
-        // Only auto-switch if current theme is still a default (not user-customized)
-        const isDefaultDark = prev === themes.dark || (prev?.tone === 'dark' && !prev?.highlight_color && !prev?.font_family?.includes('Cinzel'));
-        const isDefaultLight = prev === themes.light || (prev?.tone === 'light' && !prev?.highlight_color);
+        // Only auto-switch if the user has never customized the theme at all
+        // (no custom bg, no custom highlight, no custom font family set)
+        const isCustomized = prev?.background_url || prev?.highlight_color || prev?.font_family;
+        if (isCustomized) return prev;
+        const isDefaultDark = prev === themes.dark || prev?.tone === 'dark';
+        const isDefaultLight = prev === themes.light || prev?.tone === 'light';
         if (e.matches && isDefaultDark) return themes.light;
         if (!e.matches && isDefaultLight) return themes.dark;
         return prev;
@@ -713,7 +716,7 @@ const MobilePresenter = () => {
   const clearArmTimer                          = React.useRef(null);
   const [clearArmed, setClearArmed]           = useState(false);
   const [themeCardOpen, setThemeCardOpen]     = useState(() => window.innerWidth > 768);
-  const [fontSizeRem, setFontSizeRem]         = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontSizeRem ?? 4.1; } catch { return 4.1; } });
+  const [fontScale, setFontScale]             = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.fontScale ?? 1.0; } catch { return 1.0; } });
   const [uiFontSize, setUiFontSize]           = useState(() => { try { const s = JSON.parse(localStorage.getItem('scicp.display_prefs_v1')); return s?.uiFontSize ?? 1.0; } catch { return 1.0; } });
   const [presenterUiMode, setPresenterUiMode] = useState(() => { try { return localStorage.getItem('scicp.presenter_ui_mode') || 'dark'; } catch { return 'dark'; } });
   const [simpleMode, setSimpleMode]           = useState(() => { try { return localStorage.getItem('scicp.simple_mode') === 'true'; } catch { return false; } });
@@ -726,12 +729,12 @@ const MobilePresenter = () => {
   const resultsListRef  = useRef(null);
   const [resultsScrolled, setResultsScrolled] = useState(false);
 
-  // Persist display preferences — must be after fontSizeRem/uiFontSize declarations
+  // Persist display preferences
   useEffect(() => {
     try {
-      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontSizeRem, uiFontSize }));
+      localStorage.setItem('scicp.display_prefs_v1', JSON.stringify({ theme: currentTheme, fontScale, uiFontSize }));
     } catch { /* ignore */ }
-  }, [currentTheme, fontSizeRem, uiFontSize]);
+  }, [currentTheme, fontScale, uiFontSize]);
 
   // Show the sticky Go Live bar whenever a verse is staged and we're on mobile
   // No scroll logic needed — the bar simply mirrors the `staged` state on small screens
@@ -988,10 +991,9 @@ const MobilePresenter = () => {
   };
 
   const adjustFontSize = (delta) => {
-    setFontSizeRem(prev => {
-      const next = Math.min(7, Math.max(2, parseFloat((prev + delta).toFixed(1))));
-      const updatedTheme = { ...currentTheme, font_size: next + 'rem' };
-      handleThemeChange(updatedTheme);
+    setFontScale(prev => {
+      const next = Math.min(2.0, Math.max(0.5, parseFloat((prev + delta * 0.1).toFixed(2))));
+      handleThemeChange({ ...currentTheme, font_scale: next });
       return next;
     });
   };
@@ -1215,10 +1217,10 @@ const MobilePresenter = () => {
     setCurrentTheme(theme);
     if (staged) setStaged(prev => ({ ...prev, theme: themeForVerse(theme, prev) }));
     emitWithSession('update-theme', { theme });
-    // Keep fontSizeRem slider in sync when theme is changed externally
-    if (theme.font_size) {
-      const parsed = parseFloat(theme.font_size);
-      if (!isNaN(parsed)) setFontSizeRem(parsed);
+    // Keep fontScale in sync when theme is changed externally
+    if (theme.font_scale != null) {
+      const parsed = parseFloat(theme.font_scale);
+      if (!isNaN(parsed)) setFontScale(parsed);
     }
   };
 
@@ -2468,15 +2470,19 @@ const MobilePresenter = () => {
             <div className="disp-section">
               <div className="disp-section-label">TV Font Size</div>
               <div className="disp-row disp-row--slider">
-                <button className="disp-font-btn" onClick={() => adjustFontSize(-0.3)}>A−</button>
+                <button className="disp-font-btn" onClick={() => adjustFontSize(-1)}>A−</button>
                 <input
-                  type="range" min="2.0" max="9.0" step="0.3"
-                  value={parseFloat(currentTheme?.font_size || '4.8')}
-                  onChange={e => handleThemeChange({ ...currentTheme, font_size: `${parseFloat(e.target.value)}rem` })}
+                  type="range" min="0.5" max="2.0" step="0.05"
+                  value={fontScale}
+                  onChange={e => {
+                    const next = parseFloat(parseFloat(e.target.value).toFixed(2));
+                    setFontScale(next);
+                    handleThemeChange({ ...currentTheme, font_scale: next });
+                  }}
                   className="disp-slider"
                 />
-                <button className="disp-font-btn disp-font-btn--lg" onClick={() => adjustFontSize(0.3)}>A+</button>
-                <span className="disp-font-val">{parseFloat(currentTheme?.font_size || '4.8').toFixed(1)}</span>
+                <button className="disp-font-btn disp-font-btn--lg" onClick={() => adjustFontSize(1)}>A+</button>
+                <span className="disp-font-val">{fontScale.toFixed(2)}×</span>
               </div>
             </div>
 
@@ -3335,7 +3341,7 @@ const MobilePresenter = () => {
               <div className="font-size-controls">
                 <span className="font-size-label">Text Size</span>
                 <button className="font-size-btn" onClick={() => adjustFontSize(-0.3)} title="Smaller text" aria-label="Decrease font size">-</button>
-                <span className="font-size-badge">{fontSizeRem.toFixed(1)}rem</span>
+                <span className="font-size-badge">{fontScale.toFixed(2)}×</span>
                 <button className="font-size-btn" onClick={() => adjustFontSize(0.3)} title="Larger text" aria-label="Increase font size">+</button>
               </div>
               <div className="font-size-controls">
