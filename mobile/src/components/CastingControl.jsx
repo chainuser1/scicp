@@ -105,6 +105,7 @@ export default function CastingControl({ className = '', compact = false, label 
       pendingAutoStartRef.current = false;
       setCasting(false);
       setReconnecting(false);
+      window.dispatchEvent(new CustomEvent('scicp-cast-stopped'));
       return;
     }
     if (!available) {

@@ -572,6 +572,27 @@ const MobilePresenter = () => {
     };
   }, []);
 
+  // ── Screen orientation — lock portrait on presenter, release when casting ──
+  // Uses the web Screen Orientation API which Capacitor WebView supports.
+  useEffect(() => {
+    const lock = async () => {
+      try { await screen.orientation.lock('portrait'); } catch { /* not supported on all devices */ }
+    };
+    const unlock = () => {
+      try { screen.orientation.unlock(); } catch { /* ignore */ }
+    };
+    lock();
+    const onCastStarted = () => unlock();
+    const onCastStopped = () => lock();
+    window.addEventListener('scicp-cast-started', onCastStarted);
+    window.addEventListener('scicp-cast-stopped', onCastStopped);
+    return () => {
+      unlock();
+      window.removeEventListener('scicp-cast-started', onCastStarted);
+      window.removeEventListener('scicp-cast-stopped', onCastStopped);
+    };
+  }, []);
+
   // Reset verse-level and navigation context when live verse changes
   useEffect(() => {
     setRelatedVerses([]);
@@ -656,6 +677,11 @@ const MobilePresenter = () => {
     media.addEventListener('change', onOsThemeChange);
     return () => media.removeEventListener('change', onOsThemeChange);
   }, []);
+
+  // Sync status bar whenever theme changes (including initial load)
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('scicp-statusbar-update', { detail: { isDark: currentTheme?.tone !== 'light' } }));
+  }, [currentTheme?.tone]);
 
   useEffect(() => { setBrowseBooksLoaded(false); setBrowseLevel('books'); }, [currentLanguage]);
 
@@ -1222,6 +1248,8 @@ const MobilePresenter = () => {
       const parsed = parseFloat(theme.font_scale);
       if (!isNaN(parsed)) setFontScale(parsed);
     }
+    // Sync status bar to match presenter theme tone
+    window.dispatchEvent(new CustomEvent('scicp-statusbar-update', { detail: { isDark: theme?.tone !== 'light' } }));
   };
 
   const handleSearch = e => {

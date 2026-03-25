@@ -3,6 +3,7 @@ import { ExternalDisplay } from 'capacitor-external-display';
 import { App as CapApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { StatusBar, Style as StatusBarStyle } from '@capacitor/status-bar';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
 import { initAllDatabases } from './db-manager';
@@ -337,6 +338,57 @@ export default function App() {
   useEffect(() => {
     SplashScreen.hide().catch(() => {});
   }, []);
+
+  // ── Status bar theming — match dark/light presenter theme ──
+  // Called whenever mode/theme changes. Style.Dark = dark icons (for light bg),
+  // Style.Light = light icons (for dark bg, which is our default).
+  const applyStatusBar = useCallback((isDark) => {
+    StatusBar.setStyle({ style: isDark ? StatusBarStyle.Light : StatusBarStyle.Dark }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: isDark ? '#0d0d1a' : '#f5f0e8' }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // Default to dark presenter (light icons) on app launch
+    applyStatusBar(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expose applyStatusBar so MobilePresenter can call it on theme change
+  // via a CustomEvent so we don't need to thread props through the tree
+  useEffect(() => {
+    const handler = (e) => applyStatusBar(e.detail?.isDark ?? true);
+    window.addEventListener('scicp-statusbar-update', handler);
+    return () => window.removeEventListener('scicp-statusbar-update', handler);
+  }, [applyStatusBar]);
+
+  // ── Deep link handler — scicp://session/CODE or https://host/client?session=CODE ──
+  useEffect(() => {
+    const handleUrl = ({ url }) => {
+      if (!url) return;
+      try {
+        const parsed = new URL(url);
+        // scicp://session/ABCD1234 or ?session=ABCD1234
+        const sessionCode = (
+          parsed.searchParams.get('session') ||
+          (parsed.protocol === 'scicp:' && parsed.pathname.replace(/^\/+(session\/?)?/, ''))
+        )?.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+
+        if (!sessionCode || sessionCode.length < 4) return;
+
+        const origin = parsed.protocol !== 'scicp:'
+          ? ensureHttps(parsed.origin)
+          : (localStorage.getItem(URL_KEY) || serverUrl);
+
+        switchToOnlineRef.current?.(origin, sessionCode);
+      } catch { /* malformed URL — ignore */ }
+    };
+
+    // Handle URL that launched the app cold
+    CapApp.getLaunchUrl().then(({ url } = {}) => { if (url) handleUrl({ url }); }).catch(() => {});
+
+    // Handle URL when app is already running (brought to foreground via deep link)
+    const listener = CapApp.addListener('appUrlOpen', handleUrl);
+    return () => { listener.then(l => l.remove()).catch(() => {}); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const requestCameraPermission = useCallback(async () => {
     try {
