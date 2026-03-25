@@ -19,9 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          lfs: true
+          lfs: false    # Don't auto-fetch LFS — we restore from cache first
 
-      - name: Cache Git LFS objects
+      - name: Restore Git LFS cache
+        id: lfs-cache
         uses: actions/cache@v4
         with:
           path: .git/lfs
@@ -29,7 +30,7 @@ jobs:
           restore-keys: |
             lfs-${{ hashFiles('.lfsconfig', '.gitattributes') }}-
 
-      - name: Pull LFS objects (uses cache when available)
+      - name: Pull LFS objects (only fetches what's not in cache)
         run: git lfs pull
 
       - name: Setup Node.js
