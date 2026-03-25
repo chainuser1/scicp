@@ -105,10 +105,12 @@ function themeForVerse(baseTheme, verse) {
   const defaultFont = themes[tone]?.font_family;
   const shouldApplyFont = tokens && (!baseTheme?.font_family || baseTheme.font_family === defaultFont);
   const shouldApplyHighlight = tokens && !baseTheme?.highlight_color;
+  // Respect user's explicit background lock — don't auto-swap if they pinned one
+  const shouldApplyBg = imageUrl && !baseTheme?._bgLocked;
 
   return {
     ...baseTheme,
-    ...(imageUrl ? { background_url: `url('${imageUrl}')` } : {}),
+    ...(shouldApplyBg ? { background_url: `url('${imageUrl}')` } : {}),
     ...(shouldApplyFont ? { font_family: tokens.font } : {}),
     ...(shouldApplyHighlight ? { highlight_color: tokens.highlight } : {}),
   };
@@ -2503,10 +2505,12 @@ const Presenter = () => {
                         style={url ? { backgroundImage: `url('${url}')`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
                         onClick={() => {
                           if (!url) {
+                            // Auto: reset to default theme (volume bg will auto-apply per verse)
                             handleThemeChange({ ...(currentTheme?.tone === 'dark' ? themes.dark : themes.light), transition_mode: currentTheme.transition_mode, force_animations: !!currentTheme.force_animations });
                             setBgUrlInput('');
                           } else {
-                            handleThemeChange({ ...currentTheme, background_url: `url('${url}')` });
+                            // Explicit pick: lock background so themeForVerse won't override it
+                            handleThemeChange({ ...currentTheme, background_url: `url('${url}')`, _bgLocked: true });
                             setBgUrlInput('');
                           }
                         }}
@@ -2522,7 +2526,7 @@ const Presenter = () => {
                 <div className="popover-label">Custom URL</div>
                 <div className="popover-row">
                   <input type="text" className="popover-input" placeholder="https://…" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                  <button className="popover-apply" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` }); setBgUrlInput(''); setThemePopover(false); }}>Apply</button>
+                  <button className="popover-apply" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')`, _bgLocked: true }); setBgUrlInput(''); setThemePopover(false); }}>Apply</button>
                 </div>
               </div>
             )}
@@ -2714,10 +2718,35 @@ const Presenter = () => {
                   {[{ label: '☀ Light', theme: themes.light }, { label: '☽ Dark', theme: themes.dark }].map(({ label, theme }) => (
                     <button
                       key={label}
-                      className={`theme-btn${currentTheme === theme ? ' active' : ''}`}
+                      className={`theme-btn${currentTheme?.tone === theme.tone && !currentTheme?._bgLocked ? ' active' : ''}`}
                       onClick={() => { handleThemeChange({ ...theme, force_animations: !!currentTheme.force_animations }); setMobileMenuOpen(false); }}
                     >{label}</button>
                   ))}
+                </div>
+                {/* Background presets */}
+                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Background</div>
+                <div className="popover-bg-presets" style={{ flexWrap: 'wrap' }}>
+                  {BG_PRESETS.map(({ label, url }) => {
+                    const isActive = !url ? !currentTheme?._bgLocked : currentTheme?.background_url?.includes(url.split('/').pop());
+                    return (
+                      <button
+                        key={label}
+                        className={`popover-bg-preset${isActive ? ' popover-bg-preset--active' : ''}`}
+                        style={url ? { backgroundImage: `url('${url}')`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}}
+                        onClick={() => {
+                          if (!url) {
+                            handleThemeChange({ ...(currentTheme?.tone === 'dark' ? themes.dark : themes.light), transition_mode: currentTheme.transition_mode, force_animations: !!currentTheme.force_animations });
+                          } else {
+                            handleThemeChange({ ...currentTheme, background_url: `url('${url}')`, _bgLocked: true });
+                          }
+                          setMobileMenuOpen(false);
+                        }}
+                        title={label}
+                      >
+                        <span className="popover-bg-preset-label">{label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div className="popover-row" style={{ marginTop: '0.4rem' }}>
                   <input
@@ -2729,11 +2758,21 @@ const Presenter = () => {
                   />
                   <button className="popover-apply" onClick={() => {
                     if (!bgUrlInput) return;
-                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')` });
+                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')`, _bgLocked: true });
                     setBgUrlInput('');
                     setMobileMenuOpen(false);
                   }}>Apply</button>
                 </div>
+                {/* Font family */}
+                <div className="mobile-menu-label" style={{ marginTop: '0.5rem' }}>Font Family</div>
+                <select
+                  className="lang-select lang-select--mobile"
+                  value={currentTheme?.font_family || FONT_FAMILIES[0].value}
+                  onChange={e => { handleThemeChange({ ...currentTheme, font_family: e.target.value }); }}
+                  style={{ width: '100%' }}
+                >
+                  {FONT_FAMILIES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
               </div>
 
               <div className="mobile-menu-divider" />
@@ -2775,6 +2814,16 @@ const Presenter = () => {
                       {isRemoteMode ? '📱 Switch to Offline' : '🌐 Switch to Online'}
                     </button>
                   )}
+                </div>
+                {/* Navigation links — mobile only; replaces desktop footer */}
+                <div className="mobile-menu-divider" style={{ marginTop: '0.5rem' }} />
+                <div className="mobile-menu-label">Pages</div>
+                <div className="mobile-menu-nav-links">
+                  <a href="/client" onClick={() => setMobileMenuOpen(false)}>📺 Display</a>
+                  <a href="/about" onClick={() => setMobileMenuOpen(false)}>About</a>
+                  <a href="/contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+                  <a href="/privacy" onClick={() => setMobileMenuOpen(false)}>Privacy</a>
+                  <a href="/terms" onClick={() => setMobileMenuOpen(false)}>Terms</a>
                 </div>
               </div>
             </div>
