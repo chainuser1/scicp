@@ -11,8 +11,9 @@ RUN npm ci --include=dev
 COPY . .
 
 # Sanity check: ensure DBs are real SQLite files, not LFS pointers.
+# (Deploy workflow extracts DBs from previous GHCR image or falls back to LFS.)
 RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; then \
-      echo "ERROR: DB files are Git LFS pointers. Build with 'lfs: true' in checkout." && \
+      echo "ERROR: DB file is an LFS pointer — deploy workflow did not resolve it." && \
       exit 1; \
     fi
 
