@@ -63,6 +63,7 @@ const SK = {
   lastRead:   'scicp.reader_last_read',
   highlights: 'scicp.reader_highlights',
   bookmarks:  'scicp.reader_bookmarks',
+  bookmarksMeta: 'scicp.reader_bookmarks_meta',
   setlist:    'scicp.presenter_setlist_v1',
 };
 
@@ -98,7 +99,8 @@ export default function ScriptureReader({ onExit }) {
 
   // Annotations
   const [highlights, setHighlights] = useState(() => recall(SK.highlights, {}));
-  const [bookmarks,  setBookmarks]  = useState(() => new Set(recall(SK.bookmarks, [])));
+  const [bookmarks,      setBookmarks]      = useState(() => new Set(recall(SK.bookmarks, [])));
+  const [bookmarksMeta,  setBookmarksMeta]  = useState(() => new Map(Object.entries(recall(SK.bookmarksMeta, {}))));
 
   // Screen
   const [screen, setScreen] = useState('home');
@@ -533,11 +535,23 @@ export default function ScriptureReader({ onExit }) {
     setLpMenu(null);
   };
 
-  const toggleBookmark = (verseId) => {
+  const toggleBookmark = (verseOrId) => {
+    const verseId = typeof verseOrId === 'object' ? verseOrId.verse_id : verseOrId;
     setBookmarks(b => {
       const next = new Set(b);
       if (next.has(verseId)) next.delete(verseId); else next.add(verseId);
       store(SK.bookmarks, [...next]);
+      return next;
+    });
+    setBookmarksMeta(m => {
+      const next = new Map(m);
+      if (next.has(verseId)) {
+        next.delete(verseId);
+      } else if (typeof verseOrId === 'object') {
+        const { book_title, chapter_number, verse_number, scripture_text } = verseOrId;
+        next.set(verseId, { book_title, chapter_number, verse_number, scripture_text });
+      }
+      store(SK.bookmarksMeta, Object.fromEntries(next));
       return next;
     });
     setLpMenu(null);
@@ -659,7 +673,9 @@ export default function ScriptureReader({ onExit }) {
                 </section>
               )}
               {bookmarks.size > 0 && (() => {
-                const bkdVerses = setlist.filter(v => bookmarks.has(v.verse_id));
+                const bkdVerses = [...bookmarks].map(vid => {
+                  return bookmarksMeta.get(vid) ? { verse_id: vid, ...bookmarksMeta.get(vid) } : setlist.find(v => v.verse_id === vid);
+                }).filter(Boolean);
                 return bkdVerses.length > 0 ? (
                   <section className="rd-section">
                     <h2 className="rd-section-hd">🔖 Bookmarks</h2>
@@ -960,7 +976,7 @@ export default function ScriptureReader({ onExit }) {
               </div>
             </div>
             <div className="rd-lp-actions">
-              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse.verse_id); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>{bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}</button>
+              <button className="rd-lp-act" onClick={() => { toggleBookmark(lpMenu.verse); emitReadingEvent(lpMenu.verse, 0, 'bookmark'); }}>{bookmarks.has(lpMenu.verse.verse_id) ? '🔖 Remove bookmark' : '🔖 Bookmark'}</button>
               <button className="rd-lp-act" onClick={() => { try { navigator.clipboard.writeText(`${lpMenu.verse.scripture_text} — ${lpMenu.verse.book_title} ${lpMenu.verse.chapter_number}:${lpMenu.verse.verse_number}`); showToast('Copied'); } catch { /* ignore */ } setLpMenu(null); }}>📋 Copy verse</button>
               <button className="rd-lp-act" onClick={() => { openVerseCtx(lpMenu.verse); setLpMenu(null); }}>🔗 View context &amp; related</button>
             </div>

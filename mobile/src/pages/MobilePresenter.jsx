@@ -911,6 +911,7 @@ const MobilePresenter = () => {
         setSessionInput('');
         setSessionMessage(`Connected — ${response.sessionId}`);
         setSessionJoined(true);
+        notify('Session Connected', `Presenting on session ${response.sessionId}`, { id: 60003 });
         try {
           sessionStorage.setItem(PRESENTER_LAST_SESSION, response.sessionId);
           if (response.presenterToken) sessionStorage.setItem(PRESENTER_TOKEN_KEY, response.presenterToken);
@@ -983,13 +984,31 @@ const MobilePresenter = () => {
     };
     const onDisconnect = () => setConnectionState('disconnected');
     const onReconnecting = () => setConnectionState('reconnecting');
-    const onTakeover = () => setTakeoverAlert(true);
-    const onEvicted  = () => { setEvictedAlert(true); setTakeoverAlert(false); };
+    const onTakeover = () => {
+      setTakeoverAlert(true);
+      notify('Session Takeover Attempt', 'Someone is trying to take over your presenter session.', { id: 60001 });
+    };
+    const onEvicted  = () => {
+      setEvictedAlert(true);
+      setTakeoverAlert(false);
+      notify('Session Ended', 'You have been removed from the presenter session.', { id: 60002 });
+    };
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('reconnect_attempt', onReconnecting);
     socket.on('presenter-takeover-attempt', onTakeover);
     socket.on('presenter-evicted', onEvicted);
+
+    const prevViewerCount = { current: 0 };
+    const onViewerCount = ({ count }) => {
+      if (count > 0 && prevViewerCount.current === 0) {
+        notify('Display Connected', `${count} display${count > 1 ? 's' : ''} joined your session`, { id: 60004 });
+      } else if (count === 0 && prevViewerCount.current > 0) {
+        notify('Display Disconnected', 'All displays have left your session', { id: 60004 });
+      }
+      prevViewerCount.current = count;
+    };
+    socket.on('viewer-count', onViewerCount);
 
     // Subscribe to queue size changes
     const unsubQueue = socket.onQueueChange?.(count => setQueuedCount(count));
@@ -1000,6 +1019,7 @@ const MobilePresenter = () => {
       socket.off('reconnect_attempt', onReconnecting);
       socket.off('presenter-takeover-attempt', onTakeover);
       socket.off('presenter-evicted', onEvicted);
+      socket.off('viewer-count', onViewerCount);
       if (unsubQueue) unsubQueue();
     };
   }, [isOnline]);
@@ -1370,6 +1390,7 @@ const MobilePresenter = () => {
     setNowReading(false); // reset Now Reading on new go-live
     setHistory(h => [{ ...staged, _ts: Date.now() }, ...h.filter(v => v.verse_id !== staged.verse_id).slice(0, 19)]);
     setStaged(null);
+    notify('Verse Live', `${staged.book_title} ${staged.chapter_number}:${staged.verse_number}`, { id: 60005 });
   };
 
   const toggleNowReading = () => {
