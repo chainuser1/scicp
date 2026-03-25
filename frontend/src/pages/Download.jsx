@@ -68,7 +68,11 @@ export default function Download() {
   );
 
   useEffect(() => {
-    document.title = 'Downloads | Scriptures in View';
+    document.title = 'Download | Scriptures in View';
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Download | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Download desktop and mobile apps for offline use');
     const metaDesc = document.querySelector('meta[name="description"]');
     const description = 'Download offline Scriptures in View apps for Android, Windows, Linux, and Mac. Non-commercial church and home use only.';
     if (metaDesc) metaDesc.setAttribute('content', description);

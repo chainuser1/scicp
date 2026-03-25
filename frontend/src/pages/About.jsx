@@ -4,6 +4,10 @@ import Footer from '../components/Footer';
 function About() {
   useEffect(() => {
     document.title = 'About | Scriptures in View';
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'About | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Learn about Sacred Scripture Projector');
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       metaDesc.setAttribute('content', 'Learn what Scriptures in View can do for church worship, talks, lessons, and home scripture study.');

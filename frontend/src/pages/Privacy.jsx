@@ -4,6 +4,10 @@ import Footer from '../components/Footer';
 export default function Privacy() {
   useEffect(() => {
     document.title = "Privacy Policy | Scriptures in View";
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Privacy Policy | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Privacy policy for Scriptures in View');
     const metaDesc = document.querySelector('meta[name="description"]');
     const description = "Privacy policy for Scriptures in View, including location checks for restricted downloads.";
     if (metaDesc) metaDesc.setAttribute('content', description);

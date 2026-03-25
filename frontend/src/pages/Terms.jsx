@@ -4,6 +4,10 @@ import Footer from '../components/Footer';
 export default function Terms() {
   useEffect(() => {
     document.title = "Terms of Service | Scriptures in View";
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Terms of Service | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Terms of service for Scriptures in View');
     const metaDesc = document.querySelector('meta[name="description"]');
     const description = "Terms for using Scriptures in View for non-commercial church and home use.";
     if (metaDesc) metaDesc.setAttribute('content', description);
