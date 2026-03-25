@@ -916,7 +916,8 @@ function Client() {
   const computedRem      = (themeFontSizeRem && !isNaN(themeFontSizeRem))
     ? Math.min(themeFontSizeRem, Math.max(0.55, fittingRem))          // presenter target, clipped by overflow guard
     : Math.min(viewportMaxCap,   Math.max(rawFloor, fittingRem));     // original auto-fit with floor + viewport cap
-  const scaledRem        = computedRem * fontScale;
+  // fontScale (local A−/A+) adjusts on top but MUST NOT exceed fittingRem — text must never clip.
+  const scaledRem        = Math.min(fittingRem, computedRem * fontScale);
   const computedFontSize = `${scaledRem.toFixed(5)}rem`;
 
   const VOLUME_CLASS_MAP = {
