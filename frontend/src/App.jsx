@@ -7,6 +7,8 @@ import Terms from './pages/Terms';
 import './App.css';
 import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
+import ConnectionStatus from './components/ConnectionStatus';
 
 const Presenter = React.lazy(() => import('./pages/Presenter'));
 const Client = React.lazy(() => import('./pages/Client'));
@@ -15,7 +17,7 @@ const Download = React.lazy(() => import('./pages/Download'));
 
 /* ─── Cross / Emblem SVG ─── */
 const EmblemSVG = ({ size = 72 }) => (
-  <svg width={size} height={size} viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <svg width={size} height={size} viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sacred Scripture Projector emblem">
     {/* Cornerstone – rectangular base with slight 3D feel */}
     <rect x="12" y="46" width="48" height="18" rx="4" fill="#c9a84c" opacity="0.92"/>
     
@@ -149,22 +151,25 @@ function NotFound() {
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <React.Suspense fallback={<div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}><p>Loading…</p></div>}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/reader" element={<ReaderPage />} />
-            <Route path="/presenter" element={<Presenter />} />
-            <Route path="/client" element={<Client />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/contact" element={<Contact />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/download" element={<Download />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </React.Suspense>
-      </Router>
+      <ToastProvider>
+        <ConnectionStatus />
+        <Router>
+          <React.Suspense fallback={<div style={{display:'flex',justifyContent:'center',alignItems:'center',height:'100vh'}}><p>Loading…</p></div>}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/reader" element={<ReaderPage />} />
+              <Route path="/presenter" element={<Presenter />} />
+              <Route path="/client" element={<Client />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/contact" element={<Contact />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/download" element={<Download />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </React.Suspense>
+        </Router>
+      </ToastProvider>
     </ErrorBoundary>
   );
 }
