@@ -389,7 +389,12 @@ export default function MobileClient() {
   const length = weightedLength(displayText);
   const secLength = weightedLength(secondaryText);
 
-  const maxCap        = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
+  const viewportMaxCap = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
+  // Honor font_size from presenter's theme — A- / A+ buttons on Presenter control this
+  const themeFontSizeRem = verse.theme?.font_size ? parseFloat(verse.theme.font_size) : null;
+  const maxCap        = (themeFontSizeRem && !isNaN(themeFontSizeRem))
+    ? Math.min(viewportMaxCap, themeFontSizeRem)
+    : viewportMaxCap;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = !customData && layout === 'lower-third'
