@@ -35,6 +35,10 @@ COPY --from=build /app/resources ./resources
 RUN npm ci --omit=dev --workspace=backend \
   && npm rebuild better-sqlite3
 
+# Prebake the Xenova/all-MiniLM-L6-v2 ONNX model so it's cached at build time
+# and doesn't need to be downloaded on every container start.
+RUN node -e "import('@xenova/transformers').then(m=>m.pipeline('feature-extraction','Xenova/all-MiniLM-L6-v2')).then(()=>console.log('Model cached')).catch(e=>console.warn('Model prebake skipped:',e.message))"
+
 EXPOSE 8080
 
 ENV NODE_ENV=production
