@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          lfs: true
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
@@ -128,6 +130,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          lfs: true
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
