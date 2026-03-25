@@ -548,8 +548,13 @@ function Client() {
     const handleTheme = (theme) => {
       resetScreensaver();
       if (theme.background_url) crossfadeBackground(theme.background_url);
-      // Theme change: just crossfade the background, keep text visible
       setVerse((v) => ({ ...v, theme }));
+      // Presenter remote font scale — same fontScale state as local A-/A+ buttons
+      if (theme.font_scale != null && !isNaN(theme.font_scale)) {
+        const s = Math.min(2.0, Math.max(0.5, theme.font_scale));
+        setFontScale(s);
+        localStorage.setItem('scicp.client_font_scale', s);
+      }
     };
 
     const handleHighlight = (payload) => {
@@ -851,8 +856,6 @@ function Client() {
   const secLength = weightedLength(secondaryText);
 
   const viewportMaxCap = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
-  // Presenter's explicit font_size request (from TEXT SIZE −/+ control)
-  const themeFontSizeRem = verse.theme?.font_size ? parseFloat(verse.theme.font_size) : null;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = !customData && layout === 'lower-third'
@@ -904,19 +907,15 @@ function Client() {
     return lo;
   })();
 
-  const fittingRem       = fontSizeThatFits * 0.95;  // viewport overflow guard
+  const fittingRem       = fontSizeThatFits * 0.95;  // largest size that fits without clipping
   const hour = new Date().getHours();
   const timeFloorAdj = (hour >= 20 || hour < 6) ? -0.08 : (hour >= 10 && hour < 18) ? 0.05 : 0;
   const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
-  // Two distinct modes:
-  //   Presenter explicit size → use it as the target; auto-fit is the overflow-only safety ceiling.
-  //     Text will not be clipped; presenter's intent is honoured as closely as possible.
-  //   No explicit size → classic auto-fit: largest size that fits, clamped between rawFloor and viewportMaxCap.
-  const computedRem      = (themeFontSizeRem && !isNaN(themeFontSizeRem))
-    ? Math.min(themeFontSizeRem, Math.max(0.55, fittingRem))          // presenter target, clipped by overflow guard
-    : Math.min(viewportMaxCap,   Math.max(rawFloor, fittingRem));     // original auto-fit with floor + viewport cap
-  // fontScale (local A−/A+) adjusts on top but MUST NOT exceed fittingRem — text must never clip.
+  // Auto-fit: largest size that fits, clamped to legibility floor and viewport cap.
+  // fontScale (set by local A-/A+ OR by presenter remote) multiplies on top.
+  // Sacred rules: scaledRem can never exceed fittingRem (no clipping) and never below rawFloor / viewportMaxCap bounds.
+  const computedRem      = Math.min(viewportMaxCap, Math.max(rawFloor, fittingRem));
   const scaledRem        = Math.min(fittingRem, computedRem * fontScale);
   const computedFontSize = `${scaledRem.toFixed(5)}rem`;
 

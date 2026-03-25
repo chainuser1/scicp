@@ -104,6 +104,7 @@ export default function MobileClient() {
   const [readabilityMode, setReadabilityMode] = useState('balanced');
   const [autoHighlight, setAutoHighlight] = useState(null);
   const [dyslexiaMode, setDyslexiaMode]       = useState(false);
+  const [fontScale, setFontScale]             = useState(1.0);
 
   const [customData, setCustomData] = useState(null);
 
@@ -207,8 +208,11 @@ export default function MobileClient() {
 
     const handleTheme = (theme) => {
       if (theme.background_url) crossfadeBackground(theme.background_url);
-      // Theme change: just crossfade the background, keep text visible
       setVerse((v) => ({ ...v, theme }));
+      // Presenter remote font scale drives the same fontScale state as local controls
+      if (theme.font_scale != null && !isNaN(theme.font_scale)) {
+        setFontScale(Math.min(2.0, Math.max(0.5, theme.font_scale)));
+      }
     };
 
     const handleHighlight = (text) => setHighlightedText(text || '');
@@ -390,8 +394,6 @@ export default function MobileClient() {
   const secLength = weightedLength(secondaryText);
 
   const viewportMaxCap = vw >= 2400 ? 7.5 : vw >= 1920 ? 6.5 : vw >= 901 ? 5.4 : vw >= 641 ? 4.0 : 2.6;
-  // Presenter's explicit font_size request (from TEXT SIZE −/+ control)
-  const themeFontSizeRem = verse.theme?.font_size ? parseFloat(verse.theme.font_size) : null;
   const backdropMaxH  = Math.min(vh * 0.82, 960);
   const backdropVPad  = 2 * Math.min(2.2 * PX_PER_REM, Math.max(PX_PER_REM, vh * 0.024));
   const lowerThirdPad = !customData && layout === 'lower-third'
@@ -443,18 +445,15 @@ export default function MobileClient() {
     return lo;
   })();
 
-  const fittingRem       = fontSizeThatFits * 0.95;  // viewport overflow guard
+  const fittingRem       = fontSizeThatFits * 0.95;  // largest size that fits without clipping
   const hour = new Date().getHours();
   const timeFloorAdj = (hour >= 20 || hour < 6) ? -0.08 : (hour >= 10 && hour < 18) ? 0.05 : 0;
   const rawFloorBase = (vw >= 2400 ? 2.0 : vw >= 1920 ? 1.75 : vw >= 901 ? 1.45 : vw >= 641 ? 1.05 : 0.82) + timeFloorAdj;
   const rawFloor         = Math.max(0.72, rawFloorBase - (hasCjk ? 0.12 : 0));
-  // Two distinct modes:
-  //   Presenter explicit size → target; auto-fit is overflow-only safety ceiling. Text will not be clipped.
-  //   No explicit size → classic auto-fit: largest size that fits, clamped between rawFloor and viewportMaxCap.
-  const computedRem      = (themeFontSizeRem && !isNaN(themeFontSizeRem))
-    ? Math.min(themeFontSizeRem, Math.max(0.55, fittingRem))
-    : Math.min(viewportMaxCap,   Math.max(rawFloor, fittingRem));
-  const computedFontSize = `${computedRem.toFixed(5)}rem`;
+  // Auto-fit + fontScale (driven by presenter remote OR future local controls) — never clips.
+  const computedRem      = Math.min(viewportMaxCap, Math.max(rawFloor, fittingRem));
+  const scaledRem        = Math.min(fittingRem, computedRem * fontScale);
+  const computedFontSize = `${scaledRem.toFixed(5)}rem`;
 
   const VOLUME_CLASS_MAP = {
     'Old Testament':          'volume-ot',
