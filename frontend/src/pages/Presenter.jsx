@@ -974,6 +974,10 @@ const Presenter = () => {
 
   useEffect(() => {
     document.title = 'Presenter | Scriptures in View';
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Present | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Search and present scriptures in real-time');
     const robotsMeta = document.querySelector('meta[name="robots"]');
     if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
     // Remove any canonical — this is an app screen, not a crawlable content page.
@@ -3042,7 +3046,10 @@ const Presenter = () => {
                   <button className="setlist-clear-btn" onClick={() => { if (window.confirm('Clear entire setlist?')) setSetlist([]); }}>Clear Setlist</button>
                 </>
               ) : (
-                <div className="empty-state">No items yet.<br />Search and tap + to add,<br />or use + Text for announcements.</div>
+                <div className="empty-state">
+                  <p>Your setlist is empty</p>
+                  <p className="empty-state-hint">Search for verses and tap + to add them here</p>
+                </div>
               )}
             </div>
           ) : (

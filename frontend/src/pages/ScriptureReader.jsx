@@ -229,6 +229,14 @@ export default function ScriptureReader({ onExit }) {
 
   // ── Offline detection ─────────────────────────────────────────────────────
   useEffect(() => {
+    document.title = 'Read Scriptures | Scriptures in View';
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Read Scriptures | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Browse and study scriptures');
+  }, []);
+
+  useEffect(() => {
     const on = () => setIsOffline(false);
     const off = () => setIsOffline(true);
     window.addEventListener('online', on);

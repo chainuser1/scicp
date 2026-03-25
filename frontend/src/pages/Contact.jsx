@@ -4,6 +4,10 @@ import Footer from '../components/Footer';
 function Contact() {
   useEffect(() => {
     document.title = 'Contact | Scriptures in View';
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogTitle) ogTitle.setAttribute('content', 'Contact | Scriptures in View');
+    if (ogDesc) ogDesc.setAttribute('content', 'Get in touch with the Scriptures in View team');
     const metaDesc = document.querySelector('meta[name="description"]');
     if (metaDesc) {
       metaDesc.setAttribute('content', 'Contact Dagami Ward Dev for support and feedback about Scriptures in View.');

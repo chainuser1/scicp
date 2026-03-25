@@ -3458,6 +3458,11 @@ button,
   font-size: 1rem;
   line-height: 1.65;
 }
+.empty-state-hint {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  margin-top: 0.25rem;
+}
 
 /* ══════════════════════════════════════════════════════════════
    MAIN CONTENT AREA
@@ -9051,4 +9056,11 @@ button, [role="button"] {
 }
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* F7: Mobile SVG overflow fix */
+.home-emblem svg,
+.home-page svg {
+  max-width: 100%;
+  height: auto;
 }

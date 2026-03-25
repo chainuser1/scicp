@@ -8,7 +8,7 @@
 // if the network drops — no extra SW work required for that use-case.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CACHE_NAME = 'siv-v2';
+const CACHE_NAME = 'siv-v3';
 
 // Resources to pre-cache on install
 const PRECACHE_URLS = [
@@ -16,6 +16,12 @@ const PRECACHE_URLS = [
   '/index.html',
   '/presenter',
   '/client',
+  '/reader',
+  '/about',
+  '/contact',
+  '/privacy',
+  '/terms',
+  '/download',
   '/manifest.json',
   '/emblem-512.png',
   '/emblem.svg',
