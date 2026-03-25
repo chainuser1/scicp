@@ -313,6 +313,7 @@ const INTENT_LABELS = {
 };
 
 const SearchIntelligence = ({ meta, query }) => {
+  const [expanded, setExpanded] = useState(false);
   if (!meta || !query) return null;
   const { intent, subtype, entityMatch, display, expansions, qpprActive, sessionDrift } = meta;
 
@@ -331,33 +332,58 @@ const SearchIntelligence = ({ meta, query }) => {
   }
 
   const hasExpansions = expansions && expansions.length > 0;
-  if (!intentLabel && !hasExpansions && !qpprActive && !sessionDrift) return null;
+  const hasTags = qpprActive || sessionDrift || hasExpansions;
+  if (!intentLabel && !hasTags) return null;
 
   return (
-    <div className="search-intel">
-      {intentLabel && (
-        <span className={`search-intel-intent search-intel-intent--${intent}`} title={intentTitle}>
-          {intentLabel}{entityMatch ? <span className="search-intel-entity-match"> · {entityMatch}</span> : null}
-        </span>
-      )}
-      {qpprActive && (
-        <span className="search-intel-qppr" title="Results re-ranked using a query-seeded graph walk through verse connections">
-          graph-ranked
-        </span>
-      )}
-      {sessionDrift && (
-        <span className="search-intel-drift" title="Results weighted toward this service's current theme based on verses you've displayed">
-          theme-aware
-        </span>
-      )}
-      {hasExpansions && (
-        <span className="search-intel-expansions" title="Terms the system associated with your query">
-          also: {expansions.map((t, i) => (
+    <div className={`search-intel${expanded ? ' search-intel--expanded' : ''}`}>
+      {/* Always-visible summary row */}
+      <div className="search-intel-row">
+        {intentLabel && (
+          <span className={`search-intel-intent search-intel-intent--${intent}`} title={intentTitle}>
+            {intentLabel}{entityMatch ? <span className="search-intel-entity-match"> · {entityMatch}</span> : null}
+          </span>
+        )}
+        {!expanded && hasTags && (
+          <span className="search-intel-hint">
+            {[qpprActive && 'graph', sessionDrift && 'drift', hasExpansions && `+${expansions.length}`].filter(Boolean).join(' · ')}
+          </span>
+        )}
+        {expanded && (
+          <>
+            {qpprActive && (
+              <span className="search-intel-qppr" title="Results re-ranked using a query-seeded graph walk through verse connections">
+                graph-ranked
+              </span>
+            )}
+            {sessionDrift && (
+              <span className="search-intel-drift" title="Results weighted toward this service's current theme based on verses you've displayed">
+                theme-aware
+              </span>
+            )}
+          </>
+        )}
+        {hasTags && (
+          <button
+            className="search-intel-toggle"
+            onClick={() => setExpanded(v => !v)}
+            aria-label={expanded ? 'Collapse search details' : 'Expand search details'}
+            title={expanded ? 'Collapse' : 'Show search details'}
+          >
+            {expanded ? '▲' : '▼'}
+          </button>
+        )}
+      </div>
+      {/* Expanded: expansions row */}
+      {expanded && hasExpansions && (
+        <div className="search-intel-expansion-row">
+          <span className="search-intel-expansions-label">also</span>
+          {expansions.map((t, i) => (
             <span key={t} className="search-intel-term">
-              {t}{i < expansions.length - 1 ? ' · ' : ''}
+              {t}{i < expansions.length - 1 ? <span className="search-intel-dot"> ·</span> : ''}
             </span>
           ))}
-        </span>
+        </div>
       )}
     </div>
   );
