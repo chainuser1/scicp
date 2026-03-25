@@ -2872,6 +2872,7 @@ const Presenter = () => {
                 <div className="mobile-menu-label">Pages</div>
                 <div className="mobile-menu-nav-links">
                   <a href="/client" onClick={() => setMobileMenuOpen(false)}>📺 Display</a>
+                  <a href="/reader" onClick={() => setMobileMenuOpen(false)}>📖 Reader</a>
                   <a href="/about" onClick={() => setMobileMenuOpen(false)}>About</a>
                   <a href="/contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
                   <a href="/privacy" onClick={() => setMobileMenuOpen(false)}>Privacy</a>
@@ -3671,6 +3672,7 @@ const Presenter = () => {
           <a href="/">Home</a>
           <a href="/presenter">Present</a>
           <a href="/client">Display</a>
+          <a href="/reader">Reader</a>
           <a href="/about">About</a>
           <a href="/contact">Contact</a>
           <a href="/privacy">Privacy Policy</a>
