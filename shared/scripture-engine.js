@@ -219,7 +219,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
         const exactQ  = buildFTSPhraseQuery(raw);
         const total   = runFTSCount(exactQ, db);
         const results = runFTSQuery(exactQ, raw, pageSize, offset, db);
-        if (results.length > 0 || total > 0) return { results, total };
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'phrase' };
       }
 
       // AND match (all terms must appear)
@@ -227,7 +227,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
       if (andQ) {
         const total   = runFTSCount(andQ, db);
         const results = runFTSQuery(andQ, raw, pageSize, offset, db);
-        if (results.length > 0 || total > 0) return { results, total };
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'and' };
       }
 
       // OR match (any term)
@@ -235,7 +235,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
       if (orQ) {
         const total   = runFTSCount(orQ, db);
         const results = runFTSQuery(orQ, raw, pageSize, offset, db);
-        if (results.length > 0 || total > 0) return { results, total };
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'or' };
       }
 
       // Prefix wildcard (single word)
@@ -243,7 +243,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
         const wq      = `${raw}*`;
         const total   = runFTSCount(wq, db);
         const results = runFTSQuery(wq, raw, pageSize, offset, db);
-        if (results.length > 0 || total > 0) return { results, total };
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'prefix' };
       }
     }
   } catch (err) {

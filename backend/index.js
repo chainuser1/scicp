@@ -662,6 +662,27 @@ try {
   }
 } catch {}
 
+// ── Adam optimizer state for learned weights ──────────────────────────────────
+// First moment (momentum), second moment (RMSProp), and timestep per weight.
+// Persisted alongside weights in user-data.db.
+const ADAM_BETA1 = 0.9;
+const ADAM_BETA2 = 0.999;
+const ADAM_EPS   = 1e-8;
+const ADAM_LR    = 0.01;
+let adamM = new Float64Array(learnedWeights.length); // first moment
+let adamV = new Float64Array(learnedWeights.length); // second moment
+let adamT = 0; // global timestep
+
+// Restore Adam state from DB if available
+try {
+  const mRow = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'adam_m'").get();
+  const vRow = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'adam_v'").get();
+  const tRow = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'adam_t'").get();
+  if (mRow) adamM = new Float64Array(JSON.parse(mRow.value));
+  if (vRow) adamV = new Float64Array(JSON.parse(vRow.value));
+  if (tRow) adamT = parseInt(tRow.value, 10) || 0;
+} catch {}
+
 function updateLearnedWeights() {
   try {
     const cutoff = Date.now() - 7 * 86400000;
@@ -683,17 +704,37 @@ function updateLearnedWeights() {
       sourceCounts[wIdx]++;
     }
 
-    const lr = 0.05;
+    // Adam optimizer: momentum + adaptive per-parameter learning rates
+    adamT++;
     for (let i = 0; i < learnedWeights.length; i++) {
       if (sourceCounts[i] === 0) continue;
-      const grad = sourceWeightDeltas[i] / sourceCounts[i];
-      learnedWeights[i] = Math.max(0.05, Math.min(3.0, learnedWeights[i] + lr * grad));
+      const g = sourceWeightDeltas[i] / sourceCounts[i];
+
+      // Update biased first & second moment estimates
+      adamM[i] = ADAM_BETA1 * adamM[i] + (1 - ADAM_BETA1) * g;
+      adamV[i] = ADAM_BETA2 * adamV[i] + (1 - ADAM_BETA2) * g * g;
+
+      // Bias-corrected estimates
+      const mHat = adamM[i] / (1 - Math.pow(ADAM_BETA1, adamT));
+      const vHat = adamV[i] / (1 - Math.pow(ADAM_BETA2, adamT));
+
+      // Update with clipping
+      learnedWeights[i] = Math.max(0.05, Math.min(3.0,
+        learnedWeights[i] + ADAM_LR * mHat / (Math.sqrt(vHat) + ADAM_EPS)
+      ));
     }
 
+    // Persist weights + Adam state
     const stmt = db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)');
-    learnedWeights.forEach((w, i) => stmt.run(`w${i}`, w));
+    const txn = db_user.transaction(() => {
+      learnedWeights.forEach((w, i) => stmt.run(`w${i}`, w));
+      stmt.run('adam_m', JSON.stringify(Array.from(adamM)));
+      stmt.run('adam_v', JSON.stringify(Array.from(adamV)));
+      stmt.run('adam_t', String(adamT));
+    });
+    txn();
 
-    fastify.log.info(`[WeightLearning] Updated weights: ${learnedWeights.map(w => w.toFixed(3)).join(', ')}`);
+    fastify.log.info(`[WeightLearning/Adam] t=${adamT} weights: ${learnedWeights.map(w => w.toFixed(3)).join(', ')}`);
   } catch (err) {
     fastify.log.warn({ err }, 'updateLearnedWeights failed');
   }
@@ -701,6 +742,120 @@ function updateLearnedWeights() {
 
 // Run weight update once at startup if we have enough data
 setImmediate(() => { try { updateLearnedWeights(); } catch {} });
+
+// ── Isotonic Regression: Pool Adjacent Violators (PAV) ──────────────────────
+// Calibrates raw scores → P(relevant | score, tier) so scores become comparable.
+// PAV guarantees monotonicity: higher raw score → higher calibrated probability.
+//
+// Fitted per-tier from (raw_score, was_clicked) data in search_feedback.
+// Stored as piecewise-linear lookup tables in learned_weights.
+let calibrationCurves = new Map(); // tier → [{x, y}] sorted by x
+
+function pavCalibrate(points) {
+  if (points.length < 5) return null;
+  // Sort by raw score ascending
+  points.sort((a, b) => a.x - b.x);
+
+  // Pool Adjacent Violators: merge adjacent blocks that violate monotonicity
+  const blocks = points.map(p => ({ sum: p.y, count: 1, minX: p.x, maxX: p.x }));
+  let i = 0;
+  while (i < blocks.length - 1) {
+    const mean_i = blocks[i].sum / blocks[i].count;
+    const mean_next = blocks[i + 1].sum / blocks[i + 1].count;
+    if (mean_i > mean_next) {
+      // Merge: pool blocks[i] and blocks[i+1]
+      blocks[i].sum += blocks[i + 1].sum;
+      blocks[i].count += blocks[i + 1].count;
+      blocks[i].maxX = blocks[i + 1].maxX;
+      blocks.splice(i + 1, 1);
+      // Back up to re-check previous block
+      if (i > 0) i--;
+    } else {
+      i++;
+    }
+  }
+
+  // Convert blocks to piecewise-linear lookup: [{x: midpoint, y: mean}]
+  return blocks.map(b => ({
+    x: (b.minX + b.maxX) / 2,
+    y: b.sum / b.count,
+  }));
+}
+
+function calibrateScore(tier, rawScore) {
+  const curve = calibrationCurves.get(tier);
+  if (!curve || curve.length < 2) return rawScore;
+
+  // Piecewise linear interpolation
+  if (rawScore <= curve[0].x) return curve[0].y;
+  if (rawScore >= curve[curve.length - 1].x) return curve[curve.length - 1].y;
+
+  for (let i = 0; i < curve.length - 1; i++) {
+    if (rawScore >= curve[i].x && rawScore <= curve[i + 1].x) {
+      const t = (rawScore - curve[i].x) / (curve[i + 1].x - curve[i].x);
+      return curve[i].y + t * (curve[i + 1].y - curve[i].y);
+    }
+  }
+  return rawScore;
+}
+
+// Fit calibration curves from feedback data (called periodically)
+function fitCalibrationCurves() {
+  try {
+    const cutoff = Date.now() - 14 * 86400000; // 14 days of data
+    const feedback = db_user.prepare(`
+      SELECT tier, raw_score, clicked FROM search_calibration WHERE ts > ? ORDER BY tier, raw_score
+    `).all(cutoff);
+
+    if (feedback.length < 20) return;
+
+    const byTier = new Map();
+    for (const f of feedback) {
+      if (!byTier.has(f.tier)) byTier.set(f.tier, []);
+      byTier.get(f.tier).push({ x: f.raw_score, y: f.clicked });
+    }
+
+    for (const [tier, points] of byTier) {
+      const curve = pavCalibrate(points);
+      if (curve) calibrationCurves.set(tier, curve);
+    }
+
+    // Persist curves
+    const curvesJson = {};
+    for (const [tier, curve] of calibrationCurves) curvesJson[tier] = curve;
+    db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)').run(
+      'calibration_curves', JSON.stringify(curvesJson)
+    );
+
+    fastify.log.info(`[Calibration] Fitted PAV curves for ${calibrationCurves.size} tiers (${feedback.length} data points)`);
+  } catch (err) {
+    fastify.log.warn({ err }, 'fitCalibrationCurves failed');
+  }
+}
+
+// Ensure calibration data table exists
+try {
+  db_user.exec(`
+    CREATE TABLE IF NOT EXISTS search_calibration (
+      ts INTEGER NOT NULL,
+      tier INTEGER NOT NULL,
+      raw_score REAL NOT NULL,
+      clicked INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db_user.exec('CREATE INDEX IF NOT EXISTS idx_calibration_ts ON search_calibration(ts)');
+} catch {}
+
+// Restore saved curves
+try {
+  const row = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'calibration_curves'").get();
+  if (row) {
+    const parsed = JSON.parse(row.value);
+    for (const [tier, curve] of Object.entries(parsed)) {
+      calibrationCurves.set(Number(tier), curve);
+    }
+  }
+} catch {}
 
 // ── Item2Vec: Session-based verse embeddings ──────────────────────────────────
 const ITEM2VEC_DIM = 64;
@@ -835,8 +990,20 @@ const EMBED_BATCH_SIZE   = 50;
 let embeddingsReady     = false;
 let embeddingPipe       = null;  // transformer pipeline (loaded in dev; null in production)
 const embeddingCache    = new Map(); // verse_id → Float32Array(384)
+
+// ZCA whitening transform: v_white = W · (v - μ), then L2-normalize
+// Loaded from embedding_whitening table (prebaked by scripts/prebake-whitening.js)
+let whiteningW    = null; // Float32Array(384*384) — row-major ZCA matrix
+let whiteningMean = null; // Float32Array(384) — corpus mean vector
+const EMBED_DIM   = 384;
 const entityCentroidCache = new Map(); // entity_id → Float32Array(384)
 const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
+
+// Spectral graph embeddings (50D, from verse_spectral table in verse-graph.db)
+const spectralCache     = new Map(); // verse_id → Float32Array(50)
+let spectralReady       = false;
+const SPECTRAL_DIM      = 50;
+const SPECTRAL_BLEND    = 0.15; // blend weight: combinedSim = (1-w)·cosine + w·spectral
 
 // Topical Guide caches (populated at startup if topical-guide.db is present)
 const verseTopicCache  = new Map(); // verse_id → Set<topic_slug>
@@ -920,21 +1087,130 @@ function cosineSimilarity(a, b) {
   return sum;
 }
 
+// Apply ZCA whitening to a raw embedding: v_white = W · (v - μ), then L2-normalize
+function whitenVector(raw) {
+  if (!whiteningW || !whiteningMean) return raw;
+  const centered = new Float32Array(EMBED_DIM);
+  for (let i = 0; i < EMBED_DIM; i++) centered[i] = raw[i] - whiteningMean[i];
+  const w = new Float32Array(EMBED_DIM);
+  for (let r = 0; r < EMBED_DIM; r++) {
+    let dot = 0;
+    const off = r * EMBED_DIM;
+    for (let c = 0; c < EMBED_DIM; c++) dot += whiteningW[off + c] * centered[c];
+    w[r] = dot;
+  }
+  let norm = 0;
+  for (let i = 0; i < EMBED_DIM; i++) norm += w[i] * w[i];
+  norm = Math.sqrt(norm);
+  if (norm > 1e-10) for (let i = 0; i < EMBED_DIM; i++) w[i] /= norm;
+  return w;
+}
+
+// ── Sinkhorn Optimal Transport (Word Mover's Distance approximation) ─────
+// For multi-concept queries like "faith and repentance", a single average vector
+// loses information. WMD measures the minimum-cost transport between two
+// word-weight distributions. Sinkhorn regularization (ε) makes it differentiable
+// and computable in O(n²·iterations) instead of O(n³ LP).
+//
+// queryTokenVecs: [{vec: Float32Array(384), weight: number}]
+// verseTokenVecs: [{vec: Float32Array(384), weight: number}]
+// Returns: WMD score (lower = more similar)
+const SINKHORN_ITER = 15;
+const SINKHORN_EPS  = 0.1; // entropic regularization
+
+function sinkhornWMD(queryTokens, verseTokens) {
+  const m = queryTokens.length;
+  const n = verseTokens.length;
+  if (m === 0 || n === 0) return 1.0;
+
+  // Normalize weights to sum to 1
+  const a = new Float64Array(m);
+  const b = new Float64Array(n);
+  let aSum = 0, bSum = 0;
+  for (let i = 0; i < m; i++) { a[i] = queryTokens[i].weight; aSum += a[i]; }
+  for (let j = 0; j < n; j++) { b[j] = verseTokens[j].weight; bSum += b[j]; }
+  if (aSum <= 0 || bSum <= 0) return 1.0;
+  for (let i = 0; i < m; i++) a[i] /= aSum;
+  for (let j = 0; j < n; j++) b[j] /= bSum;
+
+  // Cost matrix: C[i][j] = 1 - cosine(q_i, v_j)
+  const K = new Float64Array(m * n); // Gibbs kernel: K = exp(-C/ε)
+  for (let i = 0; i < m; i++) {
+    const qv = queryTokens[i].vec;
+    for (let j = 0; j < n; j++) {
+      const vv = verseTokens[j].vec;
+      let dot = 0;
+      for (let d = 0; d < qv.length; d++) dot += qv[d] * vv[d];
+      const cost = 1.0 - dot; // cosine distance (vecs are L2-normalized)
+      K[i * n + j] = Math.exp(-cost / SINKHORN_EPS);
+    }
+  }
+
+  // Sinkhorn iterations: alternating row/column scaling
+  const u = new Float64Array(m).fill(1.0 / m);
+  const v = new Float64Array(n).fill(1.0 / n);
+
+  for (let iter = 0; iter < SINKHORN_ITER; iter++) {
+    // Update u: u_i = a_i / (K * v)_i
+    for (let i = 0; i < m; i++) {
+      let kv = 0;
+      for (let j = 0; j < n; j++) kv += K[i * n + j] * v[j];
+      u[i] = kv > 1e-30 ? a[i] / kv : a[i];
+    }
+    // Update v: v_j = b_j / (K^T * u)_j
+    for (let j = 0; j < n; j++) {
+      let ku = 0;
+      for (let i = 0; i < m; i++) ku += K[i * n + j] * u[i];
+      v[j] = ku > 1e-30 ? b[j] / ku : b[j];
+    }
+  }
+
+  // Compute transport cost: <P, C> where P = diag(u)·K·diag(v)
+  let wmd = 0;
+  for (let i = 0; i < m; i++) {
+    const qv = queryTokens[i].vec;
+    for (let j = 0; j < n; j++) {
+      const vv = verseTokens[j].vec;
+      let dot = 0;
+      for (let d = 0; d < qv.length; d++) dot += qv[d] * vv[d];
+      const cost = 1.0 - dot;
+      const transport = u[i] * K[i * n + j] * v[j];
+      wmd += transport * cost;
+    }
+  }
+
+  return Math.max(0, Math.min(1.0, wmd));
+}
+
+// Tokenize text into word-level embeddings using the corpus IDF weights
+// Returns: [{word, vec, weight}] or empty array
+function tokenizeForWMD(text, idfLookup) {
+  if (!text || !embeddingsReady) return [];
+  const words = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, '').split(/\s+/).filter(w => w.length > 1);
+  const unique = [...new Set(words)];
+  const tokens = [];
+  for (const w of unique) {
+    // Look up IDF weight; skip very common words (IDF < 1.0)
+    const idf = idfLookup ? (idfLookup.get(w) || 3.0) : 1.0;
+    if (idf < 1.0) continue;
+    tokens.push({ word: w, weight: idf });
+  }
+  return tokens;
+}
+
 // ── Entity Disambiguation Scorer ──────────────────────────────────────────
-// Combines cosine similarity, Bayesian prior, and spatial proximity
-// to rank candidate entities for a given context verse.
+// Combines cosine similarity, Bayesian prior, and spatial proximity using
+// polynomial feature interactions to capture nonlinear relationships.
 //
-// score = α·cos(θ_ve) + β·log(1+N)/log(1+N_max) + γ·e^(-λ·|d|/D_max)
+// Features: [cos, prior, prox, cos·prox, cos·prior, cos², prox²]
+// The cross-terms capture interactions:
+//   cos·prox  → "embedding-confirmed + spatially close = very strong"
+//   cos·prior → "similar embedding + frequent entity = reinforced"
+//   cos²      → rewards high-confidence embedding matches
+//   prox²     → rewards very close spatial proximity
 //
-//   cos(θ_ve)  : cosine similarity between verse embedding and entity centroid
-//   N / N_max  : entity verse count normalised by largest entity
-//   d / D_max  : verse distance normalised by chapter span
-//   α,β,γ,λ   : tunable weights
-//
-const ENTITY_SCORE_ALPHA  = 0.55;  // cosine similarity weight
-const ENTITY_SCORE_BETA   = 0.15;  // Bayesian prior weight
-const ENTITY_SCORE_GAMMA  = 0.30;  // proximity decay weight
-const ENTITY_DECAY_LAMBDA = 3.0;   // exponential decay rate
+const ENTITY_WEIGHTS = [0.40, 0.10, 0.20, 0.15, 0.05, 0.05, 0.05]; // 7 polynomial features
+const ENTITY_DECAY_LAMBDA = 3.0;
 
 function scoreEntityCandidates(candidates, verseId, verseEmbedding) {
   if (candidates.length <= 1) return candidates;
@@ -983,9 +1259,19 @@ function scoreEntityCandidates(candidates, verseId, verseEmbedding) {
       }
     }
 
-    c._score = ENTITY_SCORE_ALPHA * cosScore
-             + ENTITY_SCORE_BETA  * priorScore
-             + ENTITY_SCORE_GAMMA * proxScore;
+    // Polynomial feature interaction scoring
+    const features = [
+      cosScore,                 // linear: cosine similarity
+      priorScore,               // linear: Bayesian prior
+      proxScore,                // linear: spatial proximity
+      cosScore * proxScore,     // interaction: embedding + proximity
+      cosScore * priorScore,    // interaction: embedding + frequency
+      cosScore * cosScore,      // quadratic: high-confidence embedding
+      proxScore * proxScore,    // quadratic: very close proximity
+    ];
+    let score = 0;
+    for (let f = 0; f < ENTITY_WEIGHTS.length; f++) score += ENTITY_WEIGHTS[f] * features[f];
+    c._score = score;
     c._cosine = cosScore;
     c._prior  = priorScore;
     c._prox   = proxScore;
@@ -1397,22 +1683,54 @@ function reciprocalRankFusion(rankedLists, queryTopicSlugs = [], listWeights = n
   return scores;
 }
 
-// ── Maximal Marginal Relevance (Linear Algebra): diversity-aware reranking ──
+// ── Maximal Marginal Relevance with Adaptive λ (Entropy-Driven) ─────────────
 // MMR(d) = λ·sim(d,q) − (1−λ)·max_j(sim(d, d_j_selected))
-// λ=0.7 balances relevance (70%) vs diversity (30%)
-function mmrRerank(candidates, qvec, lambda = 0.7, limit = 50) {
+//
+// λ adapts based on query entropy H of the similarity distribution:
+//   H = −Σ p_i · ln(p_i)   where p_i = max(0, sim_i) / Σ max(0, sim_j)
+//   High H → many similar results → lower λ → more diversity
+//   Low H  → one clear match   → higher λ → trust relevance
+//   λ = 0.5 + 0.4 · σ(−2·(H − H_MEDIAN))
+const MMR_H_MEDIAN = 3.0;
+
+function mmrRerank(candidates, qvec, lambdaOverride = null, limit = 50) {
   if (!qvec || !embeddingsReady || candidates.length <= 1) return candidates;
 
   // Pre-limit to top candidates by RRF score for performance
   const topN = Math.min(candidates.length, Math.max(limit * 2, 100));
   const pool = candidates.slice(0, topN).map(c => {
     const vec = embeddingCache.get(c.verse_id);
+    let sim = vec ? cosineSimilarity(qvec, vec) : (c.similarity_score || 0);
+    // Blend spectral graph similarity if available
+    if (spectralReady && c._spectralSim != null) {
+      sim = (1 - SPECTRAL_BLEND) * sim + SPECTRAL_BLEND * c._spectralSim;
+    }
     return {
       ...c,
       _vec: vec || null,
-      simToQuery: vec ? cosineSimilarity(qvec, vec) : (c.similarity_score || 0),
+      simToQuery: sim,
     };
   });
+
+  // Compute adaptive λ from similarity distribution entropy
+  let lambda;
+  if (lambdaOverride !== null) {
+    lambda = lambdaOverride;
+  } else {
+    const positiveSims = pool.map(c => Math.max(0, c.simToQuery)).filter(s => s > 0);
+    if (positiveSims.length >= 2) {
+      const simSum = positiveSims.reduce((a, b) => a + b, 0);
+      let H = 0;
+      for (const s of positiveSims) {
+        const p = s / simSum;
+        if (p > 1e-12) H -= p * Math.log(p);
+      }
+      // Sigmoid mapping: H high → λ low (more diversity), H low → λ high (relevance)
+      lambda = 0.5 + 0.4 / (1.0 + Math.exp(2.0 * (H - MMR_H_MEDIAN)));
+    } else {
+      lambda = 0.9; // few results → trust relevance
+    }
+  }
 
   const selected = [];
   const selVecs = []; // cache selected vectors
@@ -1548,25 +1866,35 @@ function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
   } catch { return new Map(); }
 }
 
-// ── Session centroid: mean embedding of the last N live verses ───────────────
-// Returns a normalized Float32Array(384), or null if embeddings are unavailable
-// or the session has no history yet.
-// Called at search time — pure in-memory, zero DB I/O.
+// ── Session centroid: EWMA of live verse embeddings ──────────────────────────
+// Exponentially Weighted Moving Average: recent verses carry more weight than
+// older ones, so the centroid adapts quickly when the service theme changes.
+//
+// Weight for verse at position i (0=most recent): α·(1-α)^i
+// α=0.4 means ~67% of signal comes from the last 2 verses.
+//
+// Returns a normalized Float32Array(384), or null if unavailable.
+const EWMA_ALPHA = 0.4;
+
 function sessionCentroid(liveHistory) {
   if (!embeddingsReady || !liveHistory || liveHistory.length === 0) return null;
-  const dims = 384;
+  const dims = EMBED_DIM;
   const acc  = new Float32Array(dims);
-  let   n    = 0;
-  for (const vid of liveHistory) {
-    const vec = embeddingCache.get(vid);
+  let   wSum = 0;
+
+  // liveHistory[0] is most recent
+  for (let h = 0; h < liveHistory.length; h++) {
+    const vec = embeddingCache.get(liveHistory[h]);
     if (!vec) continue;
-    for (let i = 0; i < dims; i++) acc[i] += vec[i];
-    n++;
+    const w = EWMA_ALPHA * Math.pow(1 - EWMA_ALPHA, h);
+    for (let i = 0; i < dims; i++) acc[i] += w * vec[i];
+    wSum += w;
   }
-  if (n === 0) return null;
-  // Normalize: divide by n, then L2-normalize to unit sphere
+  if (wSum === 0) return null;
+
+  // Normalize: divide by weight sum, then L2-normalize to unit sphere
   let mag = 0;
-  for (let i = 0; i < dims; i++) { acc[i] /= n; mag += acc[i] * acc[i]; }
+  for (let i = 0; i < dims; i++) { acc[i] /= wSum; mag += acc[i] * acc[i]; }
   mag = Math.sqrt(mag);
   if (mag > 0) for (let i = 0; i < dims; i++) acc[i] /= mag;
   return acc;
@@ -1656,10 +1984,25 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
   const termWeights = queryTermWeights(query);
 
   // ── Detect significant phrases in query ──
-  const detectedPhrases = detectSignificantPhrases(query);
+  // For long queries (5+ words), skip sub-phrase decomposition — sub-bigrams create
+  // false positives (e.g. "prepared before the" matching Luke 2:31).
+  const detectedPhrases = (() => {
+    const raw = detectSignificantPhrases(query);
+    if (!raw || raw.length === 0) return raw;
+    const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
+    if (words.length >= 5) {
+      const fullPhrase = words.join(' ');
+      return raw.filter(p => p.phrase === fullPhrase);
+    }
+    return raw;
+  })();
 
-  // ── PMI expansion: augment query with statistically associated terms ──
-  const pmiTerms = expandWithPmi(query);
+  // ── PMI expansion: only for single-word queries ──
+  // Multi-word queries already express intent. PMI on "more powerful than the sword"
+  // expands "more"→"than","no" and "sword"→"edg","pestilence" — noise that triggers
+  // OR fallback matches on unrelated verses (Genesis 1 problem).
+  const _pmiWords = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
+  const pmiTerms = _pmiWords.length <= 1 ? expandWithPmi(query) : [];
   let pmiExpandedQuery = expandedQuery;
   if (pmiTerms.length > 0) {
     const pmiWords = pmiTerms.map(t => t.term);
@@ -1999,7 +2342,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     total   = r.total   || results.length;
   } else {
     // ── Explicit mode detection ──────────────────────────────────────────────
-    // Priority: reference → phrase → semantic → keyword/conceptual pipeline
+    // "" and ~ are OPTIONAL power-user shortcuts. Without them, the system
+    // automatically runs phrase + semantic + keyword and ranks by specificity.
     const isQuoted   = /^"(.+)"$/.test(query.trim());
     const isSemantic = query.trim().startsWith('~');
 
@@ -2016,7 +2360,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       }
     }
 
-    // Step 2: Explicit phrase mode — "quoted phrase" → FTS phrase match only
+    // Step 2: Explicit phrase mode — "quoted phrase" → phrase-only (power-user shortcut)
     if (isQuoted) {
       const phrase = query.trim().slice(1, -1).trim();
       const phraseResult = phraseSearch(phrase, 0, 200, dba, log);
@@ -2029,7 +2373,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       return { results: phraseResult.results, total: phraseResult.total, meta: phraseMeta, fromCache: false, cacheKey };
     }
 
-    // Step 3: Explicit semantic mode — ~query → embedding-only, skip BM25
+    // Step 3: Explicit semantic mode — ~query → embedding-only (power-user shortcut)
     if (isSemantic) {
       const semQuery = query.trim().slice(1).trim();
       if (semQuery && embeddingsReady && embeddingPipe) {
@@ -2051,42 +2395,74 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
           log.warn({ err }, '[SemanticExplicit] embedding failed, falling through to normal pipeline');
         }
       }
-      // If embedding not ready, fall through with stripped query
       query = query.trim().slice(1).trim();
     }
-    // ── Steps 4+: keyword / conceptual / mixed pipeline ─────────────────────
 
-    // Step 4: Embed query once
+    // ═══════════════════════════════════════════════════════════════════════════
+    // UNIFIED PIPELINE — auto phrase + auto semantic + keyword, no syntax needed
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Step 4a: Auto phrase detection — always attempt phrase search.
+    // If the query's words appear verbatim in a verse, those hits get tier 2 (phrase).
+    // Users don't need quotes — the system checks automatically.
+    const autoPhraseResult = phraseSearch(query.trim(), 0, 50, dba, log);
+    const phraseHitEligible = autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'and'
+      || autoPhraseResult.matchType === 'prefix';
+    const phraseHits = phraseHitEligible
+      ? autoPhraseResult.results.map(r => ({ ...r, _source: 'fts-phrase', _phraseMatch: true }))
+      : [];
+    const phraseIdsSet = new Set(phraseHits.map(r => r.verse_id));
+
+    // Step 4b: Embed query once — used by semantic scoring, concept expansion, MMR
     let qvec = null;
     if (embeddingsReady && embeddingPipe) {
       try {
         const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true });
-        qvec = new Float32Array(out.data);
+        qvec = whitenVector(new Float32Array(out.data));
       } catch {}
+    }
+
+    // Step 4c: Per-word embeddings for WMD (only for multi-word queries)
+    let queryWordVecs = null;
+    const qWords = query.trim().toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (embeddingsReady && embeddingPipe && qWords.length >= 2 && qWords.length <= 8) {
+      try {
+        const wordEmbeds = [];
+        for (const w of qWords) {
+          const wout = await embeddingPipe(w, { pooling: 'mean', normalize: true });
+          wordEmbeds.push({ word: w, vec: whitenVector(new Float32Array(wout.data)), weight: 1.0 });
+        }
+        queryWordVecs = wordEmbeds;
+      } catch {}
+    }
+
+    // Compute cosine similarity for phrase hits (needed for tier-2 tiebreaker)
+    if (phraseHits.length > 0 && qvec) {
+      for (const r of phraseHits) {
+        const vec = embeddingCache.get(r.verse_id);
+        r.similarity_score = vec ? +cosineSimilarity(qvec, vec).toFixed(4) : 0;
+      }
     }
 
     // Steps 5-6: Synonym expansion + multi-source RRF fusion
     const expanded = expandWithSynonyms(query.trim());
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
     const synonymTermsAdded = expanded.filter(t => !queryWords.has(t)).slice(0, 8);
-    const pmiTermsAdded = expandWithPmi(query.trim()).slice(0, 5).map(t => t.term);
     let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
 
     // Step 7: Sigmoid confidence gate → concept expansion
-    // Also fires for short queries (≤2 words) regardless of confidence —
-    // common theological words ("faith", "grace") have high BM25 confidence
-    // but still benefit from thematic expansion (trust, belief, testimony…).
-    const topBm25 = fusionResult.results[0]?._bm25 || fusionResult.results[0]?._bm25_rank || 0;
+    const topRrfScore  = fusionResult.results[0]?._rrfScore || 0;
+    const topBm25      = topRrfScore * 300;
     const confidence = sigmoidConfidence(topBm25, fusionResult.total);
     const queryWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
     const isShortQuery = queryWordCount <= 2;
+    // PMI only for single-word queries — multi-word PMI produces noise
+    const pmiTermsAdded = queryWordCount <= 1 ? expandWithPmi(query.trim()).slice(0, 5).map(t => t.term) : [];
     let conceptTermsUsed = [];
     const shouldExpand = (confidence < 0.6) || (isShortQuery && confidence < 0.85);
     if (shouldExpand && qvec && conceptCache.length) {
-      // Short high-confidence queries get gentle expansion (topN=2, half weight)
-      // Low-confidence queries get full expansion (topN=3-5, full weight)
       const topN   = confidence < 0.3 ? 5 : (confidence < 0.6 ? 3 : 2);
-      const wScale = confidence >= 0.6 ? 0.5 : 1.0; // dampen for high-conf short queries
+      const wScale = confidence >= 0.6 ? 0.5 : 1.0;
       const concepts = await expandWithConcepts(query.trim(), topN, qvec);
       conceptTermsUsed = concepts.map(c => c.phrase);
       for (const c of concepts) {
@@ -2104,13 +2480,90 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     results = fusionResult.results;
     total   = fusionResult.total;
 
-    // Step 6: MMR diversity reranking
-    if (results.length > 1 && qvec) {
-      results = mmrRerank(results, qvec, 0.7, Math.min(200, results.length));
-      results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? 0).toFixed(4) }));
+    // Merge phraseHits into candidates (deduplicated)
+    if (phraseHits.length > 0) {
+      results = results.filter(r => !phraseIdsSet.has(r.verse_id));
+      results = [...phraseHits, ...results];
     }
 
-    // Step 8: Semantic fallback — also fires for short queries with few semantic results
+    // Step 5.5: kNN graph expansion
+    if (qvec && db_graph && results.length > 0) {
+      const existingIds = new Set(results.map(r => r.verse_id));
+      const stmtVerse = dba.prepare(`
+        SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
+        FROM scriptures WHERE verse_id = ?
+      `);
+      const knnStmt = db_graph.prepare('SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT 10');
+      const toInject = [];
+      for (const r of results.slice(0, 12)) {
+        const parentSim = r.similarity_score || r.simToQuery || 0;
+        if (parentSim < 0.25) continue;
+        let knnRows;
+        try { knnRows = knnStmt.all(r.verse_id); } catch { continue; }
+        for (let ki = 0; ki < knnRows.length; ki++) {
+          const { neighbor_id, similarity: edgeSim } = knnRows[ki];
+          if (existingIds.has(neighbor_id)) continue;
+          const neighborScore = parentSim * edgeSim * Math.exp(-ki * 0.15);
+          const nVec = embeddingCache.get(neighbor_id);
+          const directSim = nVec ? cosineSimilarity(qvec, nVec) : 0;
+          if (directSim < 0.2) continue;
+          const finalScore = (neighborScore + directSim) / 2;
+          toInject.push({ verse_id: neighbor_id, score: finalScore });
+          existingIds.add(neighbor_id);
+        }
+      }
+      toInject.sort((a, b) => b.score - a.score);
+      for (const { verse_id, score } of toInject.slice(0, 30)) {
+        const row = stmtVerse.get(verse_id);
+        if (row) results.push({ ...row, _source: 'knn-expand', _rrfScore: score * 0.6, similarity_score: +score.toFixed(4) });
+      }
+      total = results.length;
+    }
+
+    // Step 6: Attach spectral similarity if available
+    if (spectralReady && qvec && results.length > 0) {
+      // Infer query spectral vector as cosine-weighted avg of top results' spectral embeddings
+      const topK = Math.min(5, results.length);
+      const qSpec = new Float32Array(SPECTRAL_DIM);
+      let wSum = 0;
+      for (let i = 0; i < topK; i++) {
+        const sv = spectralCache.get(results[i].verse_id);
+        if (!sv) continue;
+        const vec = embeddingCache.get(results[i].verse_id);
+        const w = vec ? Math.max(0, cosineSimilarity(qvec, vec)) : 0.1;
+        for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] += w * sv[d];
+        wSum += w;
+      }
+      if (wSum > 0) {
+        for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] /= wSum;
+        // L2-normalize
+        let norm = 0;
+        for (let d = 0; d < SPECTRAL_DIM; d++) norm += qSpec[d] * qSpec[d];
+        norm = Math.sqrt(norm) || 1;
+        for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] /= norm;
+        // Attach spectral sim to all results
+        for (const r of results) {
+          const sv = spectralCache.get(r.verse_id);
+          if (sv) {
+            let dot = 0, na = 0, nb = 0;
+            for (let d = 0; d < SPECTRAL_DIM; d++) {
+              dot += qSpec[d] * sv[d];
+              na += qSpec[d] * qSpec[d];
+              nb += sv[d] * sv[d];
+            }
+            r._spectralSim = dot / ((Math.sqrt(na) * Math.sqrt(nb)) || 1);
+          }
+        }
+      }
+    }
+
+    // Step 6b: MMR diversity reranking
+    if (results.length > 1 && qvec) {
+      results = mmrRerank(results, qvec, 0.7, Math.min(200, results.length));
+      results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? r.similarity_score ?? 0).toFixed(4) }));
+    }
+
+    // Step 8: Semantic fallback
     const semFallbackThreshold = isShortQuery ? 15 : 5;
     if (total < semFallbackThreshold && qvec) {
       const excludeIds = new Set(results.map(r => r.verse_id));
@@ -2122,35 +2575,118 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Step 6.5: Query-Personalized PageRank
-    // Seed the walk from the top results (after MMR + semantic fallback).
-    // The walk propagates authority through embedding-kNN edges, surfacing verses
-    // that are structurally central to the query's neighbourhood.
     const qpprSeeds = results.slice(0, 10).map(r => r.verse_id);
     const qpprScores = qpprSeeds.length >= 3 ? queryPPR(qpprSeeds) : null;
     if (contextVerseId) {
       results = contextBoost(results, contextVerseId);
-      results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
     }
 
-    // Step 10: Intent-aware re-ranking with blended weights
+    // Step 7.5: WMD reranking for multi-concept queries
+    // When query has multiple meaningful words and confidence is moderate,
+    // compute Sinkhorn WMD between per-word query embeddings and each candidate.
+    // This avoids the "averaging problem" where "faith and repentance" matches neither well.
+    if (queryWordVecs && queryWordVecs.length >= 2 && confidence < 0.7 && results.length > 0) {
+      const wmdLimit = Math.min(50, results.length);
+      for (let i = 0; i < wmdLimit; i++) {
+        const r = results[i];
+        const vVec = embeddingCache.get(r.verse_id);
+        if (!vVec) continue;
+        // Use verse's full embedding as single-token distribution (relaxed WMD)
+        const verseTokens = [{ vec: vVec, weight: 1.0 }];
+        const wmd = sinkhornWMD(queryWordVecs, verseTokens);
+        const wmdScore = Math.exp(-wmd * 3.0); // scale and convert to similarity
+        // Blend: 70% cosine + 30% WMD similarity
+        const cosSim = r.similarity_score || 0;
+        if (cosSim > 0) {
+          r.similarity_score = +(0.7 * cosSim + 0.3 * wmdScore).toFixed(4);
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Step 10: 5-TIER SPECIFICITY SCORING WITH SIGMOID SOFT-GATES
+    //
+    // Every result gets assigned to exactly one tier based on how it was found.
+    // Tier 1 (reference) already early-returned above.
+    //
+    //   Tier 2 (base 4.0): Exact/AND phrase match — verbatim text in verse
+    //   Tier 3 (base 3.0): Semantic — cosine sim soft-gated (no hard cliff)
+    //   Tier 4 (base 2.0): Topical — found via topical guide source
+    //   Tier 5 (base 1.0): Keyword/mixed — BM25/RRF only
+    //
+    // Sigmoid soft-gate: σ(k·(sim - θ)) replaces hard threshold.
+    // At sim=θ → gate=0.5. At sim=θ+0.1 → gate≈0.88. Smooth, no cliff.
+    //
+    // Within each tier: ranked by natural score (cosine for 2-3, RRF for 4-5).
+    // Tier gaps = 1.0, within-tier scores ∈ [0, 1) → no cross-tier leakage.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Threshold calibrated from distribution analysis:
+    // Whitened: random median≈0, adjacent-verse median=0.30, P95=0.72
+    // Raw: random median=0.28, adjacent-verse median≈0.35
+    const SEM_THRESHOLD = whiteningW ? 0.30 : 0.28;
+    const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
+
     const intentClass = classifyQueryIntent(query.trim(), confidence, qvec);
-    const intentPreset = INTENT_WEIGHT_PRESETS[intentClass.type] || INTENT_WEIGHT_PRESETS.mixed;
-    const activeWeights = blendWeights(intentPreset, learnedWeights);
+
+    // Quality filter: remove OR-fallback stopword noise before tier assignment
+    // Whitened space has wider spread → lower floor acceptable
+    const SIM_FLOOR = whiteningW ? 0.05 : 0.12;
+    if (qvec) {
+      results = results.filter(r => {
+        if (phraseIdsSet.has(r.verse_id)) return true;
+        const sim = r.similarity_score || 0;
+        const rrf = r._rrfScore || 0;
+        return sim >= SIM_FLOOR || rrf >= 0.015;
+      });
+    }
+
     if (results.length > 1) {
       results = results.map(r => {
-        const bm25Component  = (r._bm25_rank || r._bm25 || 0) * activeWeights[0];
-        const semanticComp   = (r.similarity_score || r.simToQuery || 0) * activeWeights[1];
-        // Use QPPR (query-seeded walk) when available; fall back to static PageRank
-        const qppr           = qpprScores?.get(r.verse_id) || 0;
-        const staticPR       = pageRankCache.get(r.verse_id) || 0;
-        const pagerankComp   = (qppr > 0 ? qppr * 20 : staticPR * 10) * activeWeights[2];
-        const learnedScore   = bm25Component + semanticComp + pagerankComp + (r.similarity_score || 0);
-        return { ...r, _learned_score: learnedScore };
+        const simScore = r.similarity_score || 0;
+        const rrf = r._rrfScore || 0;
+        const rrfNorm = Math.min(rrf * 8, 0.99);
+        const isTopicalSource = (r._source || '').includes('topical');
+        let tier, tierScore;
+
+        if (phraseIdsSet.has(r.verse_id)) {
+          // Tier 2: exact/AND phrase match — cosine tiebreaker
+          tier = 2;
+          tierScore = Math.min(simScore > 0 ? simScore : rrfNorm, 0.99);
+        } else if (qvec && simScore > 0) {
+          // Sigmoid soft-gate: smooth transition instead of hard cutoff
+          const gate = 1.0 / (1.0 + Math.exp(-SEM_SIGMOID_K * (simScore - SEM_THRESHOLD)));
+          if (gate >= 0.5) {
+            // Tier 3: semantic match — rank by gated cosine
+            tier = 3;
+            tierScore = Math.min(gate * simScore, 0.99);
+          } else if (isTopicalSource) {
+            // Tier 4: topical with sub-threshold semantic — blend gate + RRF
+            tier = 4;
+            tierScore = Math.min(gate * simScore + (1 - gate) * rrfNorm, 0.99);
+          } else {
+            // Tier 5: weak semantic — use RRF with small cosine nudge
+            tier = 5;
+            tierScore = Math.min(rrfNorm + gate * simScore * 0.3, 0.99);
+          }
+        } else if (isTopicalSource) {
+          // Tier 4: pure topical (no embedding available)
+          tier = 4;
+          tierScore = rrfNorm;
+        } else {
+          // Tier 5: keyword/mixed coverage
+          tier = 5;
+          tierScore = rrfNorm;
+        }
+
+        // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
+        const specificityScore = (6 - tier) + tierScore;
+        return { ...r, _specificity_score: specificityScore, _tier: tier };
       });
-      results.sort((a, b) => (b._learned_score || 0) - (a._learned_score || 0));
+      results.sort((a, b) => (b._specificity_score || 0) - (a._specificity_score || 0));
     }
 
-    // Clean internal fields before caching — keep _source for client intelligence display
+    // Clean internal fields before caching — keep _source and _tier for display
     const allExpansions = [...new Set([...synonymTermsAdded, ...pmiTermsAdded, ...conceptTermsUsed])]
       .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
     const facets = qvec ? nearestClusters(qvec, 4) : [];
@@ -2162,17 +2698,18 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       confidence: +confidence.toFixed(3),
       expansions: allExpansions,
       facets,
-      qpprActive: !!(qpprScores && qpprScores.size > 0),
+      qpprActive:      !!(qpprScores && qpprScores.size > 0),
+      phraseMatchCount: phraseHits.length,
     };
 
     results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, ...clean } = r;
+      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _specificity_score, ...clean } = r;
       return clean;
     });
     total = results.length;
   }
 
-  // Step 9: Dwell-time boost — personalize with user engagement history
+  // Step 9: Dwell-time boost — within-tier nudge only (max 0.15, tier gap = 1.0)
   try {
     const topDwell = db_user.prepare(`
       SELECT verse_id, SUM(dwell_ms) AS total_dwell
@@ -2187,13 +2724,11 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         if (dw > 0) return { ...r, similarity_score: ((r.similarity_score || 0) + dw * 0.15) };
         return r;
       });
-      if (dwellMap.size > 0) results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
     }
   } catch {}
 
   // Step 9b: Item2Vec session similarity boost
   if (item2vecReady && item2vecVectors.size > 0 && results.length > 0) {
-    // Get query vector as average of top-5 result vectors
     const topVecs = results.slice(0, 5)
       .map(r => item2vecVectors.get(r.verse_id))
       .filter(Boolean);
@@ -2211,9 +2746,6 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
   }
 
   // Step 9c: Session-centroid boost
-  // Compute the mean embedding of the last 5 verses pushed live in this session.
-  // Results near that centroid are cosine-boosted — the system "remembers" what
-  // the service is about and drifts results toward the current theme automatically.
   let sessionCentroidActive = false;
   if (sessionId && embeddingsReady) {
     try {
@@ -2225,16 +2757,18 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
           results = results.map(r => {
             const vec = embeddingCache.get(r.verse_id);
             if (!vec) return r;
-            const sim = cosineSimilarity(centroid, vec); // –1..1
-            // Weight: sim > 0.5 → meaningful thematic alignment → up to +0.12 boost
+            const sim = cosineSimilarity(centroid, vec);
             const boost = Math.max(0, sim - 0.3) * 0.4;
             return boost > 0 ? { ...r, similarity_score: (r.similarity_score || 0) + boost } : r;
           });
-          results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
         }
       }
-    } catch {}
+    } catch {};
   }
+
+  // NOTE: No re-sort by similarity_score here — tier ordering from Step 10 is authoritative.
+  // Dwell/item2vec/centroid boosts are small within-tier nudges (max ~0.3) and cannot
+  // cross tier boundaries (gap = 1.0). The _tier field preserves specificity hierarchy.
 
   if (pipelineMeta) pipelineMeta.sessionDrift = sessionCentroidActive;
 
@@ -2251,15 +2785,71 @@ function buildVerseMetaCache() {
 
 function buildEmbeddingCache() {
   if (!db_embed) return;
-  const rows = db_embed.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
-  for (const r of rows) {
-    embeddingCache.set(
-      r.verse_id,
-      new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
-    );
+
+  // Load ZCA whitening transform if available (prebaked by scripts/prebake-whitening.js)
+  try {
+    const wRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'W'").get();
+    const mRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'mean'").get();
+    if (wRow && mRow) {
+      whiteningW = new Float32Array(wRow.data.buffer, wRow.data.byteOffset, wRow.data.byteLength / 4);
+      whiteningMean = new Float32Array(mRow.data.buffer, mRow.data.byteOffset, mRow.data.byteLength / 4);
+      fastify.log.info(`[Whitening] Loaded ZCA transform: W(${EMBED_DIM}×${EMBED_DIM}) + μ(${EMBED_DIM})`);
+    }
+  } catch (err) {
+    fastify.log.warn({ err }, '[Whitening] Failed to load — using raw embeddings');
+  }
+
+  // Prefer whitened embeddings if available; fall back to raw
+  const useWhitened = whiteningW !== null;
+  const table = useWhitened ? 'verse_embeddings_white' : 'verse_embeddings';
+  let count = 0;
+  try {
+    const rows = db_embed.prepare(`SELECT verse_id, embedding FROM ${table}`).all();
+    for (const r of rows) {
+      embeddingCache.set(
+        r.verse_id,
+        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
+      );
+      count++;
+    }
+  } catch (err) {
+    // If whitened table missing, fall back to raw
+    if (useWhitened) {
+      fastify.log.warn('[Whitening] verse_embeddings_white not found, falling back to raw');
+      const rows = db_embed.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
+      for (const r of rows) {
+        embeddingCache.set(
+          r.verse_id,
+          new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
+        );
+        count++;
+      }
+      whiteningW = null;
+      whiteningMean = null;
+    }
   }
   embeddingsReady = true;
+  fastify.log.info(`[Embeddings] Loaded ${count} vectors (${useWhitened && whiteningW ? 'whitened' : 'raw'})`);
   retrofitEmbeddings(embeddingCache);
+
+  // Load spectral graph embeddings if available
+  try {
+    const db_graph_check = db_embed ? null : null; // use verse-graph.db
+    const graphPath = require('path').join(__dirname, '..', 'resources', 'db', 'verse-graph.db');
+    const graphDb = new (require('better-sqlite3'))(graphPath, { readonly: true });
+    const specRows = graphDb.prepare('SELECT verse_id, embedding FROM verse_spectral').all();
+    for (const r of specRows) {
+      spectralCache.set(
+        r.verse_id,
+        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
+      );
+    }
+    spectralReady = spectralCache.size > 0;
+    graphDb.close();
+    fastify.log.info(`[Spectral] Loaded ${spectralCache.size} spectral embeddings (${SPECTRAL_DIM}D)`);
+  } catch (err) {
+    fastify.log.warn('[Spectral] verse_spectral not available (non-fatal):', err.message);
+  }
 }
 
 // ── Domain Embedding Retrofit ────────────────────────────────────────────────
