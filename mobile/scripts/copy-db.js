@@ -26,6 +26,14 @@ const EXCLUDE = new Set([
   'japanese-scriptures-sqlite.db',
   'nrsvue-scriptures-sqlite.db',
   'waray-scriptures-sqlite.db',
+  // Heavy intelligence DBs — too large for mobile WebView memory (>45MB each)
+  // These are available on the backend server; mobile uses lite search instead.
+  'verse-embeddings.db',     // 166MB — semantic embeddings
+  'search-graph.db',         // 94MB  — graph-based ranking
+  'verse-summaries.db',      // 89MB  — verse-level summaries
+  'verse-tags.db',           // 73MB  — verse tagging
+  'verse-cross-refs.db',     // 45MB  — cross references
+  'footnotes-lds-summaries.db', // 17MB — footnotes
 ]);
 
 const dbFiles = readdirSync(SRC).filter(f => f.endsWith('.db') && !EXCLUDE.has(f));
