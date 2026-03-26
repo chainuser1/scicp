@@ -94,6 +94,9 @@ jobs:
       - name: Build frontend
         run: npm run build --workspace=frontend
 
+      - name: Sync backend runtime deps for Electron bundle
+        run: node scripts/sync-electron-deps.js
+
       - name: Verify native module
         run: ls electron/node_modules/better-sqlite3/build/Release/*.node
 

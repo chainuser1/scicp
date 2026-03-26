@@ -15,26 +15,36 @@ export function setServerUrl(url) {
 
 export function getServerUrl() { return _baseUrl; }
 
-async function api(path, fallback) {
+async function api(path, fallback, timeoutMs = 6000) {
   if (!_baseUrl) return fallback;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${_baseUrl}${path}`);
+    const res = await fetch(`${_baseUrl}${path}`, { signal: controller.signal });
+    clearTimeout(timer);
     if (!res.ok) return fallback;
     return await res.json();
   } catch {
+    clearTimeout(timer);
     return fallback;
   }
 }
 
 // ── Search ──────────────────────────────────────────────────────────────────
 
-export async function search(query, page = 0, pageSize = 10, language = 'en') {
+export async function search(query, page = 0, pageSize = 10, language = 'en', cursor = null) {
+  const qs = new URLSearchParams({
+    q: query,
+    page: String(page),
+    pageSize: String(pageSize),
+    language,
+  });
+  if (cursor) qs.set('cursor', cursor);
   return api(
-    `/search?q=${encodeURIComponent(query)}&page=${page}&pageSize=${pageSize}&language=${language}`,
+    `/search?${qs}`,
     { results: [], total: 0, page, pageSize }
   );
 }
-// Note: actual search goes through socket.emit('search') — this is a fallback.
 
 // ── Browse ──────────────────────────────────────────────────────────────────
 

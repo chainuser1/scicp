@@ -220,6 +220,7 @@ export default function ScriptureReader({ onExit }) {
   const emitReadingEvent = useCallback(async (verse, dwellMs = 0, eventType = 'read') => {
     try {
       const base = (serverUrl) ? String(serverUrl).replace(/\/+$/, '') : '';
+      if (!base) return; // skip when no server URL (pure offline)
       const payload = {
         verse_id: verse.verse_id,
         book_id: verse.book_id,
