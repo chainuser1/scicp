@@ -40,8 +40,9 @@ const PLATFORM_META = [
     platform: 'android',
     category: 'mobile',
     icon: '📱',
-    note: 'Phones and tablets · Requires internet',
-    guide: ['Download the app file.', 'Tap it and allow installation when prompted.', 'Open and begin presenting scriptures.'],
+    note: 'Phones and tablets · Coming soon',
+    guide: ['Android version is currently in development.', 'Check back for updates on availability.'],
+    comingSoon: true,
   },
   {
     label: 'iOS',
@@ -308,8 +309,7 @@ export default function Download() {
             )}
             {activeTab === 'mobile' && (
               <p className="dl-capability-note">
-                Mobile apps connect to the Scriptures in View server for search, scripture data, 
-                and real-time projection. An internet connection is required.
+                Mobile apps for both Android and iOS are coming soon.
               </p>
             )}
 
