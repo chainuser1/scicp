@@ -71,7 +71,7 @@ export default function QrScanner({ onCode, onClose }) {
               return;
             }
           }
-        }
+        }  
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
@@ -99,11 +99,20 @@ export default function QrScanner({ onCode, onClose }) {
               <div className="qr-reticle">
                 <span /><span /><span /><span />
               </div>
+              <div className="qr-status">
+                <span className="qr-status-dot" />
+                <span className="qr-status-dot" />
+                <span className="qr-status-dot" />
+              </div>
             </>
           )}
         </div>
         <p className="text-xs text-dim text-center" style={{ marginTop: 8 }}>
           {error || status}
+          {/* report an issue by email to  lumpsam47@gmail.com or submit a new issue at https://github.com/chainuser1/scicp/issues/new */}
+          <a className="text-primary" href="https://github.com/chainuser1/scicp/issues/new" target="_blank" rel="noreferrer">
+            Submit an issue
+          </a>
         </p>
       </div>
     </div>
