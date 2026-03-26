@@ -1,4 +1,4 @@
-import { useConnectionState } from '../hooks/useSocket';
+import { useConnectionState, useQueueLength } from '../hooks/useSocket';
 import './StatusHeader.css';
 
 export default function StatusHeader({
@@ -10,6 +10,7 @@ export default function StatusHeader({
   onMenuOpen,
 }) {
   const conn = useConnectionState();
+  const queueLen = useQueueLength();
 
   const verseRef = liveVerse
     ? liveVerse.verse_title || `${liveVerse.book_title || ''} ${liveVerse.chapter_number || ''}:${liveVerse.verse_number || ''}`
@@ -25,6 +26,9 @@ export default function StatusHeader({
       <div className="status-right">
         {conn !== 'connected' && (
           <span className={`status-dot ${conn}`} />
+        )}
+        {queueLen > 0 && (
+          <span className="queue-badge" title={`${queueLen} queued`}>⏳ {queueLen}</span>
         )}
         <span className={`live-badge ${isLive ? 'live-badge-on' : 'live-badge-off'}`}>
           {isLive ? '● live' : 'not live'}

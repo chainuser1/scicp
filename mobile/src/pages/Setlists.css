@@ -216,6 +216,46 @@
   padding: 8px 0 0;
 }
 
+/* ── Note button & textarea ── */
+.sl-item-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+.sl-note-btn {
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.875rem;
+  padding: 4px 6px;
+  opacity: 0.4;
+  transition: opacity var(--transition);
+}
+.sl-note-btn:active,
+.sl-note-btn-active {
+  opacity: 1;
+  color: var(--gold);
+}
+.sl-note-textarea {
+  width: 100%;
+  margin-top: 2px;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  font-family: inherit;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  resize: vertical;
+  min-height: 48px;
+}
+.sl-note-textarea::placeholder {
+  color: var(--text-dim);
+}
+.sl-note-textarea:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
 /* ── Create form ── */
 .sl-create-form {
   display: flex;

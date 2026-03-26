@@ -307,3 +307,73 @@
 }
 .announcement-send:active { background: #c0392b; transform: scale(0.98); }
 .announcement-send:disabled { opacity: 0.4; }
+
+/* ── Chapter Context Sheet (reader overlay styles for presenter) ── */
+.preview-page .rd-lp-overlay {
+  --rd-sheet: var(--surface-2);
+  --rd-border: var(--surface-3);
+  --rd-accent: var(--gold);
+  --rd-fg: var(--text-primary);
+  --rd-dim: var(--text-dim);
+  --rd-muted: var(--text-dim);
+  --rd-surface: var(--surface);
+  --rd-surface-2: var(--surface-2);
+}
+.preview-page .rd-lp-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 500;
+  display: flex;
+  align-items: flex-end;
+  animation: fadeIn 0.15s ease-out;
+}
+.preview-page .rd-lp-sheet {
+  width: 100%;
+  background: var(--rd-sheet);
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 16px);
+  animation: slideUp 0.25s ease-out;
+}
+.preview-page .rd-lp-handle {
+  width: 32px;
+  height: 4px;
+  background: var(--rd-border);
+  border-radius: 2px;
+  margin: 0 auto 12px;
+}
+.preview-page .rd-lp-ref {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--rd-accent);
+  text-align: center;
+  margin-bottom: 14px;
+}
+.preview-page .rd-section-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--rd-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 16px 16px 8px;
+}
+.preview-page .rd-topic-chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 16px 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.preview-page .rd-topic-chips::-webkit-scrollbar { display: none; }
+.preview-page .rd-topic-chip {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  background: var(--rd-surface);
+  color: var(--rd-fg);
+  border: 1px solid var(--rd-border);
+  white-space: nowrap;
+}

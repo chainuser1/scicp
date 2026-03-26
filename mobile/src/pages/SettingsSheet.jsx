@@ -38,6 +38,7 @@ export default function SettingsSheet({ session, onClose }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [language, setLanguage] = useState(() => localStorage.getItem('scicp_language') || 'en');
+  const [secondaryLanguage, setSecondaryLanguage] = useState(() => localStorage.getItem('scicp_secondary_language') || '');
   const [transition, setTransition] = useState('Fade');
   const [layout, setLayout] = useState('Centered');
   const [activeBg, setActiveBg] = useState(0);
@@ -79,7 +80,24 @@ export default function SettingsSheet({ session, onClose }) {
   const handleLanguage = (code) => {
     setLanguage(code);
     localStorage.setItem('scicp_language', code);
-    if (sessionId) socket.emit('update-language', { sessionId, language: code });
+    if (sessionId) socket.emit('update-language', { sessionId, language: code, secondaryLanguage: secondaryLanguage || null });
+  };
+
+  const handleSecondaryLanguage = (code) => {
+    setSecondaryLanguage(code);
+    localStorage.setItem('scicp_secondary_language', code);
+    if (sessionId) socket.emit('update-language', { sessionId, language, secondaryLanguage: code || null });
+  };
+
+  const handleSwapLanguages = () => {
+    if (!secondaryLanguage) return;
+    const prev = language;
+    const prevSec = secondaryLanguage;
+    setLanguage(prevSec);
+    setSecondaryLanguage(prev);
+    localStorage.setItem('scicp_language', prevSec);
+    localStorage.setItem('scicp_secondary_language', prev);
+    if (sessionId) socket.emit('update-language', { sessionId, language: prevSec, secondaryLanguage: prev || null });
   };
 
   const emitTheme = (partial) => {
@@ -152,6 +170,39 @@ export default function SettingsSheet({ session, onClose }) {
                 key={l.code}
                 className={`ss-pill ${language === l.code ? 'ss-pill-active' : ''}`}
                 onClick={() => handleLanguage(l.code)}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Secondary Language ── */}
+        <section className="ss-section">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h3 className="ss-label" style={{ margin: 0 }}>SECONDARY LANGUAGE</h3>
+            <button
+              className="ss-pill"
+              onClick={handleSwapLanguages}
+              disabled={!secondaryLanguage}
+              title="Swap primary ↔ secondary"
+              style={{ fontSize: 14, padding: '2px 8px' }}
+            >
+              🌐
+            </button>
+          </div>
+          <div className="ss-pill-row">
+            <button
+              className={`ss-pill ${secondaryLanguage === '' ? 'ss-pill-active' : ''}`}
+              onClick={() => handleSecondaryLanguage('')}
+            >
+              Off
+            </button>
+            {LANGUAGES.map(l => (
+              <button
+                key={l.code}
+                className={`ss-pill ${secondaryLanguage === l.code ? 'ss-pill-active' : ''}`}
+                onClick={() => handleSecondaryLanguage(l.code)}
               >
                 {l.label}
               </button>

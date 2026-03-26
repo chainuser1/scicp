@@ -11,6 +11,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSocketEvent } from '../hooks/useSocket';
 import { addToast } from '../hooks/useToast';
 import socket, { SERVER_URL } from '../socket';
+import ChapterContextSheet from '../components/reader/ChapterContextSheet';
 import './Preview.css';
 
 export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse, sessionId, addToHistory }) {
@@ -27,6 +28,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
   const [autoAdvanceMs, setAutoAdvanceMs] = useState(5000);
   const adjacentAbortRef = useRef(null);
   const autoTimerRef = useRef(null);
+  const [chapterCtxId, setChapterCtxId] = useState(null);
 
   const displayVerse = liveVerse || staged;
   const segments = displayVerse?.segments || [];
@@ -95,7 +97,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
     if (!staged && !displayVerse) return;
     if (!sessionId) { addToast('Join a session first', 'error'); return; }
     const v = staged || displayVerse;
-    socket.emit('go-live', { sessionId, verseData: v, language: localStorage.getItem('scicp_language') || 'en' });
+    socket.emit('go-live', { sessionId, verseData: v, language: localStorage.getItem('scicp_language') || 'en', secondaryLanguage: localStorage.getItem('scicp_secondary_language') || null });
     setLiveVerse(v);
     setCurrentSegment(0);
     setIsCustomLive(false);
@@ -156,7 +158,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
     if (!sessionId || !customText.trim()) return;
     let theme;
     try { theme = JSON.parse(localStorage.getItem('scicp.display_prefs_v1'))?.theme; } catch { /* ignore */ }
-    socket.emit('go-custom', { sessionId, text: customText.trim(), subtext: customSubtext.trim() || undefined, theme });
+    socket.emit('go-custom', { sessionId, text: customText.trim(), subtext: customSubtext.trim() || undefined, theme, secondaryLanguage: localStorage.getItem('scicp_secondary_language') || null });
     setIsCustomLive(true);
     addToast('Sent to screen!', 'success');
   }, [sessionId, customText, customSubtext]);
@@ -253,6 +255,11 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
           <button className={`context-toggle ${contextOn ? 'context-toggle-on' : ''}`} onClick={() => setContextOn(!contextOn)}>
             {contextOn ? 'ON' : 'OFF'}
           </button>
+          {displayVerse?.chapter_id && (
+            <button className="context-toggle" onClick={() => setChapterCtxId(displayVerse.chapter_id)} title="Chapter info">
+              ℹ
+            </button>
+          )}
           <span className="context-lang">KJV</span>
         </div>
         {contextOn && adjacentVerses.length > 0 && (
@@ -316,6 +323,15 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
           ▶ SEND TO SCREEN
         </button>
       </section>
+
+      {chapterCtxId && (
+        <ChapterContextSheet
+          chapterId={chapterCtxId}
+          bookTitle={displayVerse?.book_title || ''}
+          chapterNumber={displayVerse?.chapter_number || ''}
+          onClose={() => setChapterCtxId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 // Mock useSocket hooks
 vi.mock('../../hooks/useSocket', () => ({
   useConnectionState: () => 'connected',
+  useQueueLength: () => 0,
 }));
 
 import StatusHeader from '../../components/StatusHeader';

@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { SERVER_URL } from '../socket';
 import socket from '../socket';
 import { addToast } from '../hooks/useToast';
+import { useNotes } from '../hooks/useNotes';
 import './Setlists.css';
 
 export default function SetlistsPage({ onStage, onGoLive, sessionId, liveVerse, staged, setStaged }) {
@@ -16,6 +17,8 @@ export default function SetlistsPage({ onStage, onGoLive, sessionId, liveVerse, 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const touchStartRef = useRef(null);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const { getNote, setNote, hasNote } = useNotes();
 
   const fetchSetlists = useCallback(async () => {
     try {
@@ -183,23 +186,42 @@ export default function SetlistsPage({ onStage, onGoLive, sessionId, liveVerse, 
           <div className="sl-items">
             {items.map((item, i) => {
               const isLive = liveVerseId && ((item.verse_id || item.id) === liveVerseId);
+              const verseKey = String(item.verse_id || item.id);
+              const noteOpen = editingNoteId === verseKey;
               return (
-                <div
-                  key={i}
-                  className={`sl-item ${isLive ? 'sl-item-live' : ''}`}
-                  onClick={() => onStage(item)}
-                  onTouchStart={(e) => handleTouchStart(e, i)}
-                  onTouchEnd={handleTouchEnd}
-                >
-                  <span className="sl-item-num">{i + 1}</span>
-                  <span className="sl-item-ref">{title(item)}</span>
-                  {isLive && <span className="sl-live-badge">◆ live</span>}
-                  <button
-                    className="sl-item-live-dot"
-                    onClick={(e) => { e.stopPropagation(); goLiveItem(item); }}
+                <div key={i} className="sl-item-wrapper">
+                  <div
+                    className={`sl-item ${isLive ? 'sl-item-live' : ''}`}
+                    onClick={() => onStage(item)}
+                    onTouchStart={(e) => handleTouchStart(e, i)}
+                    onTouchEnd={handleTouchEnd}
                   >
-                    <span className="dot-red" />
-                  </button>
+                    <span className="sl-item-num">{i + 1}</span>
+                    <span className="sl-item-ref">{title(item)}</span>
+                    {isLive && <span className="sl-live-badge">◆ live</span>}
+                    <button
+                      className={`sl-note-btn ${hasNote(verseKey) ? 'sl-note-btn-active' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); setEditingNoteId(noteOpen ? null : verseKey); }}
+                      aria-label="Toggle note"
+                    >✎</button>
+                    <button
+                      className="sl-item-live-dot"
+                      onClick={(e) => { e.stopPropagation(); goLiveItem(item); }}
+                    >
+                      <span className="dot-red" />
+                    </button>
+                  </div>
+                  {noteOpen && (
+                    <textarea
+                      className="sl-note-textarea"
+                      placeholder="Private note…"
+                      value={getNote(verseKey)}
+                      onChange={(e) => setNote(verseKey, e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      rows={2}
+                      autoFocus
+                    />
+                  )}
                 </div>
               );
             })}

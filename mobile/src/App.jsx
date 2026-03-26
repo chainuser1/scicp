@@ -107,6 +107,7 @@ function PresenterApp() {
     socket.emit('go-live', {
       verse,
       language: localStorage.getItem('scicp_language') || 'en',
+      secondaryLanguage: localStorage.getItem('scicp_secondary_language') || null,
     });
     historyHook.addToHistory(verse);
     addToast(
