@@ -60,12 +60,11 @@ const LAYOUTS = [
 export default function SettingsPage({ session }) {
   const {
     sessionId, sessionLabel, viewerCount,
-    createSession, joinSession, leaveSession,
-    isConnected, connectionState,
+    joinSession, leaveSession,
+    isConnected, connectionState, error,
   } = session;
 
   const [joinId, setJoinId] = useState('');
-  const [newLabel, setNewLabel] = useState('');
   const [language, setLanguage] = useState('en');
   const [secondaryLanguage, setSecondaryLanguage] = useState('');
   const [pin, setPin] = useState('');
@@ -84,27 +83,11 @@ export default function SettingsPage({ session }) {
   const qrCanvasRef = useRef(null);
   const leaveTimerRef = useRef(null);
 
-  // Auto-session: create session on first connect if none exists
-  useEffect(() => {
-    if (isConnected && !sessionId) {
-      const saved = localStorage.getItem('scicp_session_id');
-      if (!saved) {
-        createSession();
-        addToast('Auto-created session', 'info');
-      }
-    }
-  }, [isConnected, sessionId, createSession]);
-
   // Takeover alert
   useSocketEvent('presenter-takeover-attempt', (data) => {
     setTakeoverAlert(data);
     addToast('⚠️ Another presenter is trying to take over!', 'error');
   });
-
-  const handleCreate = () => {
-    createSession(newLabel.trim() || undefined);
-    setNewLabel('');
-  };
 
   const handleJoin = (id) => {
     const sid = (id || joinId).trim();
@@ -274,44 +257,39 @@ export default function SettingsPage({ session }) {
             </div>
           </div>
         ) : (
-          <div className="settings-session-actions">
-            <div className="card">
-              <p className="text-sm font-medium" style={{ marginBottom: 8 }}>Create New Session</p>
-              <input
-                className="input"
-                placeholder="Session label (optional)"
-                value={newLabel}
-                onChange={e => setNewLabel(e.target.value)}
-              />
-              <button className="btn btn-primary" onClick={handleCreate} style={{ marginTop: 8, width: '100%' }}>
-                Create Session
+          <div className="card">
+            <p className="text-sm font-medium" style={{ marginBottom: 4 }}>Connect to a Client</p>
+            <p className="text-xs text-dim" style={{ marginBottom: 10 }}>
+              Scan the QR code on the TV/Client display, or enter the session ID shown on screen.
+            </p>
+            {error && (
+              <p className="text-xs" style={{ color: 'var(--accent-red)', marginBottom: 8 }}>
+                {error}
+              </p>
+            )}
+            <div className="settings-join-btns" style={{ marginBottom: 8 }}>
+              <button className="btn btn-primary" onClick={() => setScannerOpen(true)} style={{ flex: 1 }}>
+                📷 Scan QR Code
               </button>
             </div>
-            <div className="card">
-              <p className="text-sm font-medium" style={{ marginBottom: 8 }}>Join Existing</p>
-              <input
-                className="input"
-                placeholder="Session ID"
-                value={joinId}
-                onChange={e => setJoinId(e.target.value)}
-                style={{ marginBottom: 6 }}
-              />
-              <input
-                className="input"
-                type="password"
-                placeholder="PIN (if required)"
-                value={pin}
-                onChange={e => setPin(e.target.value)}
-              />
-              <div className="settings-join-btns">
-                <button className="btn btn-secondary" onClick={() => handleJoin()} style={{ flex: 1 }}>
-                  Join
-                </button>
-                <button className="btn btn-primary" onClick={() => setScannerOpen(true)} style={{ flex: 1 }}>
-                  📷 Scan QR
-                </button>
-              </div>
-            </div>
+            <p className="text-xs text-dim" style={{ textAlign: 'center', margin: '6px 0' }}>or enter manually</p>
+            <input
+              className="input"
+              placeholder="Session ID from TV screen"
+              value={joinId}
+              onChange={e => setJoinId(e.target.value)}
+              style={{ marginBottom: 6 }}
+            />
+            <input
+              className="input"
+              type="password"
+              placeholder="PIN (if required)"
+              value={pin}
+              onChange={e => setPin(e.target.value)}
+            />
+            <button className="btn btn-secondary" onClick={() => handleJoin()} style={{ width: '100%', marginTop: 8 }}>
+              Join Session
+            </button>
           </div>
         )}
       </section>

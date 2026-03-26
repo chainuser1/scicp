@@ -1,5 +1,12 @@
 /**
  * useSocket.js — React hooks for Socket.IO connection state and events.
+ *
+ * Session model:
+ * - Only the Client (TV app) creates sessions via create-client-session
+ * - Presenters (mobile) join sessions by scanning QR or entering session ID
+ * - On leave: session code wiped from localStorage, reconnection impossible
+ * - On session-error (expired/not-found): auto-wipe stored session, prompt re-scan
+ * - On reconnect after network drop: attempt rejoin; if server expired it, auto-wipe
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import socket from '../socket';
@@ -39,7 +46,11 @@ export function useSocketEvent(event, handler) {
   }, [event]);
 }
 
-/** Session management hook */
+/**
+ * Session management hook for the Presenter (mobile) app.
+ * Presenters can only JOIN sessions — never create them.
+ * The Client (TV) creates sessions via create-client-session.
+ */
 export function useSession() {
   const [sessionId, setSessionId] = useState(
     () => localStorage.getItem('scicp_session_id') || ''
@@ -50,13 +61,13 @@ export function useSession() {
   const [error, setError] = useState('');
   const conn = useConnectionState();
 
-  useSocketEvent('session-created', (data) => {
-    setSessionId(data.sessionId);
-    setSessionLabel(data.label || '');
-    setPresenterToken(data.presenterToken || '');
-    setError('');
-    localStorage.setItem('scicp_session_id', data.sessionId);
-  });
+  const clearSession = useCallback(() => {
+    setSessionId('');
+    setSessionLabel('');
+    setPresenterToken('');
+    setViewerCount(0);
+    localStorage.removeItem('scicp_session_id');
+  }, []);
 
   useSocketEvent('session-joined', (data) => {
     setSessionId(data.sessionId);
@@ -66,34 +77,44 @@ export function useSession() {
     localStorage.setItem('scicp_session_id', data.sessionId);
   });
 
+  // Session error: wipe stored session if not found / expired / locked out
   useSocketEvent('session-error', (data) => {
-    setError(data.message || 'Session error');
+    const msg = data.message || 'Session error';
+    setError(msg);
+    if (msg.includes('not found') || msg.includes('locked-out') || msg.includes('expired')) {
+      clearSession();
+    }
   });
 
+  // Voluntary leave: wipe everything
   useSocketEvent('session-left', () => {
-    setSessionId('');
-    setSessionLabel('');
-    setPresenterToken('');
-    localStorage.removeItem('scicp_session_id');
+    clearSession();
+  });
+
+  // Presenter was removed by client/server (grace period expired)
+  useSocketEvent('presenter-left', () => {
+    clearSession();
   });
 
   useSocketEvent('viewer-count', (data) => {
     setViewerCount(data.count ?? data);
   });
 
-  const createSession = useCallback((label) => {
-    socket.emit('create-session', { label: label || undefined });
-  }, []);
-
   const joinSession = useCallback((id, opts = {}) => {
     socket.emit('join-session', { sessionId: id, role: 'presenter', ...opts });
   }, []);
 
   const leaveSession = useCallback(() => {
-    if (sessionId) socket.emit('leave-session', { sessionId });
-  }, [sessionId]);
+    if (sessionId) {
+      socket.emit('leave-session', { sessionId });
+      // Immediately clear — don't wait for server ack
+      clearSession();
+    }
+  }, [sessionId, clearSession]);
 
-  // Auto-rejoin on reconnect
+  // Auto-rejoin on reconnect (network recovery)
+  // If the session was terminated during the outage, server will respond
+  // with session-error "Session not found" which triggers auto-wipe above
   useEffect(() => {
     if (conn === 'connected' && sessionId) {
       socket.emit('join-session', {
@@ -106,7 +127,7 @@ export function useSession() {
 
   return {
     sessionId, sessionLabel, presenterToken, viewerCount, error,
-    createSession, joinSession, leaveSession,
+    joinSession, leaveSession, clearSession,
     isConnected: conn === 'connected',
     connectionState: conn,
   };
