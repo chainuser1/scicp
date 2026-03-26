@@ -25,6 +25,8 @@ const engine = require('../shared/scripture-engine');
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
 const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
+const ONNX_MODEL_DIR = path.resolve(__dirname, '../resources/onnx');
+const SCRIPTURE_MODEL = 'scripture-minilm';
 // Inside Electron the DBs live in the read-only extraResources — open them
 // as readonly so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
@@ -258,6 +260,29 @@ fastify.get('/db/:filename', async (request, reply) => {
       .header('Content-Length', stat.size)
       .header('Cache-Control', 'public, max-age=86400')
       .send(stream);
+  } catch {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+});
+
+// ── /models/:model/* — serve ONNX model files for mobile @xenova/transformers
+fastify.get('/models/:model/*', async (request, reply) => {
+  const { model } = request.params;
+  if (model !== SCRIPTURE_MODEL) return reply.code(404).send({ error: 'Not found' });
+  const relPath = request.params['*'];
+  if (!relPath || relPath.includes('..')) return reply.code(400).send({ error: 'Bad path' });
+  const filePath = path.join(ONNX_MODEL_DIR, model, relPath);
+  try {
+    const stat = fs.statSync(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+    const ct = ext === '.onnx' ? 'application/octet-stream'
+      : ext === '.json' ? 'application/json'
+      : 'application/octet-stream';
+    return reply
+      .header('Content-Type', ct)
+      .header('Content-Length', stat.size)
+      .header('Cache-Control', 'public, max-age=604800')
+      .send(fs.createReadStream(filePath));
   } catch {
     return reply.code(404).send({ error: 'Not found' });
   }
@@ -2987,6 +3012,21 @@ async function processBatchAsync(pipe, verses, offset) {
 
 async function initEmbeddings() {
   if (!db_embed) return; // no embeddings DB available
+
+  // Helper: load the fine-tuned Scripture-MiniLM ONNX pipeline
+  async function loadScripturePipeline() {
+    const { pipeline, env } = await import('@xenova/transformers');
+    const localModel = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL);
+    const hasLocal = fs.existsSync(path.join(localModel, 'onnx', 'model_quantized.onnx'));
+    if (hasLocal) {
+      env.localModelPath = ONNX_MODEL_DIR;
+      env.allowRemoteModels = false;
+      return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: true });
+    }
+    // Fallback to generic HuggingFace model if local ONNX not available
+    return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+  }
+
   try {
     const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
     const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
@@ -2998,8 +3038,7 @@ async function initEmbeddings() {
       // Load pipeline for semantic search queries (lightweight — model is ~23MB, loads in ~3-5s)
       try {
         fastify.log.info('[Embeddings] Loading pipeline for semantic search…');
-        const { pipeline } = await import('@xenova/transformers');
-        embeddingPipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        embeddingPipe = await loadScripturePipeline();
         fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.');
       } catch (pipeErr) {
         fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
@@ -3013,8 +3052,7 @@ async function initEmbeddings() {
       if (existing > 0) {
         buildEmbeddingCache();
         try {
-          const { pipeline } = await import('@xenova/transformers');
-          embeddingPipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+          embeddingPipe = await loadScripturePipeline();
           fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.');
         } catch (pipeErr) {
           fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
@@ -3024,8 +3062,7 @@ async function initEmbeddings() {
     }
 
     fastify.log.info('[Embeddings] Loading pipeline…');
-    const { pipeline } = await import('@xenova/transformers');
-    const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    const pipe = await loadScripturePipeline();
     embeddingPipe = pipe;
     fastify.log.info('[Embeddings] Pipeline loaded.');
     if (REBUILD_EMBEDDINGS) {
