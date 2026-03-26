@@ -280,7 +280,7 @@ async function emit(event, payload, ackCallback) {
       }
       // Ensure local DBs are ready before searching
       if (!svc.isReady || !svc.isReady()) {
-        try { await svc.init(); } catch {}
+        try { await svc.init(); } catch (e) { console.warn('socket-local: DB init retry failed:', e.message); }
       }
       try {
         const result = await svc.search(query, page, pageSize, language);
@@ -294,6 +294,10 @@ async function emit(event, payload, ackCallback) {
 
     case 'go-live': {
       const { verse, theme, language, secondaryLanguage } = payload || {};
+      if (!verse || !verse.scripture_text) {
+        console.warn('socket-local: go-live called without a valid verse');
+        break;
+      }
       let scriptureText = verse.scripture_text;
       let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
       let bookTitle = verse.book_title;
