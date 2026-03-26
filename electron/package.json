@@ -1,21 +1,21 @@
 {
-    "name": "scriptures-in-view",
-    "version": "2.2.0",
-    "private": true,
-    "description": "Scriptures in View \u2014 Desktop (Electron)",
-    "main": "main.js",
-    "scripts": {
-        "postinstall": "electron-rebuild"
-    },
-    "dependencies": {
-        "better-sqlite3": "^12.6.2",
-        "electron-updater": "^6.3.0"
-    },
-    "devDependencies": {
-        "@electron/rebuild": "^4.0.3",
-        "electron": "^35.7.5"
-    },
-    "author": {
-        "name": "Scriptures in View"
-    }
+  "name": "scriptures-in-view",
+  "version": "2.3.0",
+  "private": true,
+  "description": "Scriptures in View — Desktop (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "electron-rebuild"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "electron-updater": "^6.3.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "electron": "^35.7.5"
+  },
+  "author": {
+    "name": "Scriptures in View"
+  }
 }
