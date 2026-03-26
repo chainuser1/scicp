@@ -28,8 +28,9 @@
     "electron:build:linux": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux; rm -rf $HOME/electron-tmp-build",
     "mobile:dev": "cd mobile && npm run dev",
     "mobile:build": "cd mobile && npm run build",
+    "mobile:build:tv": "cd mobile && VITE_APP_MODE=tv npm run build",
     "mobile:android": "cd mobile && npm run build && npx cap sync android",
-    "mobile:ios": "cd mobile && npm run build && npx cap sync ios"
+    "mobile:android:tv": "cd mobile && VITE_APP_MODE=tv npm run build && npx cap sync android"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

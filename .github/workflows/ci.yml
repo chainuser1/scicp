@@ -50,9 +50,9 @@ jobs:
       - name: Install root dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Install mobile dependencies (lockfile check)
+      - name: Install mobile dependencies
         working-directory: mobile
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --legacy-peer-deps
 
       - name: Rebuild native modules for Node.js
         run: npm rebuild better-sqlite3

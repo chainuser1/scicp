@@ -13,62 +13,16 @@ env:
 
 permissions:
   contents: write
-  packages: read
 
 jobs:
-  # ── Extract DBs from GHCR image (Linux only — shared by Android + iOS) ──
-  fetch-dbs:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract DBs from GHCR image (no LFS bandwidth)
-        run: |
-          if docker pull ghcr.io/${{ github.repository }}:latest 2>/dev/null; then
-            container=$(docker create ghcr.io/${{ github.repository }}:latest)
-            mkdir -p mobile-dbs
-            docker cp "$container:/app/resources/db/." mobile-dbs/
-            docker rm "$container"
-            head -c 6 mobile-dbs/lds-scriptures-sqlite.db | grep -q 'SQLite' \
-              && echo "✓ DBs extracted from GHCR image" \
-              || (echo "ERROR: extracted DB is not valid SQLite" && exit 1)
-          else
-            echo "No GHCR image found — falling back to Git LFS"
-            mkdir -p mobile-dbs
-            git lfs pull
-            cp resources/db/*.db mobile-dbs/
-            head -c 6 mobile-dbs/lds-scriptures-sqlite.db | grep -q 'SQLite' \
-              && echo "✓ DBs extracted from Git LFS" \
-              || (echo "ERROR: LFS fallback also failed — lds-scriptures-sqlite.db is not valid SQLite" && exit 1)
-          fi
-
-      - name: Upload DBs as workflow artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: scicp-mobile-databases
-          path: mobile-dbs/
-          retention-days: 1
-
-  # ── Android APK ─────────────────────────────────────────────────────────
+  # ── Android APKs (Presenter + TV) ──────────────────────────────────────
   android:
-    needs: fetch-dbs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - name: Compute artifact suffix
         run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
-
-      - name: Download DBs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: scicp-mobile-databases
-          path: mobile/public/assets/db/
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -88,12 +42,12 @@ jobs:
       - name: Install root dependencies
         run: npm install --no-audit --no-fund
 
-
       - name: Install mobile dependencies
         working-directory: mobile
         run: npm install --no-audit --no-fund
 
-      - name: Build web assets
+      # ── Presenter APK (default build) ──────────────────────────────────
+      - name: Build Presenter web assets
         working-directory: mobile
         run: npm run build
 
@@ -109,7 +63,7 @@ jobs:
         run: |
           GRADLE="mobile/android/app/build.gradle"
           VERSION=$(node -p "require('./mobile/package.json').version")
-          # versionCode: major*10000 + minor*100 + patch (e.g. 2.2.0 → 20200)
+          # versionCode: major*10000 + minor*100 + patch (e.g. 3.0.0 → 30000)
           IFS='.' read -r MAJ MIN PAT <<< "$VERSION"
           VCODE=$(( MAJ * 10000 + MIN * 100 + PAT ))
           sed -i "s/versionCode [0-9]*/versionCode $VCODE/" "$GRADLE"
@@ -139,7 +93,7 @@ jobs:
             echo "KEYSTORE_AVAILABLE=false" >> $GITHUB_ENV
           fi
 
-      - name: Build Android APK
+      - name: Build Presenter APK
         working-directory: mobile/android
         env:
           KEYSTORE_AVAILABLE: ${{ env.KEYSTORE_AVAILABLE }}
@@ -157,7 +111,7 @@ jobs:
             ./gradlew assembleDebug
           fi
 
-      - name: Version-stamp APK filename
+      - name: Version-stamp Presenter APK
         run: |
           if [ "$KEYSTORE_AVAILABLE" = "true" ]; then
             SRC="mobile/android/app/build/outputs/apk/release/app-release.apk"
@@ -167,84 +121,72 @@ jobs:
           DST="mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk"
           cp "$SRC" "$DST"
 
-      - name: Upload APK
+      # ── TV APK (VITE_APP_MODE=tv) ─────────────────────────────────────
+      - name: Build TV web assets
+        working-directory: mobile
+        run: VITE_APP_MODE=tv npm run build
+
+      - name: Re-sync Capacitor for TV build
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Add Android TV leanback support to manifest
+        run: |
+          MANIFEST="mobile/android/app/src/main/AndroidManifest.xml"
+          # Add leanback and touchscreen uses-feature before closing </manifest>
+          sed -i 's|</manifest>|    <uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n</manifest>|' "$MANIFEST"
+          echo "✓ Android TV leanback support added"
+
+      - name: Build TV APK
+        working-directory: mobile/android
+        env:
+          KEYSTORE_AVAILABLE: ${{ env.KEYSTORE_AVAILABLE }}
+          KEYSTORE_STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_STORE_PASS }}
+          KEYSTORE_KEY_ALIAS: ${{ secrets.ANDROID_KEYSTORE_KEY_ALIAS }}
+          KEYSTORE_KEY_PASS: ${{ secrets.ANDROID_KEYSTORE_KEY_PASS }}
+        run: |
+          if [ "$KEYSTORE_AVAILABLE" = "true" ]; then
+            ./gradlew assembleRelease \
+              -Pandroid.injected.signing.store.file="$(pwd)/app/release.keystore" \
+              -Pandroid.injected.signing.store.password="$KEYSTORE_STORE_PASS" \
+              -Pandroid.injected.signing.key.alias="$KEYSTORE_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$KEYSTORE_KEY_PASS"
+          else
+            ./gradlew assembleDebug
+          fi
+
+      - name: Version-stamp TV APK
+        run: |
+          if [ "$KEYSTORE_AVAILABLE" = "true" ]; then
+            SRC="mobile/android/app/build/outputs/apk/release/app-release.apk"
+          else
+            SRC="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
+          fi
+          DST="mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-tv.apk"
+          cp "$SRC" "$DST"
+
+      # ── Upload & Publish ───────────────────────────────────────────────
+      - name: Upload Presenter APK
         uses: actions/upload-artifact@v5
         with:
           name: scriptures-in-view-android-apk-${{ env.ARTIFACT_SUFFIX }}
           path: mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk
           if-no-files-found: warn
 
-      - name: Publish Android APK to GitHub Release
+      - name: Upload TV APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: scriptures-in-view-tv-apk-${{ env.ARTIFACT_SUFFIX }}
+          path: mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-tv.apk
+          if-no-files-found: warn
+
+      - name: Publish APKs to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk
+          files: |
+            mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-android.apk
+            mobile/android/app/build/outputs/apk/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}-tv.apk
           fail_on_unmatched_files: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── iOS Archive ─────────────────────────────────────────────────────────
-  ios:
-    needs: fetch-dbs
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Compute artifact suffix
-        run: echo "ARTIFACT_SUFFIX=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
-
-      - name: Download DBs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: scicp-mobile-databases
-          path: mobile/public/assets/db/
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install root dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Rebuild better-sqlite3 for macOS Node
-        run: npm rebuild better-sqlite3
-
-
-      - name: Install mobile dependencies
-        working-directory: mobile
-        run: npm install --no-audit --no-fund
-
-      - name: Build web assets
-        working-directory: mobile
-        run: npm run build
-
-      - name: Add Capacitor iOS platform
-        working-directory: mobile
-        run: rm -rf ios && npx cap add ios
-
-      - name: Sync Capacitor iOS
-        working-directory: mobile
-        run: npx cap sync ios
-
-      - name: Patch iOS Info.plist — deep link URL scheme + NSCameraUsageDescription
-        run: python3 .github/scripts/patch_ios_plist.py mobile/ios/App/App/Info.plist
-
-      - name: Build iOS archive
-        working-directory: mobile/ios/App
-        run: |
-          xcodebuild archive \
-            -workspace App.xcworkspace \
-            -scheme App \
-            -configuration Release \
-            -archivePath "${{ runner.temp }}/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}.xcarchive" \
-            -destination 'generic/platform=iOS' \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Upload xcarchive
-        uses: actions/upload-artifact@v5
-        with:
-          name: scriptures-in-view-ios-xcarchive-${{ env.ARTIFACT_SUFFIX }}
-          path: ${{ runner.temp }}/scriptures-in-view-${{ env.ARTIFACT_SUFFIX }}.xcarchive
-          if-no-files-found: warn
