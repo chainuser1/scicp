@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import SEO from '../components/SEO';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 const api = async (path) => {
@@ -234,14 +235,6 @@ export default function ScriptureReader({ onExit }) {
   }, [emitReadingEvent, updateReadingPace]);
 
   // ── Offline detection ─────────────────────────────────────────────────────
-  useEffect(() => {
-    document.title = 'Read Scriptures | Scriptures in View';
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogTitle) ogTitle.setAttribute('content', 'Read Scriptures | Scriptures in View');
-    if (ogDesc) ogDesc.setAttribute('content', 'Browse and study scriptures');
-  }, []);
-
   useEffect(() => {
     const on = () => setIsOffline(false);
     const off = () => setIsOffline(true);
@@ -566,6 +559,11 @@ export default function ScriptureReader({ onExit }) {
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <div className={`rd-root${flowMode ? ' rd-flow-mode' : ''}`} style={cssVars}>
+      <SEO
+        title="Read Scriptures"
+        description="Read and study scriptures online with highlights, bookmarks, and five visual themes. Browse the Bible, Book of Mormon, Doctrine and Covenants, and Pearl of Great Price."
+        path="/reader"
+      />
 
       {/* ── HOME SCREEN ── */}
       {screen === 'home' && (

@@ -1,24 +1,15 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 
 export default function Privacy() {
-  useEffect(() => {
-    document.title = "Privacy Policy | Scriptures in View";
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogTitle) ogTitle.setAttribute('content', 'Privacy Policy | Scriptures in View');
-    if (ogDesc) ogDesc.setAttribute('content', 'Privacy policy for Scriptures in View');
-    const metaDesc = document.querySelector('meta[name="description"]');
-    const description = "Privacy policy for Scriptures in View, including location checks for restricted downloads.";
-    if (metaDesc) metaDesc.setAttribute('content', description);
-    const robots = document.querySelector('meta[name="robots"]');
-    if (robots) robots.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
-    canonical.setAttribute('href', 'https://cap-teyyko.live/privacy');
-  }, []);
-
   return (
     <div className="home-page">
+      <SEO
+        title="Privacy Policy"
+        description="Privacy policy for Scriptures in View. We collect minimal data and never sell your information."
+        path="/privacy"
+      />
       <main className="home-hero">
         <div className="home-emblem">
           <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">

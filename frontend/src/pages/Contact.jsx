@@ -1,30 +1,15 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 
 function Contact() {
-  useEffect(() => {
-    document.title = 'Contact | Scriptures in View';
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogTitle) ogTitle.setAttribute('content', 'Contact | Scriptures in View');
-    if (ogDesc) ogDesc.setAttribute('content', 'Get in touch with the Scriptures in View team');
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc) {
-      metaDesc.setAttribute('content', 'Contact Dagami Ward Dev for support and feedback about Scriptures in View.');
-    } else {
-      const meta = document.createElement('meta');
-      meta.name = 'description';
-      meta.content = 'Contact Dagami Ward Dev for support and feedback about Scriptures in View.';
-      document.head.appendChild(meta);
-    }
-    const robotsMeta = document.querySelector('meta[name="robots"]');
-    if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
-    canonical.setAttribute('href', 'https://cap-teyyko.live/contact');
-  }, []);
-
   return (
     <div className="home-page">
+      <SEO
+        title="Contact"
+        description="Contact Dagami Ward Dev for support and feedback about Scriptures in View. Get help with scripture presentation for your ward or family."
+        path="/contact"
+      />
       <main className="home-hero">
         <div className="home-emblem">
           <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">

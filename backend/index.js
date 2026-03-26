@@ -24,6 +24,71 @@ const engine = require('../shared/scripture-engine');
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
+
+// ── SEO: per-route meta tags for server-side injection ──
+// Crawlers (Google, Facebook, Twitter) get correct meta without JS execution.
+const SEO_ROUTES = {
+  '/': {
+    title: 'Scriptures in View | Real-Time Scripture Presentation',
+    description: 'Free real-time scripture presentation for worship services, seminary, and family study. Search 41,000+ verses, project live to displays, and study with Reader Mode.',
+  },
+  '/about': {
+    title: 'About | Scriptures in View',
+    description: 'Learn what Scriptures in View can do for church worship, talks, lessons, and home scripture study. Free real-time scripture presentation for every ward and family.',
+  },
+  '/download': {
+    title: 'Download | Scriptures in View',
+    description: 'Download Scriptures in View for Windows, Mac, Linux, and Android. Desktop apps work fully offline. Free scripture presentation for church and home.',
+  },
+  '/reader': {
+    title: 'Read Scriptures | Scriptures in View',
+    description: 'Read and study scriptures online with highlights, bookmarks, and five visual themes. Browse the Bible, Book of Mormon, Doctrine and Covenants, and Pearl of Great Price.',
+  },
+  '/contact': {
+    title: 'Contact | Scriptures in View',
+    description: 'Contact Dagami Ward Dev for support and feedback about Scriptures in View. Get help with scripture presentation for your ward or family.',
+  },
+  '/privacy': {
+    title: 'Privacy Policy | Scriptures in View',
+    description: 'Privacy policy for Scriptures in View. We collect minimal data and never sell your information.',
+  },
+  '/terms': {
+    title: 'Terms of Service | Scriptures in View',
+    description: 'Terms for using Scriptures in View for non-commercial church and home use. Free scripture presentation for worship services.',
+  },
+};
+let _indexHtmlCache = null;
+function getIndexHtml() {
+  if (_indexHtmlCache) return _indexHtmlCache;
+  try {
+    _indexHtmlCache = fs.readFileSync(path.join(FRONTEND_DIST_DIR, 'index.html'), 'utf8');
+  } catch { _indexHtmlCache = null; }
+  return _indexHtmlCache;
+}
+function injectSeoMeta(html, routePath) {
+  const seo = SEO_ROUTES[routePath];
+  if (!seo) return html;
+  const canon = `https://cap-teyyko.live${routePath === '/' ? '' : routePath}`;
+  // Replace title
+  html = html.replace(/<title>[^<]*<\/title>/, `<title>${seo.title}</title>`);
+  // Replace meta description
+  html = html.replace(
+    /<meta name="description" content="[^"]*"/,
+    `<meta name="description" content="${seo.description}"`
+  );
+  // Replace OG tags
+  html = html.replace(/<meta property="og:title" content="[^"]*"/, `<meta property="og:title" content="${seo.title}"`);
+  html = html.replace(/<meta property="og:description" content="[^"]*"/, `<meta property="og:description" content="${seo.description}"`);
+  html = html.replace(/<meta property="og:url" content="[^"]*"/, `<meta property="og:url" content="${canon}/"`);
+  // Replace Twitter tags
+  html = html.replace(/<meta name="twitter:title" content="[^"]*"/, `<meta name="twitter:title" content="${seo.title}"`);
+  html = html.replace(/<meta name="twitter:description" content="[^"]*"/, `<meta name="twitter:description" content="${seo.description}"`);
+  // Add canonical link if not present
+  if (!html.includes('rel="canonical"')) {
+    html = html.replace('</head>', `  <link rel="canonical" href="${canon}/" />\n  </head>`);
+  }
+  return html;
+}
 const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
 const ONNX_MODEL_DIR = path.resolve(__dirname, '../resources/onnx');
 const SCRIPTURE_MODEL = 'scripture-minilm';
@@ -200,7 +265,14 @@ fastify.register(fastifyStatic, {
 });
 
 fastify.setNotFoundHandler((request, reply) => {
-  reply.sendFile('index.html');
+  const html = getIndexHtml();
+  if (html) {
+    const routePath = request.url.split('?')[0].split('#')[0];
+    const injected = injectSeoMeta(html, routePath);
+    reply.type('text/html').send(injected);
+  } else {
+    reply.sendFile('index.html');
+  }
 });
 
 fastify.get('/health', async () => {

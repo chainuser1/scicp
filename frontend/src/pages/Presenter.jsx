@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket, isRemoteMode } from '../socket';
+import SEO from '../components/SEO';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
@@ -1022,18 +1023,6 @@ const Presenter = () => {
     }).catch(() => showToast('Copy failed — clipboard not available'));
   };
   const activeTourTarget = tourOpen ? presenterTourSteps[tourStep].target : '';
-
-  useEffect(() => {
-    document.title = 'Presenter | Scriptures in View';
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogTitle) ogTitle.setAttribute('content', 'Present | Scriptures in View');
-    if (ogDesc) ogDesc.setAttribute('content', 'Search and present scriptures in real-time');
-    const robotsMeta = document.querySelector('meta[name="robots"]');
-    if (robotsMeta) robotsMeta.setAttribute('content', 'noindex,nofollow');
-    // Remove any canonical — this is an app screen, not a crawlable content page.
-    document.querySelector('link[rel="canonical"]')?.remove();
-  }, []);
 
   useEffect(() => {
     if (window.electronAPI?.getDisplays) {
@@ -2178,6 +2167,7 @@ const Presenter = () => {
   /* ── Render ── */
   return (
     <div className={`presenter-container ${presenterThemeClass} presenter-ui--${presenterUiMode}${(staged || liveVerse) ? ' has-golive-bar' : ''}`} style={{ '--ui-font-size': `${uiFontSize}rem` }}>
+      <SEO title="Presenter" description="Search and present scriptures in real-time." path="/presenter" noindex />
 
       {/* Phase 1: Presenter takeover alert — unobtrusive amber banner */}
       {takeoverAlert && (

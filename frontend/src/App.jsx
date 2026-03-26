@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useState} from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
 
 // Platform detection — download page/card is web-only
@@ -11,6 +11,7 @@ import Terms from './pages/Terms';
 import './App.css';
 import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
+import SEO from './components/SEO';
 import { ToastProvider } from './components/Toast';
 import ConnectionStatus from './components/ConnectionStatus';
 
@@ -62,16 +63,25 @@ function Home() {
     }
   };
 
-  useEffect(() => {
-    document.title = 'Scriptures in View | Real-Time Scripture Presentation';
-    const robotsMeta = document.querySelector('meta[name="robots"]');
-    if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
-    canonical.setAttribute('href', 'https://cap-teyyko.live/');
-  }, []);
 
   return (
     <div className="home-page">
+      <SEO
+        title={null}
+        description="Free real-time scripture presentation for worship services, seminary, and family study. Search 41,000+ verses, project live to displays, and study with Reader Mode."
+        path="/"
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'SoftwareApplication',
+          name: 'Scriptures in View',
+          applicationCategory: 'ReligiousApp',
+          operatingSystem: 'Windows, macOS, Linux, Android, Web',
+          offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+          description: 'Free real-time scripture presentation tool for worship services with intelligent search, multi-language support, and offline desktop apps.',
+          url: 'https://cap-teyyko.live/',
+          image: 'https://cap-teyyko.live/emblem-512.png',
+        }}
+      />
       {/* Hero */}
       <main className="home-hero">
         <div className="home-emblem">
