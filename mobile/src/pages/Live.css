@@ -113,3 +113,41 @@
   font-family: inherit;
 }
 
+/* Auto-advance */
+.auto-advance-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.auto-advance-select {
+  width: auto;
+  min-width: 70px;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+
+/* Highlight colors */
+.highlight-colors {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.highlight-color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-3);
+  transition: all var(--transition);
+}
+.highlight-color-swatch.hc-active {
+  border-color: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,0.3);
+  transform: scale(1.15);
+}
+
+/* VOTD idle */
+.votd-idle {
+  border-left: 3px solid var(--gold);
+}
+

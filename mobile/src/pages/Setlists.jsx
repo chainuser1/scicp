@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SERVER_URL } from '../socket';
+import socket from '../socket';
 import { addToast } from '../hooks/useToast';
 import './Setlists.css';
 
-export default function SetlistsPage({ onStage, bookmarks, toggleBookmark }) {
+export default function SetlistsPage({ onStage, bookmarks, toggleBookmark, sessionId, liveVerseId }) {
   const [setlists, setSetlists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
@@ -38,6 +39,55 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark }) {
     } catch { addToast('Failed to create setlist', 'error'); }
   };
 
+  const deleteSetlist = async (id) => {
+    try {
+      const res = await fetch(`${SERVER_URL}/setlists/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSetlists(prev => prev.filter(s => s.id !== id));
+        addToast('Setlist deleted', 'info');
+      }
+    } catch { addToast('Failed to delete', 'error'); }
+  };
+
+  const updateSetlist = async (id, items) => {
+    try {
+      await fetch(`${SERVER_URL}/setlists/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+    } catch { /* silent */ }
+  };
+
+  const removeItem = (setlistId, itemIdx) => {
+    setSetlists(prev => prev.map(sl => {
+      if (sl.id !== setlistId) return sl;
+      const items = [...(sl.items || [])];
+      items.splice(itemIdx, 1);
+      updateSetlist(sl.id, items);
+      return { ...sl, items };
+    }));
+    addToast('Item removed', 'info');
+  };
+
+  const moveItem = (setlistId, fromIdx, dir) => {
+    setSetlists(prev => prev.map(sl => {
+      if (sl.id !== setlistId) return sl;
+      const items = [...(sl.items || [])];
+      const toIdx = fromIdx + (dir === 'up' ? -1 : 1);
+      if (toIdx < 0 || toIdx >= items.length) return sl;
+      [items[fromIdx], items[toIdx]] = [items[toIdx], items[fromIdx]];
+      updateSetlist(sl.id, items);
+      return { ...sl, items };
+    }));
+  };
+
+  const goLiveFromItem = (item) => {
+    if (!sessionId) { addToast('Join a session first', 'error'); return; }
+    socket.emit('go-live', { sessionId, verseData: item });
+    addToast('Live!', 'success');
+  };
+
   return (
     <div className="setlists-page scroll-area safe-bottom">
       {/* Bookmarks toggle */}
@@ -65,11 +115,7 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark }) {
                     {v.verse_title || `${v.book_title} ${v.chapter_number}:${v.verse_number}`}
                   </span>
                 </button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => toggleBookmark(v)}
-                  title="Remove bookmark"
-                >
+                <button className="btn btn-ghost btn-sm" onClick={() => toggleBookmark(v)} title="Remove bookmark">
                   ✕
                 </button>
               </div>
@@ -103,27 +149,46 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark }) {
 
       {setlists.map(sl => (
         <div key={sl.id} className="card setlist-card">
-          <button
-            className="setlist-header"
-            onClick={() => setExpanded(expanded === sl.id ? null : sl.id)}
-          >
-            <span className="font-semibold">{sl.name}</span>
-            <span className="badge badge-gold">{(sl.items || []).length} verses</span>
-          </button>
+          <div className="setlist-header-row">
+            <button
+              className="setlist-header"
+              onClick={() => setExpanded(expanded === sl.id ? null : sl.id)}
+            >
+              <span className="font-semibold">{sl.name}</span>
+              <span className="badge badge-gold">{(sl.items || []).length}</span>
+            </button>
+            <button className="btn btn-ghost btn-sm sl-delete-btn" onClick={() => deleteSetlist(sl.id)} title="Delete">
+              🗑
+            </button>
+          </div>
           {expanded === sl.id && (
             <div className="setlist-items">
               {(sl.items || []).length === 0 && (
                 <p className="text-xs text-dim" style={{ padding: '8px 0' }}>Empty setlist</p>
               )}
-              {(sl.items || []).map((item, i) => (
-                <button
-                  key={i}
-                  className="setlist-item"
-                  onClick={() => onStage(item)}
-                >
-                  <span className="text-sm text-gold">{item.verse_title || item.reference}</span>
-                </button>
-              ))}
+              {(sl.items || []).map((item, i) => {
+                const isLive = liveVerseId && (item.verse_id === liveVerseId || item.id === liveVerseId);
+                return (
+                  <div key={i} className={`setlist-item-row ${isLive ? 'sl-item-live' : ''}`}>
+                    <div className="sl-reorder">
+                      <button className="sl-move-btn" onClick={() => moveItem(sl.id, i, 'up')} disabled={i === 0}>▲</button>
+                      <button className="sl-move-btn" onClick={() => moveItem(sl.id, i, 'down')} disabled={i === (sl.items || []).length - 1}>▼</button>
+                    </div>
+                    <button className="setlist-item" onClick={() => onStage(item)} style={{ flex: 1 }}>
+                      <span className="text-sm text-gold">
+                        {item.verse_title || item.reference || `Verse ${i + 1}`}
+                      </span>
+                      {isLive && <span className="badge badge-green" style={{ marginLeft: 6 }}>LIVE</span>}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => goLiveFromItem(item)} title="Go Live">
+                      🔴
+                    </button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => removeItem(sl.id, i)} title="Remove">
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

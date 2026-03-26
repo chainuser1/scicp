@@ -137,3 +137,16 @@
   accent-color: var(--gold);
   margin-top: 4px;
 }
+
+/* Custom background URL */
+.custom-bg-row {
+  display: flex;
+  gap: 8px;
+}
+.custom-bg-row .input { flex: 1; min-height: 36px; padding: 8px 12px; }
+
+/* Takeover alert */
+.takeover-alert {
+  border-left: 3px solid var(--accent-red);
+  animation: slideDown 0.3s ease-out;
+}
