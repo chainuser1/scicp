@@ -104,7 +104,13 @@ jobs:
         run: test -f frontend/dist/index.html || (echo "Frontend build failed" && exit 1)
 
       - name: Build Electron (${{ matrix.platform }})
-        run: npx electron-builder --${{ matrix.platform }} --publish never
+        run: |
+          # fpm stages the entire unpacked app in TMPDIR — default /tmp (tmpfs) can be too small (~2.4GB)
+          # Point TMPDIR to HOME which has full disk space; clean up afterwards
+          export TMPDIR="$HOME/electron-tmp-build"
+          mkdir -p "$TMPDIR"
+          npx electron-builder --${{ matrix.platform }} --publish never
+          rm -rf "$TMPDIR"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
