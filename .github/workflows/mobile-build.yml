@@ -42,6 +42,9 @@ jobs:
             mkdir -p mobile-dbs
             git lfs pull
             cp resources/db/*.db mobile-dbs/
+            head -c 6 mobile-dbs/lds-scriptures-sqlite.db | grep -q 'SQLite' \
+              && echo "✓ DBs extracted from Git LFS" \
+              || (echo "ERROR: LFS fallback also failed — lds-scriptures-sqlite.db is not valid SQLite" && exit 1)
           fi
 
       - name: Upload DBs as workflow artifact

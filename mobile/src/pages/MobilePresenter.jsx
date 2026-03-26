@@ -360,6 +360,9 @@ const MobilePresenter = () => {
   const [pinInput, setPinInput]             = useState('');
   const [pinError, setPinError]             = useState('');
   const [pendingPinSession, setPendingPinSession] = useState('');
+  const [myPinOpen, setMyPinOpen]           = useState(false);
+  const [myPinInput, setMyPinInput]         = useState('');
+  const [myPinSet, setMyPinSet]             = useState(false);
   const [connectionState, setConnectionState] = useState(isOnline ? 'connecting' : 'connected');
   const [queuedCount, setQueuedCount]       = useState(0);
   const rejoinInFlightRef = useRef(false);
@@ -999,6 +1002,11 @@ const MobilePresenter = () => {
     socket.on('presenter-takeover-attempt', onTakeover);
     socket.on('presenter-evicted', onEvicted);
 
+    const onPinSet = () => setMyPinSet(true);
+    const onPinCleared = () => setMyPinSet(false);
+    socket.on('session-pin-set', onPinSet);
+    socket.on('session-pin-cleared', onPinCleared);
+
     const prevViewerCount = { current: 0 };
     const onViewerCount = ({ count }) => {
       if (count > 0 && prevViewerCount.current === 0) {
@@ -1019,6 +1027,8 @@ const MobilePresenter = () => {
       socket.off('reconnect_attempt', onReconnecting);
       socket.off('presenter-takeover-attempt', onTakeover);
       socket.off('presenter-evicted', onEvicted);
+      socket.off('session-pin-set', onPinSet);
+      socket.off('session-pin-cleared', onPinCleared);
       socket.off('viewer-count', onViewerCount);
       if (unsubQueue) unsubQueue();
     };
@@ -2240,6 +2250,42 @@ const MobilePresenter = () => {
       </div>
     )}
 
+    {/* ── My Session PIN modal ── */}
+    {myPinOpen && (
+      <div className="pin-modal-backdrop" onClick={() => setMyPinOpen(false)}>
+        <div className="pin-modal" onClick={e => e.stopPropagation()}>
+          <h3 className="pin-modal-title">🔒 Session PIN</h3>
+          <p style={{ fontSize: '0.82rem', color: '#aaa', marginBottom: '0.75rem' }}>
+            Require viewers to enter a PIN before joining your session.
+          </p>
+          <input
+            type="number"
+            className="pin-modal-input"
+            placeholder="4–8 digit PIN"
+            value={myPinInput}
+            onChange={e => setMyPinInput(e.target.value.slice(0, 8))}
+            onKeyDown={e => e.key === 'Enter' && myPinInput.length >= 4 && (socket.emit('set-session-pin', { pin: myPinInput }), setMyPinOpen(false))}
+            autoFocus
+          />
+          <div className="pin-modal-actions">
+            {myPinSet && (
+              <button className="pin-modal-clear" onClick={() => { socket.emit('clear-session-pin'); setMyPinOpen(false); }}>
+                Remove PIN
+              </button>
+            )}
+            <button onClick={() => setMyPinOpen(false)}>Cancel</button>
+            <button
+              className="pin-modal-submit"
+              onClick={() => { socket.emit('set-session-pin', { pin: myPinInput }); setMyPinOpen(false); }}
+              disabled={myPinInput.length < 4}
+            >
+              Set PIN
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {/* ── Language download toast ── */}
     {activeDownload && (
       <div className="lang-download-toast">
@@ -2759,6 +2805,16 @@ const MobilePresenter = () => {
                       Switch Mode
                     </button>
                   </div>
+                  {sessionJoined && (
+                    <div className="mobile-menu-row" style={{ marginTop: '0.35rem' }}>
+                      <button
+                        className={`theme-btn${myPinSet ? ' theme-btn--danger' : ''}`}
+                        onClick={() => { setMyPinInput(''); setMyPinOpen(true); setMobileMenuOpen(false); }}
+                      >
+                        {myPinSet ? '🔒 Change/Clear PIN' : '🔓 Set Session PIN'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}

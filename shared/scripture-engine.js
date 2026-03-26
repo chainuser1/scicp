@@ -503,14 +503,15 @@ function browseChapters(db, bookId) {
   `).all(Number(bookId));
 }
 
-function browseVerses(db, chapterId) {
+function browseVerses(db, chapterId, { limit = 500, offset = 0 } = {}) {
   return db.prepare(`
     SELECT verse_id, book_id, chapter_id, book_title, chapter_number, verse_number,
            scripture_text, verse_title, volume_id, volume_title, volume_short_title
     FROM scriptures
     WHERE chapter_id = ?
     ORDER BY verse_number
-  `).all(Number(chapterId));
+    LIMIT ? OFFSET ?
+  `).all(Number(chapterId), limit, offset);
 }
 
 // ── FTS initialization ──────────────────────────────────────────────────────
