@@ -5,7 +5,7 @@
 .qr-viewport {
   position: relative;
   width: 100%;
-  aspect-ratio: 4/3;
+  aspect-ratio: 1/1;
   background: #000;
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -17,13 +17,33 @@
   object-fit: cover;
 }
 
+.qr-status {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+.qr-status-dot {
+  width: 10px;
+  height: 10px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 50%;
+  animation: qrPulse 1.5s ease infinite;
+}
+.qr-status-dot:nth-child(2) { animation-delay: 0.3s; }
+.qr-status-dot:nth-child(3) { animation-delay: 0.6s; }
+@keyframes qrPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.2; } }
+
+
 .qr-canvas {
   display: none;
 }
 
 .qr-reticle {
   position: absolute;
-  inset: 20%;
+  inset: 12%;
   border: 2px solid rgba(201, 168, 76, 0.6);
   border-radius: 12px;
   pointer-events: none;

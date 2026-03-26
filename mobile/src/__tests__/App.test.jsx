@@ -24,15 +24,23 @@ vi.mock('socket.io-client', () => {
 import App from '../App';
 
 describe('App', () => {
-  it('renders presenter mode by default', () => {
-    render(<App />);
-    expect(screen.getByText('Search')).toBeTruthy();
-    expect(screen.getByText('Live')).toBeTruthy();
-    expect(screen.getByText('Settings')).toBeTruthy();
+  it('renders Home tab by default', () => {
+    const { container } = render(<App />);
+    // Home page has hero title with class
+    expect(container.querySelector('.home-title-m')).toBeTruthy();
+    expect(container.textContent).toContain('Endures');
   });
 
-  it('renders search placeholder', () => {
+  it('renders root tab bar with 4 tabs', () => {
     render(<App />);
-    expect(screen.getByPlaceholderText('Search scriptures…')).toBeTruthy();
+    expect(screen.getByText('Home')).toBeTruthy();
+    expect(screen.getByText('Read')).toBeTruthy();
+    expect(screen.getByText('Present')).toBeTruthy();
+    expect(screen.getByText('More')).toBeTruthy();
+  });
+
+  it('renders emblem SVG on home', () => {
+    const { container } = render(<App />);
+    expect(container.querySelector('svg')).toBeTruthy();
   });
 });
