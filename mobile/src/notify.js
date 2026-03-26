@@ -3,24 +3,21 @@
  * Wraps @capacitor/local-notifications with permission handling.
  * Falls back silently on web / when permission is denied.
  */
+import { LocalNotifications } from '@capacitor/local-notifications';
 
-let LN = null;
 let permissionGranted = null; // null = unchecked, true/false after check
 
-async function getPlugin() {
-  if (LN) return LN;
+function getPlugin() {
   try {
-    const mod = await import('@capacitor/local-notifications');
-    LN = mod.LocalNotifications;
-    return LN;
-  } catch {
-    return null;
-  }
+    // Verify the plugin is actually available (not just the JS stub)
+    if (typeof LocalNotifications?.checkPermissions === 'function') return LocalNotifications;
+  } catch { /* plugin not available */ }
+  return null;
 }
 
 /** Request notification permission (idempotent). */
 export async function requestNotificationPermission() {
-  const plugin = await getPlugin();
+  const plugin = getPlugin();
   if (!plugin) return false;
   try {
     const { display } = await plugin.checkPermissions();
@@ -38,7 +35,7 @@ export async function requestNotificationPermission() {
 export async function notify(title, body, { id, ongoing = false } = {}) {
   if (permissionGranted === null) await requestNotificationPermission();
   if (!permissionGranted) return;
-  const plugin = await getPlugin();
+  const plugin = getPlugin();
   if (!plugin) return;
   try {
     await plugin.schedule({
@@ -60,7 +57,7 @@ export async function notify(title, body, { id, ongoing = false } = {}) {
 
 /** Cancel a notification by id. */
 export async function cancelNotification(id) {
-  const plugin = await getPlugin();
+  const plugin = getPlugin();
   if (!plugin) return;
   try {
     await plugin.cancel({ notifications: [{ id }] });
