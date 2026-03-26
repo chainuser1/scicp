@@ -267,19 +267,21 @@ export async function downloadLanguage(lang, serverUrl) {
   // Try loading from IndexedDB cache first
   try {
     const cached = await idbGet(`lang:${lang}`);
-    if (cached) {
+    if (cached && cached.byteLength > 1024) { // sanity check — must be non-trivial size
       await initEngine();
       const db = loadDatabaseFromBuffer(cached);
       databases.set(lang, db);
       setLangState(lang, 'ready', 100);
       return true;
+    } else if (cached) {
+      // Cached data is corrupt/truncated — delete it and re-download
+      await idbDelete(`lang:${lang}`).catch(() => {});
     }
   } catch {}
 
-  // Download from server
+  // Download from server (with retry)
   const base = serverUrl || getDbDownloadUrl();
   if (!base) {
-    // No server URL — try bundled assets as fallback (for dev mode)
     try {
       await initEngine();
       const db = await loadDatabase(filename);
@@ -289,51 +291,73 @@ export async function downloadLanguage(lang, serverUrl) {
     return false;
   }
 
-  setLangState(lang, 'downloading', 0);
-  try {
-    const url = `${base}/db/${filename}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    setLangState(lang, 'downloading', 0);
+    try {
+      const url = `${base}/db/${filename}`;
+      const controller = new AbortController();
+      const fetchTimeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
+      let response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(fetchTimeout);
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    // Track download progress if content-length is available
-    const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
-    let received = 0;
-    const reader = response.body.getReader();
-    const chunks = [];
+      const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+      let received = 0;
+      const reader = response.body.getReader();
+      const chunks = [];
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (contentLength > 0) {
-        setLangState(lang, 'downloading', Math.round((received / contentLength) * 100));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (contentLength > 0) {
+          setLangState(lang, 'downloading', Math.round((received / contentLength) * 100));
+        }
+      }
+
+      // Combine chunks — verify we got a reasonable amount of data
+      const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
+      if (totalLength < 1024) throw new Error(`Downloaded DB too small (${totalLength} bytes) — likely truncated`);
+
+      const combined = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.length; }
+
+      // Verify SQLite header before caching
+      const magic = String.fromCharCode(...combined.slice(0, 6));
+      if (magic !== 'SQLite') throw new Error('Downloaded file is not a valid SQLite database');
+
+      // Cache in IndexedDB — failures here should not block loading
+      try {
+        await idbPut(`lang:${lang}`, combined.buffer);
+      } catch (idbErr) {
+        console.warn(`db-manager: IndexedDB cache write failed for ${lang}:`, idbErr.message);
+        // Continue — the DB is still usable this session even without being cached
+      }
+
+      // Load into sql.js
+      await initEngine();
+      const db = new SQL.Database(combined);
+      databases.set(lang, db);
+      setLangState(lang, 'ready', 100);
+      return true;
+    } catch (err) {
+      console.warn(`db-manager: download ${lang} attempt ${attempt}/${MAX_RETRIES} failed:`, err.message);
+      if (attempt < MAX_RETRIES) {
+        // Exponential backoff: 2s, 4s
+        await new Promise(r => setTimeout(r, attempt * 2000));
       }
     }
-
-    // Combine chunks into single ArrayBuffer
-    const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
-    const combined = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    // Cache in IndexedDB for next app launch
-    await idbPut(`lang:${lang}`, combined.buffer);
-
-    // Load into sql.js
-    await initEngine();
-    const db = new SQL.Database(combined);
-    databases.set(lang, db);
-    setLangState(lang, 'ready', 100);
-    return true;
-  } catch (err) {
-    console.warn(`db-manager: download ${lang} failed:`, err.message);
-    setLangState(lang, 'error');
-    return false;
   }
+
+  setLangState(lang, 'error');
+  return false;
 }
 
 /**

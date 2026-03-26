@@ -295,7 +295,10 @@ async function emit(event, payload, ackCallback) {
       let bookTitle = verse.book_title;
 
       const targetLang = language || 'en';
-      const row = svc.getVerse(verse, targetLang);
+      // Only attempt translation if the language DB is actually loaded
+      const loadedLangs = svc.getLoadedLanguages ? svc.getLoadedLanguages() : ['en'];
+      const langReady = targetLang === 'en' || loadedLangs.includes(targetLang);
+      const row = langReady ? svc.getVerse(verse, targetLang) : null;
       if (row) {
         if (targetLang !== 'en') {
           if (row.scripture_text) scriptureText = row.scripture_text;
@@ -327,7 +330,7 @@ async function emit(event, payload, ackCallback) {
         volume_short_title: row?.volume_short_title || verse.volume_short_title || '',
       };
 
-      if (secondaryLanguage && secondaryLanguage !== targetLang) {
+      if (secondaryLanguage && secondaryLanguage !== targetLang && loadedLangs.includes(secondaryLanguage)) {
         const secRow = svc.getVerse(verse, secondaryLanguage);
         if (secRow) {
           verseWithSegments.secondary_text = secRow.scripture_text;
@@ -407,9 +410,14 @@ async function emit(event, payload, ackCallback) {
       break;
     }
 
-    case 'set-session-pin':
+    case 'set-session-pin': {
+      if (typeof ackCallback === 'function') ackCallback({ ok: true });
+      fire('session-pin-set', { ok: true });
+      break;
+    }
     case 'clear-session-pin': {
       if (typeof ackCallback === 'function') ackCallback({ ok: true });
+      fire('session-pin-cleared', { ok: true });
       break;
     }
 

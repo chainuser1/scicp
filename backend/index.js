@@ -460,11 +460,13 @@ fastify.get('/browse/chapters', async (request, reply) => {
 });
 
 fastify.get('/browse/verses', async (request, reply) => {
-  const { chapter_id, language } = request.query;
+  const { chapter_id, language, limit: limitStr, offset: offsetStr } = request.query;
   if (!chapter_id) { reply.code(400); return { error: 'chapter_id is required' }; }
+  const limit = Math.min(500, Math.max(1, parseInt(limitStr, 10) || 500));
+  const offset = Math.max(0, parseInt(offsetStr, 10) || 0);
   const targetDb = resolveDbAdapter(language);
   try {
-    return engine.browseVerses(targetDb, chapter_id);
+    return engine.browseVerses(targetDb, chapter_id, { limit, offset });
   } catch (err) {
     fastify.log.error('browse/verses failed', err);
     reply.code(500);

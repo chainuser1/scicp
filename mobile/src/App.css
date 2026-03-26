@@ -7820,6 +7820,8 @@ button, [role="button"] {
   font-weight: 600;
 }
 .pin-modal-submit:disabled { opacity: 0.4; }
+.pin-modal-clear { color: #ff6b6b !important; margin-right: auto; }
+.theme-btn--danger { border-color: rgba(255,100,100,0.4) !important; color: #ff8a8a !important; }
 
 /* ═══════════════════════════════════════════════════════════════════
    LIGHT THEME OVERRIDES — mode screen + online elements

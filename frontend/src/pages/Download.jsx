@@ -58,26 +58,28 @@ function detectPlatform() {
   return null;
 }
 
+const RELEASES_PAGE = 'https://github.com/chainuser1/scicp/releases/latest';
+
 const FALLBACK_BY_PLATFORM = {
   android: {
-    url: 'https://github.com/chainuser1/scicp/actions/runs/23000059743/artifacts/5889562783',
-    sha256: '11a670361a6426981391d5250895d06977a99b697480127ff1cd4b0c4463a604',
+    url: RELEASES_PAGE,
+    sha256: null,
   },
   windows: {
-    url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889590639',
-    sha256: '4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd',
+    url: RELEASES_PAGE,
+    sha256: null,
   },
   'linux-appimage': {
-    url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
-    sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
+    url: RELEASES_PAGE,
+    sha256: null,
   },
   'linux-deb': {
-    url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889616163',
-    sha256: 'e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4',
+    url: RELEASES_PAGE,
+    sha256: null,
   },
   mac: {
-    url: 'https://github.com/chainuser1/scicp/actions/runs/23000048595/artifacts/5889569130',
-    sha256: 'ec5d380ce6200833887d8d5c5ae8403644b9829d62d80265d44bcd20453f77b2',
+    url: RELEASES_PAGE,
+    sha256: null,
   },
 };
 
@@ -122,10 +124,14 @@ export default function Download() {
   useEffect(() => {
     let active = true;
     const loadLatestReleaseAssets = async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
       try {
         const res = await fetch('https://api.github.com/repos/chainuser1/scicp/releases/latest', {
           headers: { Accept: 'application/vnd.github+json' },
+          signal: controller.signal,
         });
+        clearTimeout(timer);
         if (!res.ok) return;
         const data = await res.json();
         const assets = Array.isArray(data?.assets) ? data.assets : [];
@@ -148,7 +154,8 @@ export default function Download() {
           }))
         );
       } catch {
-        // Keep fallback links
+        clearTimeout(timer);
+        // Keep fallback links — they point to the GitHub releases page as safe fallback
       }
     };
     loadLatestReleaseAssets();
@@ -322,12 +329,18 @@ export default function Download() {
                       Download for {item.label}
                     </button>
                     <span className="dl-source">
-                      {item.source === 'release' ? `Latest · ${releaseTag}` : 'Fallback link'}
+                      {item.source === 'release' ? `Latest · ${releaseTag}` : (
+                        <a href="https://github.com/chainuser1/scicp/releases/latest" target="_blank" rel="noopener noreferrer" className="dl-fallback-link">
+                          View releases page ↗
+                        </a>
+                      )}
                     </span>
+                    {item.sha256 && (
                     <details className="dl-verify">
                       <summary>Verify file integrity</summary>
                       <code className="dl-sha">SHA256: {item.sha256}</code>
                     </details>
+                    )}
                   </div>
                 </div>
               ))}
