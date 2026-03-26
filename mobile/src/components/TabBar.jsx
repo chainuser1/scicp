@@ -1,11 +1,10 @@
 import './TabBar.css';
 
 const TABS = [
-  { id: 'search', icon: '🔍', label: 'Search' },
-  { id: 'live',   icon: '📡', label: 'Live' },
-  { id: 'reader', icon: '📖', label: 'Read' },
-  { id: 'setlists', icon: '📋', label: 'Setlists' },
-  { id: 'settings', icon: '⚙️', label: 'Settings' },
+  { id: 'search',   icon: '🔍', label: 'Search' },
+  { id: 'preview',  icon: '≡',  label: 'Preview' },
+  { id: 'setlists', icon: '☰',  label: 'Setlist' },
+  { id: 'browse',   icon: '⊞',  label: 'Browse' },
 ];
 
 export default function TabBar({ active, onChange }) {

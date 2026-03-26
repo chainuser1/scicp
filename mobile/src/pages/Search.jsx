@@ -5,12 +5,14 @@ import { SERVER_URL } from '../socket';
 import './Search.css';
 
 const QUICK_TOPICS = [
-  'faith', 'prayer', 'hope', 'charity', 'repentance', 'forgiveness',
-  'baptism', 'obedience', 'patience', 'humility', 'love', 'gratitude',
-  'tithing', 'service', 'family',
+  'Faith', 'Atonement', 'Prayer', 'Hope',
+  'Charity', 'Repentance', 'Grace', 'Covenant',
 ];
 
-export default function SearchPage({ onStage, history, clearHistory, bookmarks, sessionId, onAddToSetlist }) {
+export default function SearchPage({
+  onStage, onGoLive, history, clearHistory, bookmarks,
+  sessionId, session, onAddToSetlist,
+}) {
   const { query, setQuery, results, meta, loading, search, loadMore, clear } = useSearch();
   const inputRef = useRef(null);
   const listRef = useRef(null);
@@ -20,13 +22,11 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
   const suggestRef = useRef(null);
   const [intExpanded, setIntExpanded] = useState(false);
 
-  // Fetch Verse of the Day
   useEffect(() => {
     fetch(`${SERVER_URL}/verse/of-the-day`).then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setVotd(d); }).catch(() => {});
   }, []);
 
-  // Auto-complete suggestions
   useEffect(() => {
     if (suggestRef.current) clearTimeout(suggestRef.current);
     if (!query || query.length < 2) { setSuggestions([]); return; }
@@ -75,21 +75,20 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
     }).catch(() => {});
   }, [query]);
 
-  const timeAgo = (ts) => {
-    const d = Date.now() - ts;
-    if (d < 60000) return 'just now';
-    if (d < 3600000) return `${Math.floor(d / 60000)}m ago`;
-    if (d < 86400000) return `${Math.floor(d / 3600000)}h ago`;
-    return `${Math.floor(d / 86400000)}d ago`;
-  };
+  const hasResults = results.length > 0;
+  const isIdle = !hasResults && !loading && !query;
+  const isConnected = session?.isConnected;
+  const hasSession = !!sessionId;
 
   return (
     <div className="search-page">
+      {/* Search bar */}
       <div className="search-bar-wrap">
         <form className="search-bar" onSubmit={handleSubmit}>
+          <span className="search-icon">🔍</span>
           <input
             ref={inputRef}
-            className="input search-input"
+            className="search-input-new"
             type="search"
             placeholder="Search scriptures…"
             value={query}
@@ -99,12 +98,13 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
             enterKeyHint="search"
             autoComplete="off"
           />
+          {meta?.total != null && hasResults && (
+            <span className="result-count-badge">{meta.total}</span>
+          )}
           {query && (
             <button type="button" className="search-clear" onClick={clear}>✕</button>
           )}
         </form>
-
-        {/* Auto-complete dropdown */}
         {showSuggestions && suggestions.length > 0 && (
           <div className="suggestions-dropdown">
             {suggestions.map((s, i) => (
@@ -117,41 +117,25 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
       </div>
 
       {/* Intelligence bar */}
-      {meta && results.length > 0 && (
+      {meta && hasResults && (
         <div className="intelligence-bar">
           <div className="intel-row">
             {meta.intelligenceHints?.map((h, i) => (
-              <span key={i} className="badge badge-gold">{h}</span>
+              <span key={i} className="intel-pill">{h}</span>
             ))}
-            {meta.intent && (
-              <span className="badge badge-blue">{meta.intent}</span>
-            )}
-            {meta.entityMatch && (
-              <span className="badge badge-green">
-                {meta.entityMatch.type === 'person' ? '👤' : '📍'} {meta.entityMatch.name}
-              </span>
-            )}
-            {meta.qpprActive && <span className="badge badge-blue">📊 Graph</span>}
-            {meta.sessionDrift && <span className="badge badge-gold">🎯 Contextual</span>}
+            {meta.intent && <span className="intel-pill">{meta.intent}</span>}
+            {meta.qpprActive && <span className="intel-pill">graph</span>}
             {meta.expansions?.length > 0 && (
-              <button className="btn btn-ghost btn-sm text-xs" onClick={() => setIntExpanded(!intExpanded)}>
-                {intExpanded ? '▲' : '▼'} {meta.expansions.length} terms
+              <button className="intel-expand-btn" onClick={() => setIntExpanded(!intExpanded)}>
+                {intExpanded ? '▲' : '▼'} {meta.expansions.length}
               </button>
             )}
+            <span className="intel-lang">EN ∨</span>
           </div>
           {intExpanded && meta.expansions?.length > 0 && (
             <div className="intel-expansions">
               {meta.expansions.map((t, i) => (
-                <span key={i} className="badge badge-blue" style={{ fontSize: '0.625rem' }}>{t}</span>
-              ))}
-            </div>
-          )}
-          {meta.facets?.length > 0 && (
-            <div className="intel-facets">
-              {meta.facets.slice(0, 4).map((f, i) => (
-                <button key={i} className="badge badge-gold" onClick={() => { setQuery(f); search(f); }}>
-                  {f}
-                </button>
+                <span key={i} className="intel-pill intel-pill-sm">{t}</span>
               ))}
             </div>
           )}
@@ -159,16 +143,13 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
       )}
 
       <div className="search-results scroll-area safe-bottom" ref={listRef} onScroll={handleScroll}>
-        {/* Search results */}
-        {results.length > 0 && results.map((v, i) => (
-          <VerseCard
+        {/* Active search results */}
+        {hasResults && results.map((v, i) => (
+          <SearchResultRow
             key={v.verse_id || i}
             verse={v}
-            onTap={() => { onStage(v); logFeedback(v, i); }}
-            isBookmarked={bookmarks?.isBookmarked?.(v.verse_id)}
-            onToggleBookmark={() => bookmarks?.toggle?.(v)}
-            onCopy={() => copyVerse(v)}
-            onAddToSetlist={onAddToSetlist ? () => onAddToSetlist(v) : undefined}
+            onStage={() => { onStage(v); logFeedback(v, i); }}
+            onGoLive={() => { onGoLive(v); logFeedback(v, i); }}
           />
         ))}
 
@@ -180,134 +161,107 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
           </div>
         )}
 
-        {/* Idle state: VOTD + quick topics + history */}
-        {results.length === 0 && !loading && !query && (
+        {/* ── Idle State ── */}
+        {isIdle && (
           <>
-            {/* Verse of the Day */}
+            {/* VOTD Card */}
             {votd && (
-              <div className="votd-card card">
-                <p className="text-xs text-dim font-semibold" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                  📅 Verse of the Day
+              <div className="votd-card">
+                <div className="votd-header">
+                  <span className="votd-marker">◆ VERSE OF THE DAY</span>
+                  <span className="votd-date">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+                </div>
+                <p className="votd-text">
+                  "{(votd.scripture_text || '').slice(0, 200)}{votd.scripture_text?.length > 200 ? '…' : ''}"
                 </p>
-                <p className="text-gold font-semibold text-sm">
-                  {votd.verse_title || `${votd.book_title} ${votd.chapter_number}:${votd.verse_number}`}
-                </p>
-                <p className="text-sm text-secondary" style={{ margin: '6px 0', lineHeight: 1.55 }}>
-                  {(votd.scripture_text || '').slice(0, 200)}{votd.scripture_text?.length > 200 ? '…' : ''}
+                <p className="votd-ref">
+                  — {votd.verse_title || `${votd.book_title} ${votd.chapter_number}:${votd.verse_number}`} (KJV)
                 </p>
                 <div className="votd-actions">
-                  <button className="btn btn-primary btn-sm" onClick={() => onStage(votd)}>
-                    Stage
-                  </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => copyVerse(votd)}>
-                    📋 Copy
-                  </button>
+                  <button className="votd-btn votd-btn-secondary" onClick={() => copyVerse(votd)}>Copy</button>
+                  <button className="votd-btn votd-btn-secondary" onClick={() => onStage(votd)}>Stage</button>
+                  <button className="votd-btn votd-btn-live" onClick={() => onGoLive(votd)}>▶ Go Live</button>
                 </div>
               </div>
             )}
 
-            {/* Quick topics */}
+            {/* Session + Ready Check row */}
+            <div className="idle-cards-row">
+              <div className="idle-card session-card">
+                <span className="idle-card-marker">◇ Session</span>
+                <p className="idle-card-hint">Scan QR on TV screen</p>
+                {!hasSession && session?.joinSession && (
+                  <button className="scan-qr-btn" onClick={() => {
+                    // The QR scanner is in SettingsSheet, prompt user
+                    addToast('Open ⋯ menu to scan QR code', 'info');
+                  }}>
+                    ⊞ Scan QR Code
+                  </button>
+                )}
+                {hasSession && (
+                  <span className="session-code-display">{sessionId}</span>
+                )}
+              </div>
+              <div className="idle-card ready-card">
+                <span className="idle-card-marker">◇ Ready Check</span>
+                <div className="ready-checklist">
+                  <span className={`ready-item ${isConnected ? 'ready-ok' : 'ready-no'}`}>
+                    {isConnected ? '●' : '○'} Server connected
+                  </span>
+                  <span className={`ready-item ${hasSession ? 'ready-ok' : 'ready-no'}`}>
+                    {hasSession ? '●' : '○'} Session active
+                  </span>
+                  <span className="ready-item ready-no">○ Stage a verse</span>
+                  <span className="ready-item ready-no">○ Go Live to project</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Topics */}
             <div className="quick-topics">
-              <p className="text-xs text-dim font-semibold" style={{ textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                Quick Topics
-              </p>
+              <span className="quick-topics-label">◆ Quick Topics</span>
+              <span className="quick-topics-hint">tap to search</span>
               <div className="topic-chips">
                 {QUICK_TOPICS.map(t => (
-                  <button key={t} className="badge badge-gold topic-chip" onClick={() => { setQuery(t); search(t); }}>
+                  <button key={t} className="topic-chip" onClick={() => { setQuery(t.toLowerCase()); search(t.toLowerCase()); }}>
                     {t}
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* History */}
-            {history && history.length > 0 && (
-              <div className="search-history">
-                <div className="history-header">
-                  <h3 className="text-xs text-dim font-semibold" style={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    Recent
-                  </h3>
-                  <button className="btn btn-ghost btn-sm text-xs" onClick={clearHistory}>
-                    Clear
-                  </button>
-                </div>
-                {history.slice(0, 15).map((v, i) => (
-                  <button key={v.verse_id || i} className="history-item" onClick={() => onStage(v)}>
-                    <span className="text-sm text-gold font-medium">
-                      {v.verse_title || `${v.book_title} ${v.chapter_number}:${v.verse_number}`}
-                    </span>
-                    <span className="text-xs text-dim">{timeAgo(v._ts)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Empty prompt only if no VOTD, no history */}
-            {!votd && (!history || history.length === 0) && (
-              <div className="empty-state">
-                <span className="empty-state-icon">🔍</span>
-                <p className="text-secondary">Search for a verse, topic, or phrase</p>
-                <p className="text-xs text-dim">Try "faith", "John 3:16", or "anger issues"</p>
-              </div>
-            )}
           </>
         )}
 
         {loading && (
-          <div className="search-loading">
-            <div className="spinner" />
-          </div>
+          <div className="search-loading"><div className="spinner" /></div>
         )}
       </div>
     </div>
   );
 }
 
-function VerseCard({ verse, onTap, isBookmarked, onToggleBookmark, onCopy, onAddToSetlist }) {
+/* Compact search result row matching mockup */
+function SearchResultRow({ verse, onStage, onGoLive }) {
   const title = verse.verse_title || `${verse.book_title} ${verse.chapter_number}:${verse.verse_number}`;
   const text = verse.scripture_text || '';
-  const preview = text.length > 180 ? text.slice(0, 180) + '…' : text;
+  const preview = text.length > 120 ? text.slice(0, 120) + '…' : text;
   const source = verse._source;
 
   return (
-    <div className="verse-card card">
-      <button className="verse-card-body" onClick={onTap}>
-        <div className="verse-card-header">
-          <span className="verse-card-title font-semibold">{title}</span>
-          {source && <span className="badge badge-blue">{source}</span>}
-        </div>
-        <p className="verse-card-text text-sm text-secondary">{preview}</p>
-        {verse.similarity_score > 0 && (
-          <div className="verse-card-score">
-            <div className="score-bar" style={{ width: `${Math.round(verse.similarity_score * 100)}%` }} />
-          </div>
-        )}
-      </button>
-      <div className="verse-card-actions">
-        {onAddToSetlist && (
-          <button
-            className="verse-action-btn"
-            onClick={(e) => { e.stopPropagation(); onAddToSetlist(); }}
-            title="Add to setlist"
-          >
-            ＋
-          </button>
-        )}
-        <button
-          className="verse-action-btn"
-          onClick={(e) => { e.stopPropagation(); onCopy?.(); }}
-          title="Copy"
-        >
-          📋
-        </button>
-        <button
-          className={`verse-action-btn ${isBookmarked ? 'bookmark-active' : ''}`}
-          onClick={(e) => { e.stopPropagation(); onToggleBookmark?.(); }}
-          title={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
-        >
-          {isBookmarked ? '🔖' : '🏷️'}
-        </button>
+    <div className="result-row" onClick={onStage}>
+      <div className="result-top">
+        <span className="result-ref">{title}</span>
+        {source && <span className="result-badge">{source.toUpperCase()}</span>}
+        {verse._tier && verse._tier <= 2 && <span className="result-badge">TL</span>}
       </div>
+      <p className="result-text">{preview}</p>
+      <button
+        className="result-live-dot"
+        onClick={(e) => { e.stopPropagation(); onGoLive(); }}
+        aria-label="Go live immediately"
+      >
+        <span className="dot-red" />
+      </button>
     </div>
   );
 }
