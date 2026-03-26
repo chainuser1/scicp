@@ -166,7 +166,8 @@ fastify.register(require('@fastify/cors'), {
 });
 
 fastify.register(require('@fastify/helmet'), {
-  contentSecurityPolicy: false,  // CSP conflicts with inline styles in React
+  contentSecurityPolicy: false,    // CSP conflicts with inline styles in React
+  crossOriginEmbedderPolicy: false, // COEP would block external background images (churchofjesuschrist.org etc.)
 });
 
 fastify.register(require('@fastify/rate-limit'), {
