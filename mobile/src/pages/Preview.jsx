@@ -154,7 +154,9 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
 
   const sendCustom = useCallback(() => {
     if (!sessionId || !customText.trim()) return;
-    socket.emit('go-custom', { sessionId, text: customText.trim(), subtext: customSubtext.trim() || undefined });
+    let theme;
+    try { theme = JSON.parse(localStorage.getItem('scicp.display_prefs_v1'))?.theme; } catch { /* ignore */ }
+    socket.emit('go-custom', { sessionId, text: customText.trim(), subtext: customSubtext.trim() || undefined, theme });
     setIsCustomLive(true);
     addToast('Sent to screen!', 'success');
   }, [sessionId, customText, customSubtext]);

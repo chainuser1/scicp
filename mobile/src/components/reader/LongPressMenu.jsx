@@ -4,7 +4,7 @@
 
 const COLORS = ['yellow', 'green', 'pink', 'blue'];
 
-export default function LongPressMenu({ verse, highlights, bookmarks, onClose }) {
+export default function LongPressMenu({ verse, highlights, bookmarks, analytics, onClose, onOpenContext }) {
   const verseId = verse.verse_id || verse.id;
   const currentColor = highlights.getColor(verseId);
   const isBm = bookmarks.isBookmarked(verseId);
@@ -35,6 +35,13 @@ export default function LongPressMenu({ verse, highlights, bookmarks, onClose })
       verse_number: verse.verse_number,
       scripture_text: verse.scripture_text,
     });
+    analytics?.trackEvent(verseId, 'bookmark');
+    onClose();
+  };
+
+  const handleHighlight = (color) => {
+    highlights.toggle(verseId, color);
+    analytics?.trackEvent(verseId, 'highlight');
     onClose();
   };
 
@@ -50,7 +57,7 @@ export default function LongPressMenu({ verse, highlights, bookmarks, onClose })
             <button
               key={c}
               className={`rd-lp-color rd-lp-color-${c}${currentColor === c ? ' rd-lp-color-active' : ''}`}
-              onClick={() => { highlights.toggle(verseId, c); onClose(); }}
+              onClick={() => handleHighlight(c)}
               aria-label={`Highlight ${c}`}
             />
           ))}
@@ -75,6 +82,11 @@ export default function LongPressMenu({ verse, highlights, bookmarks, onClose })
           <button className="rd-lp-action" onClick={handleShare}>
             ↗ Share
           </button>
+          {onOpenContext && (
+            <button className="rd-lp-action" onClick={() => onOpenContext(verse)}>
+              ℹ️ Context
+            </button>
+          )}
         </div>
       </div>
     </div>
