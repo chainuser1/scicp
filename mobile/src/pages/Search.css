@@ -362,3 +362,124 @@
   transition: all var(--transition);
 }
 .topic-chip:active { background: var(--surface-2); transform: scale(0.96); }
+
+/* ═══ Connect to Projector gate ═══ */
+.connect-gate {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 6px;
+}
+.connect-gate-icon {
+  font-size: 3.5rem;
+  margin-bottom: 8px;
+  filter: grayscale(0.3);
+}
+.connect-gate-title {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.connect-gate-desc {
+  font-size: 0.875rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  max-width: 280px;
+  margin-bottom: 12px;
+}
+.connect-gate-scan-btn {
+  width: 100%;
+  max-width: 300px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: var(--accent-green);
+  color: var(--obsidian);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: all var(--transition);
+  box-shadow: 0 4px 16px rgba(46,204,113,0.25);
+}
+.connect-gate-scan-btn:active {
+  transform: scale(0.97);
+  background: #27ae60;
+}
+.connect-gate-divider {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 300px;
+  margin: 16px 0;
+}
+.connect-gate-divider::before,
+.connect-gate-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--surface-3);
+}
+.connect-gate-or {
+  padding: 0 16px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.connect-gate-manual {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 300px;
+}
+.connect-gate-input {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.connect-gate-input:focus { border-color: var(--gold); }
+.connect-gate-input::placeholder {
+  color: var(--text-dim);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.connect-gate-join-btn {
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  background: var(--gold);
+  color: var(--obsidian);
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: all var(--transition);
+}
+.connect-gate-join-btn:active { background: var(--gold-dim); }
+.connect-gate-error {
+  font-size: 0.8125rem;
+  color: var(--accent-red);
+  margin-top: 8px;
+}
+.connect-gate-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+}
+.connect-gate-status-text {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
