@@ -40,6 +40,13 @@ let initPromise = null;
 const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
 const isFileScheme = typeof window !== 'undefined' && window.location?.protocol === 'file:';
 
+/** Check if a buffer starts with the SQLite magic header. */
+function isValidSqlite(buf) {
+  if (!buf || buf.byteLength < 16) return false;
+  const bytes = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer || buf, 0, 6);
+  return String.fromCharCode(...bytes) === 'SQLite';
+}
+
 // Download state tracking: lang → { status: 'idle'|'downloading'|'ready'|'error', progress: 0-100 }
 const downloadState = new Map();
 const downloadListeners = new Set();
@@ -160,12 +167,27 @@ async function loadDatabase(filename) {
     return null;
   }
   const buffer = await response.arrayBuffer();
-  return new SQL.Database(new Uint8Array(buffer));
+  if (!isValidSqlite(buffer)) {
+    console.warn(`db-manager: ${filename} is not a valid SQLite file (${buffer.byteLength} bytes)`);
+    return null;
+  }
+  try {
+    return new SQL.Database(new Uint8Array(buffer));
+  } catch (e) {
+    console.warn(`db-manager: ${filename} failed to open:`, e.message);
+    return null;
+  }
 }
 
-/** Load a DB from an ArrayBuffer (e.g. from IndexedDB cache). */
+/** Load a DB from an ArrayBuffer (e.g. from IndexedDB cache). Returns null if invalid. */
 function loadDatabaseFromBuffer(buffer) {
-  return new SQL.Database(new Uint8Array(buffer));
+  if (!isValidSqlite(buffer)) return null;
+  try {
+    return new SQL.Database(new Uint8Array(buffer));
+  } catch (e) {
+    console.warn('db-manager: buffer failed to open as SQLite:', e.message);
+    return null;
+  }
 }
 
 /**
@@ -226,8 +248,13 @@ export async function initAllDatabases() {
           const buffer = await idbGet(key);
           if (buffer) {
             const db = loadDatabaseFromBuffer(buffer);
-            databases.set(lang, db);
-            setLangState(lang, 'ready', 100);
+            if (db) {
+              databases.set(lang, db);
+              setLangState(lang, 'ready', 100);
+            } else {
+              console.warn(`db-manager: cached ${lang} is corrupt — purging`);
+              await idbDelete(key).catch(() => {});
+            }
           }
         } catch (e) { console.warn(`db-manager: cached ${lang} restore failed:`, e.message); }
       }));
@@ -281,12 +308,17 @@ export async function downloadLanguage(lang, serverUrl) {
   // Try loading from IndexedDB cache first
   try {
     const cached = await idbGet(`lang:${lang}`);
-    if (cached && cached.byteLength > 1024) { // sanity check — must be non-trivial size
+    if (cached && cached.byteLength > 1024) {
       await initEngine();
       const db = loadDatabaseFromBuffer(cached);
-      databases.set(lang, db);
-      setLangState(lang, 'ready', 100);
-      return true;
+      if (db) {
+        databases.set(lang, db);
+        setLangState(lang, 'ready', 100);
+        return true;
+      }
+      // Cached data is corrupt — delete and re-download
+      console.warn(`db-manager: cached ${lang} is corrupt — purging`);
+      await idbDelete(`lang:${lang}`).catch(() => {});
     } else if (cached) {
       // Cached data is corrupt/truncated — delete it and re-download
       await idbDelete(`lang:${lang}`).catch(() => {});
@@ -344,8 +376,7 @@ export async function downloadLanguage(lang, serverUrl) {
       for (const chunk of chunks) { combined.set(chunk, offset); offset += chunk.length; }
 
       // Verify SQLite header before caching
-      const magic = String.fromCharCode(...combined.slice(0, 6));
-      if (magic !== 'SQLite') throw new Error('Downloaded file is not a valid SQLite database');
+      if (!isValidSqlite(combined)) throw new Error('Downloaded file is not a valid SQLite database');
 
       // Cache in IndexedDB — failures here should not block loading
       try {
