@@ -55,6 +55,16 @@
 .verse-card {
   text-align: left;
   width: 100%;
+  display: flex;
+  align-items: stretch;
+}
+
+.verse-card-body {
+  flex: 1;
+  text-align: left;
+  background: none;
+  color: inherit;
+  min-width: 0;
 }
 
 .verse-card-header {
@@ -93,3 +103,48 @@
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+
+.verse-bookmark-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  flex-shrink: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  border-left: 1px solid var(--surface-2);
+  transition: all var(--transition);
+}
+.verse-bookmark-btn.bookmark-active {
+  color: var(--gold);
+  background: rgba(201, 168, 76, 0.08);
+}
+
+/* ── History ── */
+.search-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background var(--transition);
+}
+.history-item:active { background: var(--surface-2); }

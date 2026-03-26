@@ -57,3 +57,59 @@
   border-radius: var(--radius-md);
   border: 1px dashed var(--surface-3);
 }
+
+/* Segment navigation */
+.segment-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.segment-dots {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.seg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  transition: all var(--transition);
+}
+
+.seg-dot-active {
+  background: var(--gold);
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 6px rgba(201, 168, 76, 0.4);
+}
+
+.seg-dot-past {
+  background: var(--gold-dim);
+}
+
+/* Adjacent verse navigation */
+.verse-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface-2);
+}
+
+.now-reading-btn {
+  flex-shrink: 0;
+}
+
+/* Custom text area */
+.custom-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+}
+

@@ -1,6 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { addToast } from '../hooks/useToast';
 import socket, { SERVER_URL } from '../socket';
+import QrScanner from '../components/QrScanner';
+import PinModal from '../components/PinModal';
 import './Settings.css';
 
 const LANGUAGES = [
@@ -15,6 +17,35 @@ const LANGUAGES = [
   { code: 'ja', label: '日本語' },
 ];
 
+const BG_PRESETS = [
+  { label: 'None', url: null },
+  { label: 'NT Dark', url: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default' },
+  { label: 'NT Light', url: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default' },
+  { label: 'OT Dark', url: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default' },
+  { label: 'OT Light', url: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default' },
+  { label: 'BoM Dark', url: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default' },
+  { label: 'D&C Dark', url: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default' },
+];
+
+const FONT_FAMILIES = [
+  { label: 'Cormorant Garamond', value: "'Cormorant Garamond', Georgia, serif" },
+  { label: 'Cinzel (Classic)', value: "'Cinzel', serif" },
+  { label: 'EB Garamond', value: "'EB Garamond', Georgia, serif" },
+  { label: 'Georgia', value: "Georgia, serif" },
+  { label: 'Times New Roman', value: "'Times New Roman', Times, serif" },
+  { label: 'Arial (Sans)', value: "Arial, Helvetica, sans-serif" },
+  { label: 'OpenDyslexic', value: "OpenDyslexic, Arial, sans-serif" },
+];
+
+const THEMES = [
+  { name: 'Classic Dark', bg: '#0a0a0f', text: '#f0ece4' },
+  { name: 'Warm Parchment', bg: '#f5f0e8', text: '#2c2416' },
+  { name: 'Ocean', bg: '#0d1b2a', text: '#e0e1dd' },
+  { name: 'Forest', bg: '#1a2e1a', text: '#d4e4d4' },
+  { name: 'Sunset', bg: '#2d1810', text: '#f5deb3' },
+  { name: 'Midnight Blue', bg: '#0f1626', text: '#c8d6e5' },
+];
+
 export default function SettingsPage({ session }) {
   const {
     sessionId, sessionLabel, viewerCount,
@@ -26,17 +57,31 @@ export default function SettingsPage({ session }) {
   const [newLabel, setNewLabel] = useState('');
   const [language, setLanguage] = useState('en');
   const [pin, setPin] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [hasPinActive, setHasPinActive] = useState(false);
+  const [fontSize, setFontSize] = useState(32);
+  const [fontFamily, setFontFamily] = useState(FONT_FAMILIES[0].value);
+  const [activeBg, setActiveBg] = useState(0);
+  const qrCanvasRef = useRef(null);
 
   const handleCreate = () => {
     createSession(newLabel.trim() || undefined);
     setNewLabel('');
   };
 
-  const handleJoin = () => {
-    if (!joinId.trim()) return;
-    joinSession(joinId.trim(), pin ? { pin } : {});
+  const handleJoin = (id) => {
+    const sid = (id || joinId).trim();
+    if (!sid) return;
+    joinSession(sid, pin ? { pin } : {});
     setJoinId('');
     setPin('');
+  };
+
+  const handleScannedCode = (code) => {
+    setScannerOpen(false);
+    handleJoin(code);
+    addToast(`Joining session: ${code}`, 'info');
   };
 
   const handleLanguage = (code) => {
@@ -46,6 +91,57 @@ export default function SettingsPage({ session }) {
       addToast(`Language: ${LANGUAGES.find(l => l.code === code)?.label}`, 'info');
     }
   };
+
+  const applyTheme = (theme, idx) => {
+    if (sessionId) {
+      const bgUrl = BG_PRESETS[activeBg]?.url || null;
+      socket.emit('update-theme', {
+        sessionId,
+        theme: {
+          backgroundColor: theme.bg,
+          textColor: theme.text,
+          name: theme.name,
+          font_size: fontSize,
+          font_family: fontFamily,
+          ...(bgUrl && { backgroundImage: bgUrl }),
+        },
+      });
+      addToast(`Theme: ${theme.name}`, 'info');
+    }
+  };
+
+  const applyFont = () => {
+    if (sessionId) {
+      socket.emit('update-theme', {
+        sessionId,
+        theme: { font_size: fontSize, font_family: fontFamily },
+      });
+      addToast('Font updated', 'info');
+    }
+  };
+
+  const applyBg = (idx) => {
+    setActiveBg(idx);
+    if (sessionId) {
+      const url = BG_PRESETS[idx]?.url || null;
+      socket.emit('update-theme', { sessionId, theme: { backgroundImage: url } });
+      if (url) socket.emit('preload-background', { sessionId, background_url: url });
+      addToast(`Background: ${BG_PRESETS[idx].label}`, 'info');
+    }
+  };
+
+  // Generate QR code when session exists
+  useEffect(() => {
+    if (!sessionId || !qrCanvasRef.current) return;
+    import('qrcode').then(QRCode => {
+      const mod = QRCode.default || QRCode;
+      mod.toCanvas(qrCanvasRef.current, `${SERVER_URL}/client?session=${sessionId}`, {
+        width: 200,
+        margin: 2,
+        color: { dark: '#c9a84c', light: '#0a0a0f' },
+      });
+    }).catch(() => {});
+  }, [sessionId]);
 
   return (
     <div className="settings-page scroll-area safe-bottom">
@@ -73,9 +169,14 @@ export default function SettingsPage({ session }) {
                 <p className="text-sm">👁 {viewerCount} viewer{viewerCount !== 1 ? 's' : ''}</p>
               )}
             </div>
-            <button className="btn btn-danger btn-sm" onClick={leaveSession} style={{ marginTop: 12 }}>
-              Leave Session
-            </button>
+            <div className="settings-session-btns">
+              <button className="btn btn-secondary btn-sm" onClick={() => setPinModalOpen(true)}>
+                🔒 {hasPinActive ? 'Change PIN' : 'Set PIN'}
+              </button>
+              <button className="btn btn-danger btn-sm" onClick={leaveSession}>
+                Leave Session
+              </button>
+            </div>
           </div>
         ) : (
           <div className="settings-session-actions">
@@ -107,9 +208,14 @@ export default function SettingsPage({ session }) {
                 value={pin}
                 onChange={e => setPin(e.target.value)}
               />
-              <button className="btn btn-secondary" onClick={handleJoin} style={{ marginTop: 8, width: '100%' }}>
-                Join Session
-              </button>
+              <div className="settings-join-btns">
+                <button className="btn btn-secondary" onClick={() => handleJoin()} style={{ flex: 1 }}>
+                  Join
+                </button>
+                <button className="btn btn-primary" onClick={() => setScannerOpen(true)} style={{ flex: 1 }}>
+                  📷 Scan QR
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -120,10 +226,11 @@ export default function SettingsPage({ session }) {
         <section className="settings-section">
           <h3 className="settings-label text-xs text-dim font-semibold">CONNECT TV</h3>
           <div className="card text-center">
-            <p className="text-sm text-secondary" style={{ marginBottom: 8 }}>
-              On the TV app, scan this QR code or enter session ID:
+            <p className="text-sm text-secondary" style={{ marginBottom: 12 }}>
+              Scan this QR code on the TV app to connect:
             </p>
-            <p className="text-xl font-bold text-gold">{sessionId}</p>
+            <canvas ref={qrCanvasRef} className="qr-canvas-display" />
+            <p className="text-xl font-bold text-gold" style={{ marginTop: 8 }}>{sessionId}</p>
             <p className="text-xs text-dim" style={{ marginTop: 4 }}>
               TV app will auto-connect as display client
             </p>
@@ -150,35 +257,91 @@ export default function SettingsPage({ session }) {
       {/* Theme */}
       <section className="settings-section">
         <h3 className="settings-label text-xs text-dim font-semibold">DISPLAY THEME</h3>
-        <ThemePicker sessionId={sessionId} />
+        <ThemePicker sessionId={sessionId} onApply={applyTheme} />
+      </section>
+
+      {/* Background */}
+      <section className="settings-section">
+        <h3 className="settings-label text-xs text-dim font-semibold">BACKGROUND IMAGE</h3>
+        <div className="bg-grid">
+          {BG_PRESETS.map((bg, i) => (
+            <button
+              key={i}
+              className={`bg-swatch ${activeBg === i ? 'bg-active' : ''}`}
+              onClick={() => applyBg(i)}
+            >
+              {bg.url ? (
+                <img src={bg.url} alt={bg.label} className="bg-thumb" loading="lazy" />
+              ) : (
+                <span className="text-xs text-dim">None</span>
+              )}
+              <span className="text-xs bg-label">{bg.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Font */}
+      <section className="settings-section">
+        <h3 className="settings-label text-xs text-dim font-semibold">FONT</h3>
+        <div className="card">
+          <label className="text-xs text-dim">Family</label>
+          <div className="font-grid">
+            {FONT_FAMILIES.map((f, i) => (
+              <button
+                key={i}
+                className={`btn btn-sm ${fontFamily === f.value ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontFamily: f.value }}
+                onClick={() => setFontFamily(f.value)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <label className="text-xs text-dim" style={{ marginTop: 12, display: 'block' }}>
+            Size: {fontSize}px
+          </label>
+          <input
+            type="range"
+            min="18"
+            max="72"
+            value={fontSize}
+            onChange={e => setFontSize(Number(e.target.value))}
+            className="font-slider"
+          />
+          <button className="btn btn-secondary btn-sm" onClick={applyFont} style={{ marginTop: 8, width: '100%' }}>
+            Apply Font
+          </button>
+        </div>
       </section>
 
       <div style={{ height: 32 }} />
+
+      {/* Modals */}
+      {scannerOpen && (
+        <QrScanner
+          onCode={handleScannedCode}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
+      {pinModalOpen && (
+        <PinModal
+          sessionId={sessionId}
+          hasPinActive={hasPinActive}
+          onPinChanged={setHasPinActive}
+          onClose={() => setPinModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-const THEMES = [
-  { name: 'Classic Dark', bg: '#0a0a0f', text: '#f0ece4' },
-  { name: 'Warm Parchment', bg: '#f5f0e8', text: '#2c2416' },
-  { name: 'Ocean', bg: '#0d1b2a', text: '#e0e1dd' },
-  { name: 'Forest', bg: '#1a2e1a', text: '#d4e4d4' },
-  { name: 'Sunset', bg: '#2d1810', text: '#f5deb3' },
-  { name: 'Midnight Blue', bg: '#0f1626', text: '#c8d6e5' },
-];
-
-function ThemePicker({ sessionId }) {
+function ThemePicker({ sessionId, onApply }) {
   const [active, setActive] = useState(0);
 
   const apply = (theme, idx) => {
     setActive(idx);
-    if (sessionId) {
-      socket.emit('update-theme', {
-        sessionId,
-        theme: { backgroundColor: theme.bg, textColor: theme.text, name: theme.name },
-      });
-      addToast(`Theme: ${theme.name}`, 'info');
-    }
+    onApply?.(theme, idx);
   };
 
   return (
