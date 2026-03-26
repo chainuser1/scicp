@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../scripture-service', () => ({
   init: vi.fn().mockResolvedValue(),
+  isReady: vi.fn(() => true),
   search: vi.fn().mockResolvedValue({ results: [{ verse_id: 1 }], total: 1 }),
   browse: vi.fn(() => []),
   getVerse: vi.fn(() => null),

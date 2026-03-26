@@ -157,8 +157,7 @@ export default function ConnectTV({ isOnline, serverUrl, sessionId, lanServerUrl
       </div>
       <p className="ctv-note-alt">iOS hotspot: try <code>172.20.10.1:8080</code></p>
       <p className="ctv-note">
-        No internet or Wi-Fi router needed.{' '}
-        {!hasLan && <span className="ctv-warn">⚠ Start the local server first by going online or tapping the Cast button.</span>}
+        No internet or Wi-Fi router needed.
       </p>
     </div>
   );

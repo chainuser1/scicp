@@ -853,6 +853,25 @@ const MobilePresenter = () => {
     if (readinessOpen) runReadinessChecks();
   }, [readinessOpen, runReadinessChecks]);
 
+  // Auto-start local HTTP server in offline mode so ConnectTV works immediately
+  useEffect(() => {
+    if (isOnline) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const existing = await getLocalServerUrl();
+        if (cancelled) return;
+        if (existing) {
+          setLanServerUrl(existing);
+        } else {
+          const srv = await startLocalServer(8080);
+          if (!cancelled && srv?.url) setLanServerUrl(srv.url);
+        }
+      } catch { /* server is optional */ }
+    })();
+    return () => { cancelled = true; };
+  }, [isOnline]);
+
   // When casting starts, re-push current presenter state so the external display
   // immediately reflects the active verse/theme instead of waiting for next action.
   useEffect(() => {

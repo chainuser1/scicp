@@ -149,7 +149,10 @@ export async function init() {
  */
 export async function search(query, page = 0, pageSize = 10, language = 'en') {
   const adapter = resolveAdapter(language);
-  if (!adapter) return { results: [], total: 0, page, pageSize };
+  if (!adapter) {
+    console.warn(`scripture-service: ${language} database not loaded — search returning empty`);
+    return { results: [], total: 0, page, pageSize };
+  }
 
   const log = { info: () => {}, warn: console.warn, error: console.error };
 
@@ -1015,4 +1018,5 @@ export {
   LANGUAGE_NAMES,
   VOTD_POOL,
   getLoadedLanguages,
+  isReady,
 };
