@@ -4473,7 +4473,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
     socket.on('search', async (payload) => {
       try {
-        if (!socketRateLimit('search', 30)) {
+        if (!socketRateLimit('search', 120)) {
           socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'rate-limited' });
           return;
         }
