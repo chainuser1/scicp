@@ -40,6 +40,12 @@ let initPromise = null;
 const baseUrl = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
 const isFileScheme = typeof window !== 'undefined' && window.location?.protocol === 'file:';
 
+// Production server fallback URLs for downloading DBs when bundled assets aren't available
+const FALLBACK_SERVERS = [
+  'https://cap-teyyko.live',
+  'https://backend-production-9a27.up.railway.app',
+];
+
 /** Check if a buffer starts with the SQLite magic header. */
 function isValidSqlite(buf) {
   if (!buf || buf.byteLength < 16) return false;
@@ -191,6 +197,55 @@ function loadDatabaseFromBuffer(buffer) {
 }
 
 /**
+ * Download a DB from production servers with IndexedDB caching.
+ * Used as fallback when bundled assets aren't available in the APK.
+ * Tries IndexedDB cache → each server URL in order.
+ */
+async function downloadDbFromServer(filename, cacheKey) {
+  // Try IndexedDB cache first
+  try {
+    const cached = await idbGet(cacheKey);
+    if (cached && isValidSqlite(cached)) {
+      const db = loadDatabaseFromBuffer(cached);
+      if (db) return db;
+    }
+    if (cached) await idbDelete(cacheKey).catch(() => {});
+  } catch {}
+
+  // Build ordered list of server URLs to try
+  const stored = getDbDownloadUrl();
+  const servers = [stored, ...FALLBACK_SERVERS].filter(Boolean);
+  const unique = [...new Set(servers)];
+
+  for (const base of unique) {
+    try {
+      const url = `${base}/db/${filename}`;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90_000);
+      let response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (!response.ok) continue;
+
+      const buffer = await response.arrayBuffer();
+      if (!isValidSqlite(buffer)) continue;
+
+      // Cache for future use
+      try { await idbPut(cacheKey, buffer); } catch {}
+
+      await initEngine();
+      return new SQL.Database(new Uint8Array(buffer));
+    } catch (err) {
+      console.warn(`db-manager: download ${filename} from ${base} failed:`, err.message);
+    }
+  }
+  return null;
+}
+
+/**
  * Initialize core databases at startup.
  * Loads bundled English + intelligence + context DBs.
  * Also restores any previously downloaded language DBs from IndexedDB.
@@ -209,6 +264,20 @@ export async function initAllDatabases() {
         return { lang, ok: !!db };
       })
     );
+
+    // Fallback: if English DB isn't bundled, download from production server
+    if (!databases.has('en')) {
+      console.log('db-manager: English DB not bundled — downloading from server...');
+      setLangState('en', 'downloading', 0);
+      const db = await downloadDbFromServer(ALL_LANG_FILES['en'], 'bundled:en');
+      if (db) {
+        databases.set('en', db);
+        setLangState('en', 'ready', 100);
+        console.log('db-manager: English DB downloaded from server');
+      } else {
+        setLangState('en', 'error');
+      }
+    }
 
     // Load bundled intelligence & context DBs
     // Only load light DBs eagerly on mobile (Capacitor WebView has limited memory).
@@ -233,7 +302,10 @@ export async function initAllDatabases() {
     await Promise.allSettled(optionalBundled.map(async ([key, filename]) => {
       try {
         const db = await loadDatabase(filename);
-        if (db) databases.set(key, db);
+        if (db) { databases.set(key, db); return; }
+        // Fallback: try downloading from server
+        const downloaded = await downloadDbFromServer(filename, `bundled:${key}`);
+        if (downloaded) databases.set(key, downloaded);
       } catch (e) { console.warn(`db-manager: optional DB ${filename} failed:`, e.message); }
     }));
 
@@ -279,10 +351,11 @@ export async function initAllDatabases() {
 
 /** Get the server URL for downloading language DBs. */
 function getDbDownloadUrl() {
-  // Use the online server URL if available, otherwise fall back to bundled
   try {
-    return (localStorage.getItem('scicp.server_url') || '').replace(/\/+$/, '');
-  } catch { return ''; }
+    const stored = localStorage.getItem('scicp.server_url');
+    if (stored) return stored.replace(/\/+$/, '');
+  } catch {}
+  return FALLBACK_SERVERS[0];
 }
 
 /**
@@ -297,11 +370,14 @@ export async function downloadLanguage(lang, serverUrl) {
   const filename = ALL_LANG_FILES[lang];
   if (!filename) return false;
 
-  // If bundled, just load from assets
+  // If bundled, try loading from assets first, then server fallback
   if (BUNDLED_LANGS.has(lang)) {
     await initEngine();
     const db = await loadDatabase(filename);
     if (db) { databases.set(lang, db); setLangState(lang, 'ready', 100); return true; }
+    // Bundled load failed — try downloading from server
+    const downloaded = await downloadDbFromServer(filename, `bundled:${lang}`);
+    if (downloaded) { databases.set(lang, downloaded); setLangState(lang, 'ready', 100); return true; }
     return false;
   }
 
@@ -467,6 +543,9 @@ export async function loadEmbeddingsDb() {
       await initEngine();
       const emb = await loadDatabase('verse-embeddings.db');
       if (emb) { databases.set('embeddings', emb); return emb; }
+      // Fallback: try downloading from server (large file — 83MB)
+      const downloaded = await downloadDbFromServer('verse-embeddings.db', 'bundled:embeddings');
+      if (downloaded) { databases.set('embeddings', downloaded); return downloaded; }
     } catch (err) {
       console.warn('db-manager: verse-embeddings.db load failed:', err.message);
     }
