@@ -2729,6 +2729,9 @@ const MobilePresenter = () => {
                 <button className="theme-btn" onClick={() => { openDrawer('history'); setMobileMenuOpen(false); }}>
                   <IconClock /> Recent
                 </button>
+                <button className="theme-btn" onClick={() => { setDisplayOpen(true); setMobileMenuOpen(false); }}>
+                  <IconPalette /> Theme
+                </button>
                 <button className="theme-btn" onClick={() => { openTour(); setMobileMenuOpen(false); }}>
                   <IconInfo /> Help
                 </button>
@@ -3538,7 +3541,7 @@ const MobilePresenter = () => {
       <nav className="prs-bottom-nav">
         <button
           className={`prs-nav-btn${drawerOpen && drawerTab === 'search' ? ' prs-nav-btn--active' : ''}`}
-          onClick={() => { openDrawer('search'); setMobileMenuOpen(false); }}
+          onClick={() => { openDrawer('search'); setMobileMenuOpen(false); setDisplayOpen(false); }}
           aria-label="Search"
         >
           <IconSearch />
@@ -3547,24 +3550,14 @@ const MobilePresenter = () => {
 
         <button
           className={`prs-nav-btn${drawerOpen && drawerTab === 'setlist' ? ' prs-nav-btn--active' : ''}`}
-          onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); }}
-          aria-label="Setlist"
+          onClick={() => { openDrawer('setlist'); setMobileMenuOpen(false); setDisplayOpen(false); }}
+          aria-label="List"
         >
           <IconList />
-          <span>Setlist</span>
-          {setlist.length > 0 && <span className="prs-nav-badge">{setlist.length}</span>}
+          <span>List{setlist.length > 0 ? ` (${setlist.length})` : ''}</span>
         </button>
 
-        <button
-          className={`prs-nav-btn${displayOpen ? ' prs-nav-btn--active' : ''}`}
-          onClick={() => { setDisplayOpen(o => !o); setMobileMenuOpen(false); }}
-          aria-label="Display settings"
-        >
-          <IconPalette />
-          <span>Display</span>
-        </button>
-
-        {/* Center action — Go Live when staged, End when live, open Search drawer otherwise */}
+        {/* Center action — Go Live when staged, End when live, Browse otherwise */}
         <button
           className={`prs-nav-btn prs-nav-btn--center${staged ? ' prs-nav-btn--golive' : liveVerse ? ' prs-nav-btn--live' : ' prs-nav-btn--idle'}`}
           onClick={() => {
@@ -3572,7 +3565,7 @@ const MobilePresenter = () => {
             else if (liveVerse) endLive();
             else { openDrawer('browse'); setMobileMenuOpen(false); }
           }}
-          aria-label={staged ? 'Go live' : liveVerse ? 'End live' : 'Browse'}
+          aria-label={staged ? 'Go Live' : liveVerse ? 'End Live' : 'Browse'}
         >
           {staged ? <IconBolt /> : liveVerse ? <span className="prs-live-dot-icon" /> : <IconBook />}
           <span>{staged ? 'Go Live' : liveVerse ? 'Live' : 'Browse'}</span>
@@ -3582,7 +3575,7 @@ const MobilePresenter = () => {
 
         <button
           className={`prs-nav-btn${mobileMenuOpen ? ' prs-nav-btn--active' : ''}`}
-          onClick={() => setMobileMenuOpen(o => !o)}
+          onClick={() => { setMobileMenuOpen(o => !o); setDisplayOpen(false); }}
           aria-label="More"
         >
           <IconMenu />

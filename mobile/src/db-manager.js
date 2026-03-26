@@ -183,15 +183,25 @@ export async function initAllDatabases() {
     );
 
     // Load bundled intelligence & context DBs
-    const optionalBundled = [
-      ['tg',          'topical-guide.db'],
-      ['tags',        'verse-tags.db'],
-      ['chsummary',   'chapter-summaries-fts.db'],
-      ['vsummary',    'verse-summaries.db'],
-      ['vxref',       'verse-cross-refs.db'],
-      ['searchgraph', 'search-graph.db'],
-      ['footnotes',   'footnotes-lds-summaries.db'],
-    ];
+    // Only load light DBs eagerly on mobile (Capacitor WebView has limited memory).
+    // Heavy DBs (verse-summaries, verse-tags, search-graph, vxref, footnotes) are
+    // lazy-loaded on first use to avoid OOM crashes on Android devices.
+    const isCapacitorNative = typeof window !== 'undefined' &&
+      (window.location?.protocol === 'capacitor:' || window?.Capacitor?.isNativePlatform?.());
+    const optionalBundled = isCapacitorNative
+      ? [
+          ['tg',        'topical-guide.db'],
+          ['chsummary', 'chapter-summaries-fts.db'],
+        ]
+      : [
+          ['tg',          'topical-guide.db'],
+          ['tags',        'verse-tags.db'],
+          ['chsummary',   'chapter-summaries-fts.db'],
+          ['vsummary',    'verse-summaries.db'],
+          ['vxref',       'verse-cross-refs.db'],
+          ['searchgraph', 'search-graph.db'],
+          ['footnotes',   'footnotes-lds-summaries.db'],
+        ];
     await Promise.allSettled(optionalBundled.map(async ([key, filename]) => {
       try {
         const db = await loadDatabase(filename);

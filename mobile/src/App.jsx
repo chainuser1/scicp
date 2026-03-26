@@ -648,9 +648,10 @@ export default function App() {
   // ── Loading (offline/reader init) ──
   if ((mode === 'offline' || mode === 'reader') && !ready) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-        minHeight: '100vh', background: '#0a0a0f', color: '#c9a84c', fontFamily: 'sans-serif' }}>
-        <p>Loading scriptures...</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100vh', background: '#0a0a0f', color: '#c9a84c', fontFamily: 'sans-serif', gap: 16 }}>
+        <div className="lang-download-toast-spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+        <p style={{ margin: 0, fontSize: '1rem', fontWeight: 500 }}>Opening scriptures…</p>
       </div>
     );
   }
@@ -677,20 +678,26 @@ export default function App() {
       <div className="mode-cards">
         <button className="mode-card" onClick={() => setMode('offline')}>
           <span className="mode-card-icon">📱</span>
-          <span className="mode-card-label">Offline Mode</span>
-          <span className="mode-card-desc">Self-contained — search & present from this device. Cast to a connected display.</span>
+          <span className="mode-card-text">
+            <span className="mode-card-label">Present Offline</span>
+            <span className="mode-card-desc">Search and present from this device. Cast to a TV or display.</span>
+          </span>
         </button>
 
         <button className="mode-card mode-card--online" onClick={startScanner}>
           <span className="mode-card-icon">📷</span>
-          <span className="mode-card-label">Scan TV QR Code</span>
-          <span className="mode-card-desc">Scan the QR code on the TV to connect and present remotely over the internet.</span>
+          <span className="mode-card-text">
+            <span className="mode-card-label">Connect to TV</span>
+            <span className="mode-card-desc">Scan the QR code on the TV screen to present remotely.</span>
+          </span>
         </button>
 
         <button className="mode-card mode-card--reader" onClick={() => { try { localStorage.setItem(MODE_KEY, 'reader'); } catch {} setMode('reader'); }}>
           <span className="mode-card-icon">📖</span>
-          <span className="mode-card-label">Read Scriptures</span>
-          <span className="mode-card-desc">Personal reading — search, browse by book and chapter, adjust font size. No screen required.</span>
+          <span className="mode-card-text">
+            <span className="mode-card-label">Read Scriptures</span>
+            <span className="mode-card-desc">Browse by book and chapter. Adjust font, bookmark verses.</span>
+          </span>
         </button>
       </div>
 
