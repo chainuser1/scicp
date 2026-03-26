@@ -59,54 +59,21 @@ const PLATFORM_META = [
 function detectPlatform() {
   const ua = navigator.userAgent.toLowerCase();
   if (/android/.test(ua)) return 'android';
-  if (/iphone|ipad|ipod/.test(ua)) return null; // iOS not supported
+  if (/iphone|ipad|ipod/.test(ua)) return null;
   if (/win/.test(ua)) return 'windows';
   if (/mac/.test(ua)) return 'mac';
-  if (/linux/.test(ua)) {
-    // Debian/Ubuntu/Kali/Mint: default to .deb
-    return 'linux-deb';
-  }
+  if (/linux/.test(ua)) return 'linux-deb';
   return null;
 }
-
-const RELEASES_PAGE = 'https://github.com/chainuser1/scicp/releases/latest';
-
-const FALLBACK_BY_PLATFORM = {
-  android: {
-    url: RELEASES_PAGE,
-    sha256: null,
-  },
-  windows: {
-    url: RELEASES_PAGE,
-    sha256: null,
-  },
-  'linux-appimage': {
-    url: RELEASES_PAGE,
-    sha256: null,
-  },
-  'linux-deb': {
-    url: RELEASES_PAGE,
-    sha256: null,
-  },
-  mac: {
-    url: RELEASES_PAGE,
-    sha256: null,
-  },
-};
 
 export default function Download() {
   const [geoState, setGeoState] = useState({ checking: true, allowed: false, reason: '' });
   const [accepted, setAccepted] = useState(false);
-  const [releaseTag, setReleaseTag] = useState('fallback');
+  const [releaseTag, setReleaseTag] = useState(null);
   const [downloadLinks, setDownloadLinks] = useState(
-    PLATFORM_META.map(item => ({
-      ...item,
-      ...FALLBACK_BY_PLATFORM[item.platform],
-      source: 'fallback',
-    }))
+    PLATFORM_META.map(item => ({ ...item, url: null }))
   );
 
-  // Auto-select the tab matching the visitor's OS
   const detectedPlatform = useMemo(() => detectPlatform(), []);
   const detectedCategory = detectedPlatform === 'android' ? 'mobile' : detectedPlatform ? 'desktop' : 'desktop';
   const [activeTab, setActiveTab] = useState(detectedCategory);
@@ -134,18 +101,15 @@ export default function Download() {
           'linux-deb': find(n => n.endsWith('.deb')),
         };
         if (!active) return;
-        setReleaseTag(data?.tag_name || 'latest');
+        setReleaseTag(data?.tag_name || null);
         setDownloadLinks(
           PLATFORM_META.map(item => ({
             ...item,
-            url: found[item.platform] || FALLBACK_BY_PLATFORM[item.platform].url,
-            sha256: FALLBACK_BY_PLATFORM[item.platform].sha256,
-            source: found[item.platform] ? 'release' : 'fallback',
+            url: found[item.platform] || null,
           }))
         );
       } catch {
         clearTimeout(timer);
-        // Keep fallback links — they point to the GitHub releases page as safe fallback
       }
     };
     loadLatestReleaseAssets();
@@ -170,7 +134,6 @@ export default function Download() {
         ].filter(Boolean);
 
         if (!countries.length) {
-          // Fail-open to avoid false lockouts when geo services are down.
           setGeoState({ checking: false, allowed: true, reason: 'Location provider unavailable. Proceed responsibly.' });
           return;
         }
@@ -189,7 +152,6 @@ export default function Download() {
           return;
         }
 
-        // Allow PH users even when one provider flags proxy (common ISP false positive).
         const caution = isVpnOrProxy && anyPH ? 'Network flagged as proxy by one provider; downloads are allowed.' : '';
         setGeoState({ checking: false, allowed: true, reason: caution });
       } catch {
@@ -201,12 +163,6 @@ export default function Download() {
     return () => { active = false; };
   }, []);
 
-  const gatedMessage = useMemo(() => {
-    if (geoState.checking) return 'Verifying location and network integrity…';
-    if (!geoState.allowed) return geoState.reason || 'Access restricted.';
-    return '';
-  }, [geoState]);
-
   const groupedDownloads = useMemo(
     () => ({
       desktop: downloadLinks.filter(item => item.category === 'desktop'),
@@ -216,6 +172,16 @@ export default function Download() {
   );
 
   const visiblePlatforms = activeTab === 'desktop' ? groupedDownloads.desktop : groupedDownloads.mobile;
+
+  const handleDownload = (item) => {
+    if (item.comingSoon || !item.url) return;
+    const a = document.createElement('a');
+    a.href = item.url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
   return (
     <div className="dl-page">
@@ -234,6 +200,7 @@ export default function Download() {
           url: 'https://cap-teyyko.live/download',
         }}
       />
+
       {/* ── Hero ── */}
       <section className="dl-hero" aria-labelledby="dl-hero-title">
         <div className="dl-hero-glow" aria-hidden="true" />
@@ -243,7 +210,7 @@ export default function Download() {
         <p className="dl-hero-sub">
           Present sacred scriptures beautifully — offline, for your chapel and home.
         </p>
-        {!geoState.checking && geoState.allowed && releaseTag !== 'fallback' && (
+        {!geoState.checking && geoState.allowed && releaseTag && (
           <span className="dl-version-chip">{releaseTag}</span>
         )}
       </section>
@@ -258,7 +225,7 @@ export default function Download() {
         ) : !geoState.allowed ? (
           <div className="dl-status-card dl-status-card--blocked">
             <span className="dl-status-icon" aria-hidden="true">⊘</span>
-            <p>{gatedMessage}</p>
+            <p>{geoState.reason || 'Access restricted.'}</p>
           </div>
         ) : (
           <>
@@ -303,7 +270,7 @@ export default function Download() {
 
             {activeTab === 'desktop' && (
               <p className="dl-capability-note">
-                Desktop apps bundle all scripture databases locally and work completely offline — 
+                Desktop apps bundle all scripture databases locally and work completely offline —
                 no internet connection needed after installation.
               </p>
             )}
@@ -316,7 +283,10 @@ export default function Download() {
             {/* Cards */}
             <div className={`dl-grid dl-grid--${activeTab}`}>
               {visiblePlatforms.map(item => (
-                <div key={item.platform} className={`dl-card${detectedPlatform === item.platform ? ' dl-card--detected' : ''}`}>
+                <div
+                  key={item.platform}
+                  className={`dl-card${detectedPlatform === item.platform ? ' dl-card--detected' : ''}`}
+                >
                   <div className="dl-card-icon-wrap">
                     <span className="dl-card-icon" aria-hidden="true">{item.icon}</span>
                     {detectedPlatform === item.platform && (
@@ -350,30 +320,12 @@ export default function Download() {
                       className="dl-btn"
                       disabled={!accepted || !item.url || item.comingSoon}
                       aria-disabled={!accepted || !item.url || item.comingSoon}
-                      onClick={() => {
-                        if (item.comingSoon || !item.url) return;
-                        const a = document.createElement('a');
-                        a.href = item.url;
-                        a.download = '';
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                      }}
+                      onClick={() => handleDownload(item)}
                     >
                       {item.comingSoon ? 'Coming Soon' : `Download for ${item.label}`}
                     </button>
-                    <span className="dl-source">
-                      {item.source === 'release' ? `Latest · ${releaseTag}` : (
-                        <a href="https://github.com/chainuser1/scicp/releases/latest" target="_blank" rel="noopener noreferrer" className="dl-fallback-link">
-                          View releases page ↗
-                        </a>
-                      )}
-                    </span>
-                    {item.sha256 && (
-                    <details className="dl-verify">
-                      <summary>Verify file integrity</summary>
-                      <code className="dl-sha">SHA256: {item.sha256}</code>
-                    </details>
+                    {releaseTag && !item.comingSoon && (
+                      <span className="dl-source">Latest · {releaseTag}</span>
                     )}
                   </div>
                 </div>
