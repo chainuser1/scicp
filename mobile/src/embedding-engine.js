@@ -1,10 +1,13 @@
 /**
- * embedding-engine.js — Optional MiniLM inference for mobile.
+ * embedding-engine.js — Fine-tuned Scripture-MiniLM inference for mobile.
  *
- * Lazy-loads the Xenova/all-MiniLM-L6-v2 ONNX model via @xenova/transformers.
- * The model (~23MB) is downloaded once and cached by the browser.
- * Used for full semantic search when the "Enhanced AI Search" toggle is on.
+ * Lazy-loads the scripture-minilm ONNX model via @xenova/transformers.
+ * In Capacitor (native), fetches the model from the backend server.
+ * In browser, loads from the same origin. Model is cached after first download.
  */
+
+const SCRIPTURE_MODEL = 'scripture-minilm';
+const FALLBACK_MODEL  = 'Xenova/all-MiniLM-L6-v2';
 
 let pipeline = null;
 let pipe = null;
@@ -42,7 +45,7 @@ export function getStatus() {
 
 /**
  * Initialize the embedding pipeline (lazy — call on first search if enabled).
- * Downloads the ONNX model on first use (~23MB, cached by browser).
+ * Downloads the ONNX model on first use (~22MB quantized, cached by browser).
  * @param {function} [onProgress] — optional progress callback ({ status, progress })
  * @returns {Promise<boolean>} true if ready
  */
@@ -60,18 +63,39 @@ export async function initPipeline(onProgress) {
   loading = true;
   loadError = null;
   try {
-    // Dynamic import so the module is only pulled in when needed
-    const { pipeline: createPipeline } = await import('@xenova/transformers');
+    const { pipeline: createPipeline, env } = await import('@xenova/transformers');
     pipeline = createPipeline;
-    pipe = await createPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-      progress_callback: onProgress || undefined,
-    });
+
+    // Point @xenova/transformers to our backend for the fine-tuned model
+    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.();
+    const serverUrl = (isNative
+      ? (localStorage.getItem('scicp_server_url') || 'https://cap-teyyko.live')
+      : (window.location?.origin || '')
+    ).replace(/\/$/, '');
+    env.remoteHost = serverUrl + '/';
+    env.remotePathTemplate = 'models/{model}/';
+    env.allowLocalModels = false;
+
+    try {
+      pipe = await createPipeline('feature-extraction', SCRIPTURE_MODEL, {
+        quantized: true,
+        progress_callback: onProgress || undefined,
+      });
+    } catch (modelErr) {
+      // Fallback to generic HuggingFace model if fine-tuned model unavailable
+      console.warn('[EmbeddingEngine] Fine-tuned model unavailable, falling back:', modelErr.message);
+      env.remoteHost = 'https://huggingface.co/';
+      env.remotePathTemplate = '{model}/resolve/{revision}/';
+      pipe = await createPipeline('feature-extraction', FALLBACK_MODEL, {
+        progress_callback: onProgress || undefined,
+      });
+    }
     loading = false;
     return true;
   } catch (err) {
     loadError = err;
     loading = false;
-    console.warn('[EmbeddingEngine] Failed to load MiniLM:', err.message);
+    console.warn('[EmbeddingEngine] Failed to load model:', err.message);
     return false;
   }
 }
