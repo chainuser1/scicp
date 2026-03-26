@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; the
 RUN npm run build --workspace=frontend
 
 # --- Production stage ---
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 WORKDIR /app
 
