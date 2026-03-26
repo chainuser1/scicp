@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, lazy, Suspense } from 'react';
 import { useSession, useSocketEvent } from './hooks/useSocket';
 import { useToast } from './hooks/useToast';
 import { addToast } from './hooks/useToast';
@@ -18,11 +18,30 @@ import TVClient from './pages/TVClient';
 import { SERVER_URL } from './socket';
 import './styles/app.css';
 
+const ReaderApp = lazy(() => import('./pages/reader/ReaderApp'));
+
 const APP_MODE = import.meta.env.VITE_APP_MODE || 'presenter';
+const MODE_KEY = 'scicp_app_mode';
 
 export default function App() {
   if (APP_MODE === 'tv') return <TVClient />;
-  return <PresenterApp />;
+
+  const [appMode, setAppMode] = useState(
+    () => localStorage.getItem(MODE_KEY) || 'reader'
+  );
+  const switchMode = useCallback((mode) => {
+    localStorage.setItem(MODE_KEY, mode);
+    setAppMode(mode);
+  }, []);
+
+  if (appMode === 'reader') {
+    return (
+      <Suspense fallback={<div style={{ background: '#f5f0e8', height: '100%' }} />}>
+        <ReaderApp onSwitchMode={() => switchMode('presenter')} />
+      </Suspense>
+    );
+  }
+  return <PresenterApp onSwitchToReader={() => switchMode('reader')} />;
 }
 
 /* Maps bottom tabs to default sub-tabs */
@@ -30,7 +49,7 @@ const TAB_TO_SUBTAB = { search: 'search', preview: null, setlists: 'setlist', br
 /* Maps sub-tabs to bottom tabs */
 const SUBTAB_TO_TAB = { search: 'search', recent: 'search', setlist: 'setlists', browse: 'browse' };
 
-function PresenterApp() {
+function PresenterApp({ onSwitchToReader }) {
   const [tab, setTab] = useState('search');
   const [subTab, setSubTab] = useState('search');
   const [staged, setStaged] = useState(null);
@@ -47,6 +66,9 @@ function PresenterApp() {
     setLiveVerse(data || null);
   });
   useSocketEvent('clear-screen', () => setLiveVerse(null));
+  useSocketEvent('update-theme', () => {
+    // Theme is managed by the TV client; presenter just acknowledges
+  });
 
   /* Bottom tab change → also sync sub-tab */
   const handleTabChange = (newTab) => {
@@ -186,6 +208,7 @@ function PresenterApp() {
         <SettingsSheet
           session={session}
           onClose={() => setSettingsOpen(false)}
+          onSwitchToReader={onSwitchToReader}
         />
       )}
     </div>

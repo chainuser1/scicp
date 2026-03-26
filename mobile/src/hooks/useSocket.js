@@ -21,12 +21,15 @@ export function useConnectionState() {
     const onConnect = () => setState('connected');
     const onDisconnect = () => setState('disconnected');
     const onReconnecting = () => setState('connecting');
+    const onError = () => setState('disconnected');
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onError);
     socket.io.on('reconnect_attempt', onReconnecting);
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onError);
       socket.io.off('reconnect_attempt', onReconnecting);
     };
   }, []);
@@ -88,6 +91,11 @@ export function useSession() {
 
   // Voluntary leave: wipe everything
   useSocketEvent('session-left', () => {
+    clearSession();
+  });
+
+  // Presenter evicted by server/client
+  useSocketEvent('presenter-evicted', (data) => {
     clearSession();
   });
 

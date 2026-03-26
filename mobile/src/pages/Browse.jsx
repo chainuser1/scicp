@@ -29,7 +29,7 @@ export default function Browse({ onStage, onGoLive }) {
   // Fetch books on mount or volume change
   useEffect(() => {
     setLoading(true);
-    fetch(`${SERVER_URL}/browse/books?language=en`)
+    fetch(`${SERVER_URL}/browse/books?language=${localStorage.getItem('scicp_language') || 'en'}`)
       .then(r => r.json())
       .then(data => {
         setBooks(data.books || data || []);
@@ -47,7 +47,7 @@ export default function Browse({ onStage, onGoLive }) {
     setSelectedBook(book);
     setLevel('chapters');
     setLoading(true);
-    fetch(`${SERVER_URL}/browse/chapters?book_id=${book.id}&language=en`)
+    fetch(`${SERVER_URL}/browse/chapters?book_id=${book.id}&language=${localStorage.getItem('scicp_language') || 'en'}`)
       .then(r => r.json())
       .then(data => {
         setChapters(data.chapters || data || []);
@@ -61,7 +61,7 @@ export default function Browse({ onStage, onGoLive }) {
     setLevel('verses');
     setLoading(true);
     const chId = chapter.id || chapter.chapter_id;
-    fetch(`${SERVER_URL}/browse/verses?chapter_id=${chId}&language=en`)
+    fetch(`${SERVER_URL}/browse/verses?chapter_id=${chId}&language=${localStorage.getItem('scicp_language') || 'en'}`)
       .then(r => r.json())
       .then(data => {
         setVerses(data.verses || data || []);

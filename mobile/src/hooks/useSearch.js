@@ -27,7 +27,7 @@ export function useSearch() {
     setLoading(true);
     setPage(pg);
     if (pg === 1) setResults([]);
-    socket.emit('search', { query: trimmed, page: pg, _searchId: id });
+    socket.emit('search', { query: trimmed, page: pg, _searchId: id, language: localStorage.getItem('scicp_language') || 'en' });
   }, [query]);
 
   const loadMore = useCallback(() => {

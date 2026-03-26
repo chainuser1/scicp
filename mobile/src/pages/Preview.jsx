@@ -95,7 +95,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
     if (!staged && !displayVerse) return;
     if (!sessionId) { addToast('Join a session first', 'error'); return; }
     const v = staged || displayVerse;
-    socket.emit('go-live', { sessionId, verseData: v });
+    socket.emit('go-live', { sessionId, verseData: v, language: localStorage.getItem('scicp_language') || 'en' });
     setLiveVerse(v);
     setCurrentSegment(0);
     setIsCustomLive(false);
@@ -121,6 +121,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
     const params = new URLSearchParams({
       verse_id: displayVerse.verse_id,
       direction,
+      language: localStorage.getItem('scicp_language') || 'en',
       ...(displayVerse.book_id != null && { book_id: displayVerse.book_id }),
       ...(displayVerse.chapter_number != null && { chapter_number: displayVerse.chapter_number }),
       ...(displayVerse.verse_number != null && { verse_number: displayVerse.verse_number }),
@@ -144,6 +145,7 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
 
   const clearScreen = useCallback(() => {
     if (!sessionId) return;
+    if (!window.confirm('Clear the screen?')) return;
     socket.emit('clear-screen', { sessionId });
     setLiveVerse(null);
     setIsCustomLive(false);
@@ -278,6 +280,11 @@ export default function PreviewPage({ staged, setStaged, liveVerse, setLiveVerse
             />
             <button className="highlight-send" onClick={highlight} disabled={!highlightText.trim()}>
               ✦
+            </button>
+            <button className="highlight-send" onClick={() => {
+              if (sessionId) { socket.emit('highlight-text', { sessionId, text: '' }); setHighlightText(''); addToast('Highlight cleared', 'info'); }
+            }} style={{ opacity: highlightText ? 1 : 0.3 }}>
+              ✕
             </button>
           </div>
         </section>
