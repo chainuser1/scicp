@@ -30,10 +30,23 @@
   gap: 4px;
 }
 
+.settings-session-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.settings-session-btns .btn { flex: 1; }
+
 .settings-session-actions {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.settings-join-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .settings-lang-grid {
@@ -63,4 +76,64 @@
 .theme-swatch.theme-active {
   border-color: var(--gold);
   box-shadow: 0 0 12px rgba(201,168,76,0.3);
+}
+
+/* QR code display */
+.qr-canvas-display {
+  max-width: 200px;
+  margin: 0 auto;
+  border-radius: var(--radius);
+}
+
+/* Background presets */
+.bg-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.bg-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--surface);
+  border: 2px solid var(--surface-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: all var(--transition);
+  min-height: 64px;
+  justify-content: center;
+}
+
+.bg-swatch.bg-active {
+  border-color: var(--gold);
+  box-shadow: 0 0 8px rgba(201,168,76,0.3);
+}
+
+.bg-thumb {
+  width: 100%;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.bg-label {
+  font-size: 0.625rem;
+  color: var(--text-dim);
+}
+
+/* Font controls */
+.font-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.font-slider {
+  width: 100%;
+  accent-color: var(--gold);
+  margin-top: 4px;
 }

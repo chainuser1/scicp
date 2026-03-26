@@ -40,3 +40,9 @@
   transition: background var(--transition);
 }
 .setlist-item:active { background: var(--surface-3); }
+
+.setlist-item-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

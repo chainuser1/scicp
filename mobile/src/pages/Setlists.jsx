@@ -3,11 +3,12 @@ import { SERVER_URL } from '../socket';
 import { addToast } from '../hooks/useToast';
 import './Setlists.css';
 
-export default function SetlistsPage({ onStage }) {
+export default function SetlistsPage({ onStage, bookmarks, toggleBookmark }) {
   const [setlists, setSetlists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [showBookmarks, setShowBookmarks] = useState(false);
 
   const fetchSetlists = useCallback(async () => {
     try {
@@ -39,6 +40,44 @@ export default function SetlistsPage({ onStage }) {
 
   return (
     <div className="setlists-page scroll-area safe-bottom">
+      {/* Bookmarks toggle */}
+      {bookmarks?.length > 0 && (
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={() => setShowBookmarks(!showBookmarks)}
+          style={{ alignSelf: 'flex-start' }}
+        >
+          🔖 Bookmarks ({bookmarks.length}) {showBookmarks ? '▲' : '▼'}
+        </button>
+      )}
+
+      {showBookmarks && bookmarks?.length > 0 && (
+        <div className="card setlist-card">
+          <div className="setlist-header">
+            <span className="font-semibold">🔖 Bookmarks</span>
+            <span className="badge badge-gold">{bookmarks.length} verses</span>
+          </div>
+          <div className="setlist-items">
+            {bookmarks.map((v, i) => (
+              <div key={v.verse_id || i} className="setlist-item-row">
+                <button className="setlist-item" onClick={() => onStage(v)} style={{ flex: 1 }}>
+                  <span className="text-sm text-gold">
+                    {v.verse_title || `${v.book_title} ${v.chapter_number}:${v.verse_number}`}
+                  </span>
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => toggleBookmark(v)}
+                  title="Remove bookmark"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="setlists-create">
         <input
           className="input"
