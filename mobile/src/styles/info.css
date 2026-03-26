@@ -1,0 +1,63 @@
+/* ── Shared Info Page Styles ── */
+.info-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--obsidian);
+  overflow: hidden;
+}
+.info-scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.info-scroll::-webkit-scrollbar { display: none; }
+.info-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--safe-top, 0px) + 14px) 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.info-back {
+  background: none;
+  border: none;
+  color: var(--gold);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.info-header-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.info-content {
+  padding: 20px 16px 40px;
+}
+.info-content h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin: 24px 0 8px;
+}
+.info-content h2:first-child { margin-top: 0; }
+.info-content p {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+.info-content a {
+  color: var(--gold);
+  text-decoration: underline;
+}
+.info-content h3 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 16px 0 6px;
+}

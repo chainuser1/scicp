@@ -1,0 +1,105 @@
+.home-page-m {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--obsidian);
+  overflow: hidden;
+}
+.home-scroll {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.home-scroll::-webkit-scrollbar { display: none; }
+
+/* Hero */
+.home-hero-m {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: calc(var(--safe-top, 0px) + 32px) 24px 24px;
+}
+.home-emblem-m {
+  margin-bottom: 20px;
+}
+.home-title-m {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+.home-title-m em {
+  color: var(--gold);
+  font-style: italic;
+}
+.home-subtitle-m {
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* Mode Cards */
+.home-cards-m {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 20px;
+}
+.home-card-m {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 20px 20px;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--surface);
+  border: 1px solid rgba(201,168,76,0.15);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.home-card-m:active {
+  transform: scale(0.98);
+  border-color: rgba(201,168,76,0.3);
+}
+.home-card-reader-m {
+  border-color: rgba(201,168,76,0.25);
+}
+.home-card-icon-m {
+  font-size: 1.75rem;
+  margin-bottom: 8px;
+}
+.home-card-label-m {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 6px;
+}
+.home-card-desc-m {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.home-card-btn-m {
+  padding: 8px 20px;
+  border-radius: 6px;
+  background: none;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.home-card-btn-m:active {
+  background: rgba(201,168,76,0.1);
+}

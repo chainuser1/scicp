@@ -1,0 +1,38 @@
+.root-tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--deep, #111118);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-bottom: var(--safe-bottom, 0px);
+  height: var(--tab-height, 56px);
+  z-index: 100;
+  flex-shrink: 0;
+}
+.root-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-dim, #6a6458);
+  font-family: inherit;
+  transition: color 0.2s ease;
+  padding: 6px 0;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.root-tab-active {
+  color: var(--gold, #c9a84c);
+}
+.root-tab-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.root-tab-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
