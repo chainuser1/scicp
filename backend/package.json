@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Scriptures in View — Fastify + Socket.IO backend",
   "main": "index.js",
   "scripts": {
