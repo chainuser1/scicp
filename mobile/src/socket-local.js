@@ -46,6 +46,8 @@ const RECONNECT_DELAY_MS = 2000;
 // Track the current verse/theme for re-send after displayReady
 let _lastVerse = null;
 let _lastTheme = null;
+// Track whether the local HTTP server (LAN TV) is running
+let _localServerRunning = false;
 
 // Called by CastingControl after startCasting to subscribe events
 export function onDisplayReady(callback) {
@@ -89,7 +91,6 @@ async function sendToDisplay(message) {
       try {
         await ExternalDisplay.sendToDisplay({ message });
       } catch {
-        // Fallback: dispatch locally (browser dev mode / popup)
         window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
       }
     } else if (_castMode === 'web' && _webConnection) {
@@ -99,6 +100,12 @@ async function sendToDisplay(message) {
         window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
       }
     }
+  } else if (_localServerRunning) {
+    // No native casting active, but local HTTP server is running (LAN TV).
+    // Push via plugin so the native side forwards to SSE clients.
+    try {
+      await ExternalDisplay.sendToDisplay({ message });
+    } catch { /* ignore — local server might have stopped */ }
   }
   // Always fire locally too (for in-app preview if needed)
   window.dispatchEvent(new CustomEvent('bridge-message', { detail: message }));
@@ -226,7 +233,9 @@ export function isCasting() {
 /** Start local HTTP server for LAN casting (last-resort offline fallback). */
 export async function startLocalServer(port = 8080) {
   try {
-    return await ExternalDisplay.startLocalServer({ port });
+    const result = await ExternalDisplay.startLocalServer({ port });
+    _localServerRunning = true;
+    return result;
   } catch (e) {
     console.warn('startLocalServer failed:', e);
     return null;
@@ -235,6 +244,7 @@ export async function startLocalServer(port = 8080) {
 
 /** Stop local HTTP server. */
 export async function stopLocalServer() {
+  _localServerRunning = false;
   try {
     await ExternalDisplay.stopLocalServer();
   } catch { /* ignore */ }

@@ -8091,6 +8091,19 @@ button, [role="button"] {
   padding: 0.6rem 0 0;
 }
 
+/* Inside the bottom sheet, open popover downward (sheet has overflow-y:auto) */
+.prs-more-sheet .ctv-popover {
+  bottom: auto;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  right: auto;
+}
+/* Inside header toolbar on wide screens, also open downward */
+.hdr-right .ctv-popover {
+  bottom: auto;
+  top: calc(100% + 0.55rem);
+}
+
 /* ── Presenter UI mode — controls ONLY the operator panel, not client display ── */
 .presenter-ui--light .presenter-header,
 .presenter-ui--light .presenter-sidebar,
