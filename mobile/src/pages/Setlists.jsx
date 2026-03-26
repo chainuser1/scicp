@@ -1,15 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+/**
+ * Setlists.jsx — Combined preview card + ORDER OF SERVICE.
+ * Matches the Setlist mockup: preview at top, media controls,
+ * "projecting now" bar, numbered items with live badge, FAB.
+ */
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { SERVER_URL } from '../socket';
 import socket from '../socket';
 import { addToast } from '../hooks/useToast';
 import './Setlists.css';
 
-export default function SetlistsPage({ onStage, bookmarks, toggleBookmark, sessionId, liveVerseId }) {
+export default function SetlistsPage({ onStage, onGoLive, sessionId, liveVerse, staged, setStaged }) {
   const [setlists, setSetlists] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeIdx, setActiveIdx] = useState(0); // which setlist is selected
+  const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
-  const [expanded, setExpanded] = useState(null);
-  const [showBookmarks, setShowBookmarks] = useState(false);
+  const touchStartRef = useRef(null);
 
   const fetchSetlists = useCallback(async () => {
     try {
@@ -20,6 +26,12 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark, sessi
   }, []);
 
   useEffect(() => { fetchSetlists(); }, [fetchSetlists]);
+
+  const activeSetlist = setlists[activeIdx] || null;
+  const items = activeSetlist?.items || [];
+  const liveVerseId = liveVerse?.verse_id || liveVerse?.id;
+  const liveItemIdx = items.findIndex(it => (it.verse_id || it.id) === liveVerseId);
+  const displayVerse = staged || liveVerse;
 
   const createSetlist = async () => {
     const name = newName.trim();
@@ -34,6 +46,8 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark, sessi
         const sl = await res.json();
         setSetlists(prev => [sl, ...prev]);
         setNewName('');
+        setShowCreate(false);
+        setActiveIdx(0);
         addToast('Setlist created', 'success');
       }
     } catch { addToast('Failed to create setlist', 'error'); }
@@ -44,155 +58,191 @@ export default function SetlistsPage({ onStage, bookmarks, toggleBookmark, sessi
       const res = await fetch(`${SERVER_URL}/setlists/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setSetlists(prev => prev.filter(s => s.id !== id));
+        setActiveIdx(0);
         addToast('Setlist deleted', 'info');
       }
     } catch { addToast('Failed to delete', 'error'); }
   };
 
-  const updateSetlist = async (id, items) => {
+  const updateItems = async (newItems) => {
+    if (!activeSetlist) return;
+    setSetlists(prev => prev.map((sl, i) => i === activeIdx ? { ...sl, items: newItems } : sl));
     try {
-      await fetch(`${SERVER_URL}/setlists/${id}`, {
+      await fetch(`${SERVER_URL}/setlists/${activeSetlist.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({ items: newItems }),
       });
     } catch { /* silent */ }
   };
 
-  const removeItem = (setlistId, itemIdx) => {
-    setSetlists(prev => prev.map(sl => {
-      if (sl.id !== setlistId) return sl;
-      const items = [...(sl.items || [])];
-      items.splice(itemIdx, 1);
-      updateSetlist(sl.id, items);
-      return { ...sl, items };
-    }));
-    addToast('Item removed', 'info');
+  const removeItem = (itemIdx) => {
+    const newItems = [...items];
+    newItems.splice(itemIdx, 1);
+    updateItems(newItems);
+    addToast('Removed', 'info');
   };
 
-  const moveItem = (setlistId, fromIdx, dir) => {
-    setSetlists(prev => prev.map(sl => {
-      if (sl.id !== setlistId) return sl;
-      const items = [...(sl.items || [])];
-      const toIdx = fromIdx + (dir === 'up' ? -1 : 1);
-      if (toIdx < 0 || toIdx >= items.length) return sl;
-      [items[fromIdx], items[toIdx]] = [items[toIdx], items[fromIdx]];
-      updateSetlist(sl.id, items);
-      return { ...sl, items };
-    }));
+  const moveItem = (fromIdx, dir) => {
+    const toIdx = fromIdx + (dir === 'up' ? -1 : 1);
+    if (toIdx < 0 || toIdx >= items.length) return;
+    const newItems = [...items];
+    [newItems[fromIdx], newItems[toIdx]] = [newItems[toIdx], newItems[fromIdx]];
+    updateItems(newItems);
   };
 
-  const goLiveFromItem = (item) => {
+  const goLiveItem = (item) => {
     if (!sessionId) { addToast('Join a session first', 'error'); return; }
-    socket.emit('go-live', { sessionId, verseData: item });
-    addToast('Live!', 'success');
+    onGoLive(item);
   };
+
+  const goLiveNext = () => {
+    if (liveItemIdx < 0 || liveItemIdx >= items.length - 1) return;
+    goLiveItem(items[liveItemIdx + 1]);
+  };
+  const goLivePrev = () => {
+    if (liveItemIdx <= 0) return;
+    goLiveItem(items[liveItemIdx - 1]);
+  };
+
+  // Swipe-to-remove touch handlers
+  const handleTouchStart = (e, idx) => {
+    touchStartRef.current = { x: e.touches[0].clientX, idx };
+  };
+  const handleTouchEnd = (e) => {
+    if (!touchStartRef.current) return;
+    const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
+    if (Math.abs(dx) > 100) removeItem(touchStartRef.current.idx);
+    touchStartRef.current = null;
+  };
+
+  const title = (v) => v?.verse_title || v?.reference || `${v?.book_title || ''} ${v?.chapter_number || ''}:${v?.verse_number || ''}`;
 
   return (
     <div className="setlists-page scroll-area safe-bottom">
-      {/* Bookmarks toggle */}
-      {bookmarks?.length > 0 && (
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => setShowBookmarks(!showBookmarks)}
-          style={{ alignSelf: 'flex-start' }}
-        >
-          🔖 Bookmarks ({bookmarks.length}) {showBookmarks ? '▲' : '▼'}
-        </button>
-      )}
-
-      {showBookmarks && bookmarks?.length > 0 && (
-        <div className="card setlist-card">
-          <div className="setlist-header">
-            <span className="font-semibold">🔖 Bookmarks</span>
-            <span className="badge badge-gold">{bookmarks.length} verses</span>
-          </div>
-          <div className="setlist-items">
-            {bookmarks.map((v, i) => (
-              <div key={v.verse_id || i} className="setlist-item-row">
-                <button className="setlist-item" onClick={() => onStage(v)} style={{ flex: 1 }}>
-                  <span className="text-sm text-gold">
-                    {v.verse_title || `${v.book_title} ${v.chapter_number}:${v.verse_number}`}
-                  </span>
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => toggleBookmark(v)} title="Remove bookmark">
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="setlists-create">
-        <input
-          className="input"
-          placeholder="New setlist name…"
-          value={newName}
-          onChange={e => setNewName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && createSetlist()}
-        />
-        <button className="btn btn-primary btn-sm" onClick={createSetlist}>Create</button>
-      </div>
-
-      {loading && (
-        <div className="search-loading"><div className="spinner" /></div>
-      )}
-
-      {!loading && setlists.length === 0 && (
-        <div className="empty-state">
-          <span className="empty-state-icon">📋</span>
-          <p className="text-secondary">No setlists yet</p>
-          <p className="text-xs text-dim">Create one to save verse collections for services</p>
-        </div>
-      )}
-
-      {setlists.map(sl => (
-        <div key={sl.id} className="card setlist-card">
-          <div className="setlist-header-row">
+      {/* Setlist selector if multiple */}
+      {setlists.length > 1 && (
+        <div className="sl-selector">
+          {setlists.map((sl, i) => (
             <button
-              className="setlist-header"
-              onClick={() => setExpanded(expanded === sl.id ? null : sl.id)}
+              key={sl.id}
+              className={`sl-select-btn ${i === activeIdx ? 'sl-select-active' : ''}`}
+              onClick={() => setActiveIdx(i)}
             >
-              <span className="font-semibold">{sl.name}</span>
-              <span className="badge badge-gold">{(sl.items || []).length}</span>
+              {sl.name}
             </button>
-            <button className="btn btn-ghost btn-sm sl-delete-btn" onClick={() => deleteSetlist(sl.id)} title="Delete">
-              🗑
-            </button>
-          </div>
-          {expanded === sl.id && (
-            <div className="setlist-items">
-              {(sl.items || []).length === 0 && (
-                <p className="text-xs text-dim" style={{ padding: '8px 0' }}>Empty setlist</p>
-              )}
-              {(sl.items || []).map((item, i) => {
-                const isLive = liveVerseId && (item.verse_id === liveVerseId || item.id === liveVerseId);
-                return (
-                  <div key={i} className={`setlist-item-row ${isLive ? 'sl-item-live' : ''}`}>
-                    <div className="sl-reorder">
-                      <button className="sl-move-btn" onClick={() => moveItem(sl.id, i, 'up')} disabled={i === 0}>▲</button>
-                      <button className="sl-move-btn" onClick={() => moveItem(sl.id, i, 'down')} disabled={i === (sl.items || []).length - 1}>▼</button>
-                    </div>
-                    <button className="setlist-item" onClick={() => onStage(item)} style={{ flex: 1 }}>
-                      <span className="text-sm text-gold">
-                        {item.verse_title || item.reference || `Verse ${i + 1}`}
-                      </span>
-                      {isLive && <span className="badge badge-green" style={{ marginLeft: 6 }}>LIVE</span>}
-                    </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => goLiveFromItem(item)} title="Go Live">
-                      🔴
-                    </button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => removeItem(sl.id, i)} title="Remove">
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          ))}
         </div>
-      ))}
+      )}
+
+      {/* Preview card at top */}
+      {displayVerse && (
+        <div className="sl-preview-card">
+          <p className="sl-preview-text">{displayVerse.scripture_text || ''}</p>
+          <p className="sl-preview-ref">{title(displayVerse)}</p>
+        </div>
+      )}
+
+      {/* Media controls */}
+      {displayVerse && (
+        <div className="sl-media-controls">
+          <button className="media-btn media-btn-sm" onClick={goLivePrev} disabled={liveItemIdx <= 0}>⏮</button>
+          <button className="media-btn media-btn-sm" disabled>◀</button>
+          <button className="media-btn media-btn-play" onClick={() => {
+            if (displayVerse && sessionId) {
+              onGoLive(displayVerse);
+            }
+          }}>▶</button>
+          <button className="media-btn media-btn-sm" disabled>▶</button>
+          <button className="media-btn media-btn-sm" onClick={goLiveNext} disabled={liveItemIdx < 0 || liveItemIdx >= items.length - 1}>⏭</button>
+        </div>
+      )}
+
+      {/* Projecting now bar */}
+      {liveVerse && liveItemIdx >= 0 && (
+        <div className="sl-projecting-bar">
+          <button className="sl-proj-arrow" onClick={goLivePrev} disabled={liveItemIdx <= 0}>◀</button>
+          <div className="sl-proj-info">
+            <span className="sl-proj-label">projecting now</span>
+            <span className="sl-proj-ref">{title(liveVerse)}</span>
+          </div>
+          <button className="sl-proj-arrow" onClick={goLiveNext} disabled={liveItemIdx >= items.length - 1}>▶</button>
+        </div>
+      )}
+
+      {/* ORDER OF SERVICE */}
+      {activeSetlist && (
+        <section className="sl-order-section">
+          <div className="sl-order-header">
+            <span className="sl-order-title">{activeSetlist.name?.toUpperCase()}</span>
+            <button className="sl-delete-btn" onClick={() => deleteSetlist(activeSetlist.id)}>🗑</button>
+          </div>
+          {items.length === 0 && (
+            <p className="sl-empty-hint">No items yet — search for verses and tap 🔴 to add</p>
+          )}
+          <div className="sl-items">
+            {items.map((item, i) => {
+              const isLive = liveVerseId && ((item.verse_id || item.id) === liveVerseId);
+              return (
+                <div
+                  key={i}
+                  className={`sl-item ${isLive ? 'sl-item-live' : ''}`}
+                  onClick={() => onStage(item)}
+                  onTouchStart={(e) => handleTouchStart(e, i)}
+                  onTouchEnd={handleTouchEnd}
+                >
+                  <span className="sl-item-num">{i + 1}</span>
+                  <span className="sl-item-ref">{title(item)}</span>
+                  {isLive && <span className="sl-live-badge">◆ live</span>}
+                  <button
+                    className="sl-item-live-dot"
+                    onClick={(e) => { e.stopPropagation(); goLiveItem(item); }}
+                  >
+                    <span className="dot-red" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {items.length > 0 && (
+            <p className="sl-reorder-hint">hold to reorder · swipe to remove</p>
+          )}
+        </section>
+      )}
+
+      {/* Empty state */}
+      {!loading && setlists.length === 0 && !showCreate && (
+        <div className="empty-state">
+          <span className="empty-state-icon">☰</span>
+          <p className="text-secondary">No setlists yet</p>
+          <p className="text-xs text-dim">Tap + to create an order of service</p>
+        </div>
+      )}
+
+      {/* Create form */}
+      {showCreate && (
+        <div className="sl-create-form">
+          <input
+            className="ss-input"
+            placeholder="Setlist name (e.g. Sacrament Meeting)"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && createSetlist()}
+            autoFocus
+          />
+          <div className="sl-create-actions">
+            <button className="ss-btn ss-btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+            <button className="ss-btn ss-btn-primary" onClick={createSetlist}>Create</button>
+          </div>
+        </div>
+      )}
+
+      {loading && <div className="search-loading"><div className="spinner" /></div>}
+
+      {/* Green FAB */}
+      <button className="sl-fab" onClick={() => setShowCreate(true)} aria-label="Create setlist">
+        +
+      </button>
     </div>
   );
 }
