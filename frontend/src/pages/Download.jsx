@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Footer from '../components/Footer';
+import SEO from '../components/SEO';
 
 const PLATFORM_META = [
   {
@@ -110,27 +111,6 @@ export default function Download() {
   const [activeTab, setActiveTab] = useState(detectedCategory);
 
   useEffect(() => {
-    document.title = 'Download | Scriptures in View';
-    const ogTitle = document.querySelector('meta[property="og:title"]');
-    const ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogTitle) ogTitle.setAttribute('content', 'Download | Scriptures in View');
-    if (ogDesc) ogDesc.setAttribute('content', 'Download desktop and mobile apps for offline use');
-    const metaDesc = document.querySelector('meta[name="description"]');
-    const description = 'Download offline Scriptures in View apps for Android, Windows, Linux, and Mac. Non-commercial church and home use only.';
-    if (metaDesc) metaDesc.setAttribute('content', description);
-    else {
-      const meta = document.createElement('meta');
-      meta.name = 'description';
-      meta.content = description;
-      document.head.appendChild(meta);
-    }
-    const robotsMeta = document.querySelector('meta[name="robots"]');
-    if (robotsMeta) robotsMeta.setAttribute('content', 'index,follow');
-    const canonical = document.querySelector('link[rel="canonical"]') || (() => { const el = document.createElement('link'); el.rel = 'canonical'; document.head.appendChild(el); return el; })();
-    canonical.setAttribute('href', 'https://cap-teyyko.live/download');
-  }, []);
-
-  useEffect(() => {
     let active = true;
     const loadLatestReleaseAssets = async () => {
       const controller = new AbortController();
@@ -238,6 +218,21 @@ export default function Download() {
 
   return (
     <div className="dl-page">
+      <SEO
+        title="Download"
+        description="Download Scriptures in View for Windows, Mac, Linux, and Android. Desktop apps work fully offline. Free scripture presentation for church and home."
+        path="/download"
+        jsonLd={{
+          '@context': 'https://schema.org',
+          '@type': 'SoftwareApplication',
+          name: 'Scriptures in View',
+          applicationCategory: 'ReligiousApp',
+          operatingSystem: 'Windows, macOS, Linux, Android',
+          offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+          description: 'Free offline scripture presentation app for worship services.',
+          url: 'https://cap-teyyko.live/download',
+        }}
+      />
       {/* ── Hero ── */}
       <section className="dl-hero" aria-labelledby="dl-hero-title">
         <div className="dl-hero-glow" aria-hidden="true" />

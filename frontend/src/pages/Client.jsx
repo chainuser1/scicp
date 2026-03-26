@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
+import SEO from '../components/SEO';
 
 const POV_TINT = {
   'prayer or praise':      'rgba(120, 80, 200, 0.12)',
@@ -333,14 +334,6 @@ function Client() {
     sync();
     media.addEventListener('change', sync);
     return () => media.removeEventListener('change', sync);
-  }, []);
-
-  useEffect(() => {
-    document.title = 'Client Display | Scriptures in View';
-    const m = document.querySelector('meta[name="robots"]');
-    if (m) m.setAttribute('content', 'noindex,nofollow');
-    // Remove any canonical — this is an app screen, not a crawlable content page.
-    document.querySelector('link[rel="canonical"]')?.remove();
   }, []);
 
   // Caches the Client shell + static assets for offline display continuity.
@@ -946,6 +939,8 @@ function Client() {
   ].filter(Boolean).join(' ');
 
   return (
+    <>
+    <SEO title="Client Display" description="Live scripture display for congregational screens." path="/client" noindex />
     <div className={viewClass} style={{
       fontSize: computedFontSize,
       fontFamily: hasCjk
@@ -1113,6 +1108,7 @@ function Client() {
 
       <button className="fullscreen-toggle" onClick={toggleFullscreen} aria-label="Toggle fullscreen" title="Toggle fullscreen (F11)">⛶</button>
     </div>
+    </>
   );
 }
 
