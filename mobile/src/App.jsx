@@ -6,6 +6,7 @@ import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style as StatusBarStyle } from '@capacitor/status-bar';
 import { socket as localSocket, isDisplayAvailable } from './socket-local';
 import { socket as remoteSocket } from './socket-remote';
+import { setServerUrl as setRemoteServiceUrl } from './scripture-service-remote';
 import { initAllDatabases } from './db-manager';
 import { requestNotificationPermission } from './notify';
 import SocketCtx from './socket-context';
@@ -76,13 +77,15 @@ export default function App() {
   // ── Offline init ──
   useEffect(() => {
     if (mode !== 'offline') return;
+    // Set the remote service URL so socket-local can use web API for search when network is available
+    setRemoteServiceUrl(serverUrl || 'https://cap-teyyko.live');
     localSocket.init()
       .then(() => setReady(true))
       .catch(err => {
         console.error('Failed to initialize databases:', err);
         setError(err.message || 'Failed to load scripture databases.');
       });
-  }, [mode]);
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reader mode init (DBs only, no socket) ──
   useEffect(() => {
@@ -213,6 +216,8 @@ export default function App() {
       // Ensure local DBs are initialised (no-op if already done)
       await localSocket.init();
       remoteSocket.destroy();
+      // Also set the remote service URL so socket-local can use web API for search when online
+      setRemoteServiceUrl(serverUrl || 'https://cap-teyyko.live');
       localStorage.setItem(MODE_KEY, 'offline');
       setMode('offline');
       setReady(true);
@@ -428,7 +433,8 @@ export default function App() {
     switchToOffline,
     switchToOnline,
     isOnline: mode === 'online',
-  }), [mode, serverUrl, requestModeSwitch, switchToOffline, switchToOnline]);
+    networkAvailable: networkStatus === 'online',
+  }), [mode, serverUrl, requestModeSwitch, switchToOffline, switchToOnline, networkStatus]);
 
   // ── Mode-switch scanner (reuses the same QR flow but calls switchToOnline) ──
   const startModeSwitchScanner = useCallback(() => {
