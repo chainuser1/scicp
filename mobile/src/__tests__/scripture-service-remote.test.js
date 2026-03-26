@@ -58,7 +58,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ results: [{ verse_id: 1 }], total: 1 });
       const result = await search('love', 0, 10, 'en');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/search?q=love&page=0&pageSize=10&language=en'
+        'https://api.example.com/search?q=love&page=0&pageSize=10&language=en',
+        expect.any(Object)
       );
       expect(result).toEqual({ results: [{ verse_id: 1 }], total: 1 });
     });
@@ -67,8 +68,12 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ results: [], total: 0 });
       await search('God & love', 0, 10, 'en');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('q=God%20%26%20love')
+        expect.stringContaining('q=God'),
+        expect.any(Object)
       );
+      // URLSearchParams encodes spaces as + and & as %26
+      const calledUrl = globalThis.fetch.mock.calls[0][0];
+      expect(calledUrl).toMatch(/q=God[+%20]+%26[+%20]+love/);
     });
   });
 
@@ -79,7 +84,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson([{ id: 1, book_title: 'Genesis' }]);
       const result = await browse('books');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/browse/books?language=en'
+        'https://api.example.com/browse/books?language=en',
+        expect.any(Object)
       );
       expect(result).toEqual([{ id: 1, book_title: 'Genesis' }]);
     });
@@ -88,7 +94,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson([{ id: 10, chapter_number: 1 }]);
       await browse('chapters', { bookId: 1 }, 'en');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/browse/chapters?book_id=1&language=en'
+        'https://api.example.com/browse/chapters?book_id=1&language=en',
+        expect.any(Object)
       );
     });
 
@@ -96,7 +103,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson([]);
       await browse('verses', { chapterId: 5 }, 'tl');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/browse/verses?chapter_id=5&language=tl'
+        'https://api.example.com/browse/verses?chapter_id=5&language=tl',
+        expect.any(Object)
       );
     });
 
@@ -117,7 +125,8 @@ describe('scripture-service-remote', () => {
       });
       const result = await getChapterSummary(42);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/chapter/42/summary'
+        'https://api.example.com/chapter/42/summary',
+        expect.any(Object)
       );
       expect(result.summary_text).toBe('A summary');
       expect(result.ready).toBe(true);
@@ -141,7 +150,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ people: ['Moses'], places: ['Sinai'], ready: true });
       const result = await getChapterEntities(3);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/chapter/3/entities'
+        'https://api.example.com/chapter/3/entities',
+        expect.any(Object)
       );
       expect(result.people).toEqual(['Moses']);
     });
@@ -154,7 +164,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ summary: 'verse summary', cross_references: [], ready: true });
       const result = await getVerseSummary(100);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/verse/100/summary'
+        'https://api.example.com/verse/100/summary',
+        expect.any(Object)
       );
       expect(result.summary).toBe('verse summary');
     });
@@ -167,7 +178,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ results: [{ verse_id: 2 }], matchedConcept: 'love', total: 1 });
       const result = await getRelated(1, 'en');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/verse/1/related?language=en&pageSize=20'
+        'https://api.example.com/verse/1/related?language=en&pageSize=20',
+        expect.any(Object)
       );
       expect(result.matchedConcept).toBe('love');
     });
@@ -180,7 +192,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ pov: 'narrator', labels: ['law'], speaker: null, ready: true });
       const result = await getVerseTags(50);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/verse/50/tags'
+        'https://api.example.com/verse/50/tags',
+        expect.any(Object)
       );
       expect(result.pov).toBe('narrator');
     });
@@ -193,7 +206,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ verse_id: 5, scripture_text: 'translated' });
       const result = await getVerse({ verse_id: 5 }, 'tl');
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/verse/5/translation?language=tl'
+        'https://api.example.com/verse/5/translation?language=tl',
+        expect.any(Object)
       );
       expect(result.scripture_text).toBe('translated');
     });
@@ -230,7 +244,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ results: [{ topic: 'grace' }] });
       const result = await searchSermonTopics('grace', 5);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/sermon-search?q=grace&limit=5'
+        'https://api.example.com/sermon-search?q=grace&limit=5',
+        expect.any(Object)
       );
       expect(result).toEqual([{ topic: 'grace' }]);
     });
@@ -243,7 +258,8 @@ describe('scripture-service-remote', () => {
       mockFetchJson({ verse_id: 999, scripture_text: 'daily verse' });
       const result = await verseOfTheDay();
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        'https://api.example.com/verse/of-the-day'
+        'https://api.example.com/verse/of-the-day',
+        expect.any(Object)
       );
       expect(result.verse_id).toBe(999);
     });
