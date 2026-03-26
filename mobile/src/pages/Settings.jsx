@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { addToast } from '../hooks/useToast';
+import { useSocketEvent } from '../hooks/useSocket';
 import socket, { SERVER_URL } from '../socket';
 import QrScanner from '../components/QrScanner';
 import PinModal from '../components/PinModal';
@@ -46,6 +47,16 @@ const THEMES = [
   { name: 'Midnight Blue', bg: '#0f1626', text: '#c8d6e5' },
 ];
 
+const TRANSITIONS = [
+  'Fade', 'Slide', 'Push', 'Zoom', 'Flip', 'Dissolve',
+  'Iris', 'Wipe', 'Morph', 'None',
+];
+
+const LAYOUTS = [
+  { label: 'Centered', value: 'centered' },
+  { label: 'Lower Third', value: 'lower-third' },
+];
+
 export default function SettingsPage({ session }) {
   const {
     sessionId, sessionLabel, viewerCount,
@@ -56,14 +67,39 @@ export default function SettingsPage({ session }) {
   const [joinId, setJoinId] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [language, setLanguage] = useState('en');
+  const [secondaryLanguage, setSecondaryLanguage] = useState('');
   const [pin, setPin] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [hasPinActive, setHasPinActive] = useState(false);
   const [fontSize, setFontSize] = useState(32);
+  const [fontScale, setFontScale] = useState(1.0);
   const [fontFamily, setFontFamily] = useState(FONT_FAMILIES[0].value);
   const [activeBg, setActiveBg] = useState(0);
+  const [customBgUrl, setCustomBgUrl] = useState('');
+  const [transition, setTransition] = useState('Fade');
+  const [layout, setLayout] = useState('centered');
+  const [takeoverAlert, setTakeoverAlert] = useState(null);
+  const [leaveConfirm, setLeaveConfirm] = useState(false);
   const qrCanvasRef = useRef(null);
+  const leaveTimerRef = useRef(null);
+
+  // Auto-session: create session on first connect if none exists
+  useEffect(() => {
+    if (isConnected && !sessionId) {
+      const saved = localStorage.getItem('scicp_session_id');
+      if (!saved) {
+        createSession();
+        addToast('Auto-created session', 'info');
+      }
+    }
+  }, [isConnected, sessionId, createSession]);
+
+  // Takeover alert
+  useSocketEvent('presenter-takeover-attempt', (data) => {
+    setTakeoverAlert(data);
+    addToast('⚠️ Another presenter is trying to take over!', 'error');
+  });
 
   const handleCreate = () => {
     createSession(newLabel.trim() || undefined);
@@ -76,6 +112,17 @@ export default function SettingsPage({ session }) {
     joinSession(sid, pin ? { pin } : {});
     setJoinId('');
     setPin('');
+  };
+
+  const handleLeave = () => {
+    if (!leaveConfirm) {
+      setLeaveConfirm(true);
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = setTimeout(() => setLeaveConfirm(false), 3000);
+      return;
+    }
+    setLeaveConfirm(false);
+    leaveSession();
   };
 
   const handleScannedCode = (code) => {
@@ -92,6 +139,13 @@ export default function SettingsPage({ session }) {
     }
   };
 
+  const handleSecondaryLanguage = (code) => {
+    setSecondaryLanguage(code === secondaryLanguage ? '' : code);
+    if (sessionId) {
+      socket.emit('update-language', { sessionId, language, secondaryLanguage: code === secondaryLanguage ? null : code });
+    }
+  };
+
   const applyTheme = (theme, idx) => {
     if (sessionId) {
       const bgUrl = BG_PRESETS[activeBg]?.url || null;
@@ -102,7 +156,10 @@ export default function SettingsPage({ session }) {
           textColor: theme.text,
           name: theme.name,
           font_size: fontSize,
+          font_scale: fontScale,
           font_family: fontFamily,
+          transition,
+          layout,
           ...(bgUrl && { backgroundImage: bgUrl }),
         },
       });
@@ -114,7 +171,7 @@ export default function SettingsPage({ session }) {
     if (sessionId) {
       socket.emit('update-theme', {
         sessionId,
-        theme: { font_size: fontSize, font_family: fontFamily },
+        theme: { font_size: fontSize, font_scale: fontScale, font_family: fontFamily },
       });
       addToast('Font updated', 'info');
     }
@@ -127,6 +184,30 @@ export default function SettingsPage({ session }) {
       socket.emit('update-theme', { sessionId, theme: { backgroundImage: url } });
       if (url) socket.emit('preload-background', { sessionId, background_url: url });
       addToast(`Background: ${BG_PRESETS[idx].label}`, 'info');
+    }
+  };
+
+  const applyCustomBg = () => {
+    const url = customBgUrl.trim();
+    if (!url || !sessionId) return;
+    socket.emit('update-theme', { sessionId, theme: { backgroundImage: url } });
+    socket.emit('preload-background', { sessionId, background_url: url });
+    addToast('Custom background applied', 'info');
+  };
+
+  const applyTransition = (t) => {
+    setTransition(t);
+    if (sessionId) {
+      socket.emit('update-theme', { sessionId, theme: { transition: t } });
+      addToast(`Transition: ${t}`, 'info');
+    }
+  };
+
+  const applyLayout = (l) => {
+    setLayout(l);
+    if (sessionId) {
+      socket.emit('update-theme', { sessionId, theme: { layout: l } });
+      addToast(`Layout: ${l}`, 'info');
     }
   };
 
@@ -145,6 +226,17 @@ export default function SettingsPage({ session }) {
 
   return (
     <div className="settings-page scroll-area safe-bottom">
+      {/* Takeover alert */}
+      {takeoverAlert && (
+        <div className="card takeover-alert">
+          <p className="text-sm text-gold font-semibold">⚠️ Presenter Takeover Attempt</p>
+          <p className="text-xs text-secondary">Another device is trying to control this session.</p>
+          <button className="btn btn-sm btn-secondary" onClick={() => setTakeoverAlert(null)} style={{ marginTop: 8 }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Connection Status */}
       <section className="settings-section">
         <h3 className="settings-label text-xs text-dim font-semibold">CONNECTION</h3>
@@ -173,8 +265,11 @@ export default function SettingsPage({ session }) {
               <button className="btn btn-secondary btn-sm" onClick={() => setPinModalOpen(true)}>
                 🔒 {hasPinActive ? 'Change PIN' : 'Set PIN'}
               </button>
-              <button className="btn btn-danger btn-sm" onClick={leaveSession}>
-                Leave Session
+              <button
+                className={`btn btn-sm ${leaveConfirm ? 'btn-danger' : 'btn-secondary'}`}
+                onClick={handleLeave}
+              >
+                {leaveConfirm ? 'Tap Again to Leave' : 'Leave Session'}
               </button>
             </div>
           </div>
@@ -240,7 +335,7 @@ export default function SettingsPage({ session }) {
 
       {/* Language */}
       <section className="settings-section">
-        <h3 className="settings-label text-xs text-dim font-semibold">LANGUAGE</h3>
+        <h3 className="settings-label text-xs text-dim font-semibold">PRIMARY LANGUAGE</h3>
         <div className="settings-lang-grid">
           {LANGUAGES.map(lang => (
             <button
@@ -254,10 +349,64 @@ export default function SettingsPage({ session }) {
         </div>
       </section>
 
+      {/* Secondary Language */}
+      <section className="settings-section">
+        <h3 className="settings-label text-xs text-dim font-semibold">SECONDARY LANGUAGE (DUAL DISPLAY)</h3>
+        <div className="settings-lang-grid">
+          <button
+            className={`btn btn-sm ${!secondaryLanguage ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => handleSecondaryLanguage('')}
+          >
+            None
+          </button>
+          {LANGUAGES.filter(l => l.code !== language).map(lang => (
+            <button
+              key={lang.code}
+              className={`btn btn-sm ${secondaryLanguage === lang.code ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => handleSecondaryLanguage(lang.code)}
+            >
+              {lang.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* Theme */}
       <section className="settings-section">
         <h3 className="settings-label text-xs text-dim font-semibold">DISPLAY THEME</h3>
         <ThemePicker sessionId={sessionId} onApply={applyTheme} />
+      </section>
+
+      {/* Transition */}
+      <section className="settings-section">
+        <h3 className="settings-label text-xs text-dim font-semibold">TRANSITION</h3>
+        <div className="settings-lang-grid">
+          {TRANSITIONS.map(t => (
+            <button
+              key={t}
+              className={`btn btn-sm ${transition === t ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => applyTransition(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Layout */}
+      <section className="settings-section">
+        <h3 className="settings-label text-xs text-dim font-semibold">LAYOUT</h3>
+        <div className="settings-lang-grid">
+          {LAYOUTS.map(l => (
+            <button
+              key={l.value}
+              className={`btn btn-sm ${layout === l.value ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => applyLayout(l.value)}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* Background */}
@@ -278,6 +427,17 @@ export default function SettingsPage({ session }) {
               <span className="text-xs bg-label">{bg.label}</span>
             </button>
           ))}
+        </div>
+        {/* Custom background URL */}
+        <div className="custom-bg-row" style={{ marginTop: 8 }}>
+          <input
+            className="input"
+            placeholder="Custom background URL…"
+            value={customBgUrl}
+            onChange={e => setCustomBgUrl(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <button className="btn btn-secondary btn-sm" onClick={applyCustomBg}>Apply</button>
         </div>
       </section>
 
@@ -307,6 +467,18 @@ export default function SettingsPage({ session }) {
             max="72"
             value={fontSize}
             onChange={e => setFontSize(Number(e.target.value))}
+            className="font-slider"
+          />
+          <label className="text-xs text-dim" style={{ marginTop: 8, display: 'block' }}>
+            Scale: {fontScale.toFixed(1)}×
+          </label>
+          <input
+            type="range"
+            min="0.5"
+            max="2.0"
+            step="0.1"
+            value={fontScale}
+            onChange={e => setFontScale(Number(e.target.value))}
             className="font-slider"
           />
           <button className="btn btn-secondary btn-sm" onClick={applyFont} style={{ marginTop: 8, width: '100%' }}>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSession } from './hooks/useSocket';
+import { useSession, useSocketEvent } from './hooks/useSocket';
 import { useToast } from './hooks/useToast';
 import { useHistory } from './hooks/useHistory';
 import { useBookmarks } from './hooks/useBookmarks';
@@ -24,10 +24,17 @@ export default function App() {
 function PresenterApp() {
   const [tab, setTab] = useState('search');
   const [staged, setStaged] = useState(null);
+  const [liveVerseId, setLiveVerseId] = useState(null);
   const session = useSession();
   const { toasts } = useToast();
   const historyHook = useHistory();
   const bookmarkHook = useBookmarks();
+
+  // Track which verse is currently live
+  useSocketEvent('update-verse', (data) => {
+    setLiveVerseId(data?.verse_id || data?.id || null);
+  });
+  useSocketEvent('clear-screen', () => setLiveVerseId(null));
 
   const handleStage = (verse) => {
     setStaged(verse);
@@ -45,6 +52,7 @@ function PresenterApp() {
             history={historyHook.history}
             clearHistory={historyHook.clearHistory}
             bookmarks={bookmarkHook}
+            sessionId={session.sessionId}
           />
         )}
         {tab === 'live' && (
@@ -68,6 +76,8 @@ function PresenterApp() {
             onStage={handleStage}
             bookmarks={bookmarkHook.bookmarks}
             toggleBookmark={bookmarkHook.toggle}
+            sessionId={session.sessionId}
+            liveVerseId={liveVerseId}
           />
         )}
         {tab === 'settings' && <SettingsPage session={session} />}
