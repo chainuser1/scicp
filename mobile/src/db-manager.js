@@ -557,3 +557,32 @@ export async function loadEmbeddingsDb() {
   })();
   return embeddingsPromise;
 }
+
+// Lazy-load map for intelligence DBs not loaded at Capacitor startup
+const lazyPromises = new Map();
+const LAZY_DBS = {
+  searchgraph: 'search-graph.db',
+  tags:        'verse-tags.db',
+  vxref:       'verse-cross-refs.db',
+};
+
+/**
+ * Lazy-load search intelligence DBs on first search (Capacitor only).
+ * Loads search-graph, verse-tags, and verse-cross-refs in parallel.
+ */
+export async function ensureSearchDbs() {
+  const needed = Object.entries(LAZY_DBS).filter(([key]) => !databases.has(key));
+  if (needed.length === 0) return;
+  await Promise.allSettled(needed.map(async ([key, filename]) => {
+    if (lazyPromises.has(key)) return lazyPromises.get(key);
+    const p = (async () => {
+      await initEngine();
+      const db = await loadDatabase(filename);
+      if (db) { databases.set(key, db); return; }
+      const downloaded = await downloadDbFromServer(filename, `bundled:${key}`);
+      if (downloaded) databases.set(key, downloaded);
+    })();
+    lazyPromises.set(key, p);
+    return p;
+  }));
+}

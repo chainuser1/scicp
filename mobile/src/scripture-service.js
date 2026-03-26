@@ -4,10 +4,10 @@
  * Wraps the shared/scripture-engine functions with SqlJsAdapter instances
  * loaded from db-manager.js. Provides a clean async API for MobilePresenter.
  */
-import { getDb, getLoadedLanguages, initAllDatabases, isReady, loadEmbeddingsDb } from './db-manager';
+import { getDb, getLoadedLanguages, initAllDatabases, isReady, loadEmbeddingsDb, ensureSearchDbs } from './db-manager';
 import { SqlJsAdapter } from '@shared/db-adapter';
 import scriptureSynonyms from '@shared/scripture-synonyms.json';
-import { isEnhancedSearchEnabled, semanticSearch as fullSemanticSearch, initPipeline, getStatus as getEmbeddingStatus } from './embedding-engine';
+import { isEnhancedSearchEnabled, semanticSearch as fullSemanticSearch, initPipeline, getStatus as getEmbeddingStatus, embedQuery } from './embedding-engine';
 import {
   segmentVerseText,
   segmentVerseTextDual,
@@ -126,6 +126,232 @@ function embeddingAssistedSearch(topVerseIds, embDb, adapter, limit = 30) {
   }).filter(Boolean);
 }
 
+// ── Phase 1a: MMR Re-ranking ─────────────────────────────────────────────────
+// Maximal Marginal Relevance: balances relevance-to-query with diversity.
+// Adaptive λ computed from entropy of cosine score distribution.
+
+function mmrRerank(candidates, qvec, embDb, limit = 50) {
+  if (!qvec || !embDb || candidates.length <= 1) return candidates.slice(0, limit);
+
+  const vids = candidates.map(c => c[0]);
+  const embeddings = fetchEmbeddings(embDb, vids);
+  if (embeddings.size < 2) return candidates.slice(0, limit);
+
+  // Compute cosine similarities to query for all candidates
+  const simToQuery = new Map();
+  for (const [vid, entry] of candidates) {
+    const vec = embeddings.get(vid);
+    simToQuery.set(vid, vec ? cosineSimilarity(qvec, vec) : 0);
+  }
+
+  // Adaptive λ from entropy of cosine score distribution
+  const sims = [...simToQuery.values()].filter(s => s > 0);
+  const total = sims.reduce((a, b) => a + b, 0) || 1;
+  let H = 0;
+  for (const s of sims) { const p = s / total; if (p > 0) H -= p * Math.log(p); }
+  const lambda = 0.5 + 0.4 / (1.0 + Math.exp(2.0 * (H - 3.0)));
+
+  // Greedy MMR selection
+  const selected = [];
+  const selectedVecs = [];
+  const remaining = new Map(candidates);
+
+  while (selected.length < limit && remaining.size > 0) {
+    let bestVid = null, bestScore = -Infinity;
+    for (const [vid] of remaining) {
+      const rel = simToQuery.get(vid) || 0;
+      let maxSim = 0;
+      const vec = embeddings.get(vid);
+      if (vec) {
+        // Compare against last 8 selected (performance optimization)
+        const window = selectedVecs.slice(-8);
+        for (const sv of window) {
+          const s = cosineSimilarity(vec, sv);
+          if (s > maxSim) maxSim = s;
+        }
+      }
+      const mmr = lambda * rel - (1 - lambda) * maxSim;
+      if (mmr > bestScore) { bestScore = mmr; bestVid = vid; }
+    }
+    if (bestVid === null) break;
+    const entry = remaining.get(bestVid);
+    selected.push([bestVid, entry]);
+    const vec = embeddings.get(bestVid);
+    if (vec) selectedVecs.push(vec);
+    remaining.delete(bestVid);
+  }
+  return selected;
+}
+
+// ── Phase 1b: Tier Scoring ───────────────────────────────────────────────────
+// 5-level hierarchy: phrase > semantic > topical > weak > keyword-only
+const SEM_THRESHOLD = 0.30;
+
+function tierScore(entry) {
+  const { sources, row } = entry;
+  const sim = row.similarity_score || 0;
+  const gate = 1.0 / (1.0 + Math.exp(-20 * (sim - SEM_THRESHOLD)));
+
+  if (sources.has('fts-phrase')) return 4 + Math.min(entry.score, 0.99);
+  if (gate >= 0.5 && (sources.has('semantic') || sources.has('embedding')))
+    return 3 + Math.min(entry.score, 0.99);
+  if (sources.has('tg') || sources.has('entity'))
+    return 2 + Math.min(entry.score, 0.99);
+  if (sim > 0.15) return 1 + Math.min(entry.score, 0.99);
+  return 0 + Math.min(entry.score, 0.99);
+}
+
+// ── Phase 2a: Cross-Reference Expansion ──────────────────────────────────────
+function crossRefExpand(topResults, adapter) {
+  const vxrefDb = getDb('vxref');
+  if (!vxrefDb) return [];
+  const seen = new Set(topResults.map(r => r.verse_id));
+  const results = [];
+  const stmt = adapter.prepare(
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+  );
+  for (const r of topResults.slice(0, 15)) {
+    try {
+      const rows = vxrefDb.exec('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?', [r.verse_id]);
+      if (!rows.length || !rows[0].values.length) continue;
+      const refs = JSON.parse(rows[0].values[0][0]);
+      for (const refId of refs.slice(0, 8)) {
+        if (seen.has(refId)) continue;
+        seen.add(refId);
+        const row = stmt.get(refId);
+        if (row) results.push({ ...row, _source: 'cross-ref', _xref_from: r.verse_id });
+      }
+    } catch {}
+  }
+  return results;
+}
+
+// ── Phase 2b: kNN Graph Expansion ────────────────────────────────────────────
+function knnExpand(topResults, sgDb, adapter, qvec, embDb) {
+  if (!sgDb) return [];
+  const seen = new Set(topResults.map(r => r.verse_id));
+  const results = [];
+  const stmt = adapter.prepare(
+    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE verse_id = ?'
+  );
+  // Get embeddings for scoring if available
+  const parentSims = new Map();
+  if (qvec && embDb) {
+    const parentEmbs = fetchEmbeddings(embDb, topResults.slice(0, 12).map(r => r.verse_id));
+    for (const [vid, vec] of parentEmbs) parentSims.set(vid, cosineSimilarity(qvec, vec));
+  }
+
+  for (let ri = 0; ri < Math.min(topResults.length, 12); ri++) {
+    const r = topResults[ri];
+    const parentSim = parentSims.get(r.verse_id) || (r.similarity_score || 0.5);
+    try {
+      const rows = sgDb.exec('SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? LIMIT 10', [r.verse_id]);
+      if (!rows.length || !rows[0].values.length) continue;
+      for (let ni = 0; ni < rows[0].values.length; ni++) {
+        const [nid, edgeSim] = rows[0].values[ni];
+        if (seen.has(nid)) continue;
+        seen.add(nid);
+        const score = parentSim * edgeSim * Math.exp(-ni * 0.15);
+        const row = stmt.get(nid);
+        if (row) results.push({ ...row, _source: 'knn-expand', similarity_score: +score.toFixed(4) });
+      }
+    } catch {}
+  }
+  results.sort((a, b) => (b.similarity_score || 0) - (a.similarity_score || 0));
+  return results.slice(0, 30);
+}
+
+// ── Phase 2c: Chapter Summary Aggregation ────────────────────────────────────
+function chapterSummarySearch(query, adapter) {
+  const chDb = getDb('chsummary');
+  if (!chDb) return [];
+  const terms = query.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+    .filter(t => t.length > 2).map(t => t + '*').join(' ');
+  if (!terms) return [];
+  try {
+    const sumRows = chDb.exec(
+      `SELECT cs.chapter_id, cs.book_id, cs.chapter_num, fts.rank
+       FROM chapter_summaries_fts fts
+       JOIN chapter_summaries cs ON cs.rowid = fts.rowid
+       WHERE chapter_summaries_fts MATCH ? ORDER BY fts.rank LIMIT 15`, [terms]
+    );
+    if (!sumRows.length || !sumRows[0].values.length) return [];
+    const results = [];
+    const seen = new Set();
+    for (const [chId, , , rank] of sumRows[0].values) {
+      try {
+        const verses = adapter.prepare(
+          'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id FROM scriptures WHERE chapter_id = ? LIMIT 5'
+        ).all(chId);
+        for (const v of verses) {
+          if (!seen.has(v.verse_id)) {
+            seen.add(v.verse_id);
+            results.push({ ...v, _source: 'ch-summary' });
+          }
+        }
+      } catch {}
+    }
+    return results;
+  } catch { return []; }
+}
+
+// ── Phase 3: Query-Personalized PageRank (2-hop subgraph walk) ───────────────
+function queryPPR(seedIds, sgDb, hops = 2, alpha = 0.85) {
+  if (!sgDb || seedIds.length === 0) return new Map();
+
+  // BFS: collect neighbors up to `hops` from seeds
+  const adjOut = new Map();
+  let frontier = new Set(seedIds);
+  for (let h = 0; h < hops; h++) {
+    const nextFrontier = new Set();
+    for (const vid of frontier) {
+      if (adjOut.has(vid)) continue;
+      try {
+        const rows = sgDb.exec('SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? LIMIT 10', [vid]);
+        if (rows.length && rows[0].values.length) {
+          const neighbors = rows[0].values.map(([nid, sim]) => ({ nid, sim }));
+          adjOut.set(vid, neighbors);
+          for (const { nid } of neighbors) nextFrontier.add(nid);
+        } else {
+          adjOut.set(vid, []);
+        }
+      } catch { adjOut.set(vid, []); }
+    }
+    frontier = nextFrontier;
+  }
+
+  // Initialize scores: uniform over seeds
+  const scores = new Map();
+  const seedSet = new Set(seedIds);
+  const seedWeight = 1.0 / seedIds.length;
+  for (const vid of seedIds) scores.set(vid, seedWeight);
+
+  // Power iteration (4 iterations)
+  for (let iter = 0; iter < 4; iter++) {
+    const next = new Map();
+    // Restart component
+    for (const vid of seedIds) next.set(vid, (next.get(vid) || 0) + (1 - alpha) * seedWeight);
+    // Walk component
+    for (const [vid, neighbors] of adjOut) {
+      const score = scores.get(vid) || 0;
+      if (score === 0 || neighbors.length === 0) continue;
+      const totalSim = neighbors.reduce((s, n) => s + n.sim, 0) || 1;
+      for (const { nid, sim } of neighbors) {
+        next.set(nid, (next.get(nid) || 0) + alpha * score * (sim / totalSim));
+      }
+    }
+    scores.clear();
+    for (const [k, v] of next) scores.set(k, v);
+  }
+
+  // Normalize: max → 1.0
+  let maxScore = 0;
+  for (const v of scores.values()) if (v > maxScore) maxScore = v;
+  if (maxScore > 0) for (const [k, v] of scores) scores.set(k, v / maxScore);
+
+  return scores;
+}
+
 /** Resolve the SqlJsAdapter for a given language code. */
 function resolveAdapter(language) {
   const rawDb = getDb(language);
@@ -148,6 +374,8 @@ export async function init() {
  * Falls back to simple FTS if search-graph.db unavailable.
  */
 export async function search(query, page = 0, pageSize = 10, language = 'en') {
+  // Lazy-load intelligence DBs on first search (Capacitor defers these at startup)
+  await ensureSearchDbs();
   const adapter = resolveAdapter(language);
   if (!adapter) {
     console.warn(`scripture-service: ${language} database not loaded — search returning empty`);
@@ -381,11 +609,24 @@ export async function search(query, page = 0, pageSize = 10, language = 'en') {
     } catch {}
   }
 
+  // Source 6: Cross-reference expansion (from top FTS results)
+  const xrefRanked = crossRefExpand(ftsRanked, adapter);
+
+  // Source 7: kNN graph expansion
+  let qvec = null;
+  if (isEnhancedSearchEnabled() && getEmbeddingStatus() === 'ready') {
+    try { qvec = await embedQuery(query); } catch {}
+  }
+  const knnRanked = knnExpand(ftsRanked, sgDb, adapter, qvec, embDb);
+
+  // Source 8: Chapter summary aggregation
+  const chRanked = chapterSummarySearch(query, adapter);
+
   // ── Reciprocal Rank Fusion (with per-list weights) ──
   const RRF_K = 60;
   const rrfScores = new Map(); // verse_id → { score, row, sources }
-  const allLists = [ftsRanked, phraseRanked, tgRanked, entityRanked, synRanked, embRanked];
-  const listWeights = [1, 3, 1, 1, 0.8, 1.2]; // embedding 1.2x (high-quality semantic signal)
+  const allLists = [ftsRanked, phraseRanked, tgRanked, entityRanked, synRanked, embRanked, xrefRanked, knnRanked, chRanked];
+  const listWeights = [1, 3, 1, 1, 0.8, 1.2, 0.9, 1.0, 0.7];
 
   for (let li = 0; li < allLists.length; li++) {
     const list = allLists[li];
@@ -453,7 +694,10 @@ export async function search(query, page = 0, pageSize = 10, language = 'en') {
     } catch {}
   }
 
-  // Multi-source bonus + PPR + PageRank boost
+  // Multi-source bonus + Topic-PPR + Global PageRank + queryPPR boost
+  const seedIds = ftsRanked.slice(0, 10).map(r => r.verse_id);
+  const pprScores = queryPPR(seedIds, sgDb);
+
   for (const [vid, entry] of rrfScores) {
     if (entry.sources.size >= 3) entry.score *= 1.4;
     else if (entry.sources.size >= 2) entry.score *= 1.2;
@@ -477,29 +721,47 @@ export async function search(query, page = 0, pageSize = 10, language = 'en') {
         entry.score += pr[0].values[0][0] * 1000;
       }
     } catch {}
+    // Query-Personalized PageRank (2-hop graph walk) boost
+    const pprScore = pprScores.get(vid);
+    if (pprScore) entry.score += pprScore * 0.3;
   }
 
-  // Sort by RRF score and apply cluster-based diversity
-  const sorted = [...rrfScores.entries()]
-    .sort((a, b) => b[1].score - a[1].score);
+  // Tier scoring: assign each entry to a quality tier
+  for (const [, entry] of rrfScores) {
+    entry._tierScore = tierScore(entry);
+  }
 
-  // Cluster-based MMR approximation
-  const diverseResults = [];
-  const clusterCounts = new Map();
-  const MAX_PER_CLUSTER = 4;
-  for (const [vid, entry] of sorted) {
-    if (diverseResults.length >= page * pageSize + pageSize * 3) break;
-    try {
-      const cl = sgDb.exec('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?', [vid]);
-      if (cl.length && cl[0].values.length) {
-        const clusterId = cl[0].values[0][0];
-        const count = clusterCounts.get(clusterId) || 0;
-        if (count >= MAX_PER_CLUSTER) continue;
-        clusterCounts.set(clusterId, count + 1);
-      }
-    } catch {}
-    const { _source, _ftsRank, _tgRank, _entityRank, ...clean } = entry.row;
-    diverseResults.push({ ...clean, similarity_score: +(entry.score).toFixed(4) });
+  // Sort by tier (descending), then by score within tier
+  const sorted = [...rrfScores.entries()]
+    .sort((a, b) => b[1]._tierScore - a[1]._tierScore);
+
+  // MMR diversity re-ranking (falls back to cluster diversity when no embeddings)
+  let diverseResults;
+  if (qvec && embDb) {
+    const mmrSorted = mmrRerank(sorted, qvec, embDb, page * pageSize + pageSize * 3);
+    diverseResults = mmrSorted.map(([, entry]) => {
+      const { _source, _ftsRank, _tgRank, _entityRank, _xref_from, ...clean } = entry.row;
+      return { ...clean, similarity_score: +(entry._tierScore).toFixed(4) };
+    });
+  } else {
+    // Fallback: cluster-based diversity
+    diverseResults = [];
+    const clusterCounts = new Map();
+    const MAX_PER_CLUSTER = 4;
+    for (const [vid, entry] of sorted) {
+      if (diverseResults.length >= page * pageSize + pageSize * 3) break;
+      try {
+        const cl = sgDb.exec('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?', [vid]);
+        if (cl.length && cl[0].values.length) {
+          const clusterId = cl[0].values[0][0];
+          const count = clusterCounts.get(clusterId) || 0;
+          if (count >= MAX_PER_CLUSTER) continue;
+          clusterCounts.set(clusterId, count + 1);
+        }
+      } catch {}
+      const { _source, _ftsRank, _tgRank, _entityRank, _xref_from, ...clean } = entry.row;
+      diverseResults.push({ ...clean, similarity_score: +(entry._tierScore).toFixed(4) });
+    }
   }
 
   const total = sorted.length;
