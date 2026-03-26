@@ -148,9 +148,15 @@ async function initEngine() {
 /** Load a DB from the bundled assets. */
 async function loadDatabase(filename) {
   const url = resolveAssetUrl(`assets/db/${filename}`);
-  const response = await fetch(url);
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (e) {
+    console.warn(`db-manager: fetch error for ${filename} (${url}):`, e.message);
+    return null;
+  }
   if (!response.ok) {
-    console.warn(`Failed to fetch DB: ${filename} (${response.status})`);
+    console.warn(`db-manager: failed to fetch ${filename} (${url}) — HTTP ${response.status}`);
     return null;
   }
   const buffer = await response.arrayBuffer();
@@ -187,7 +193,7 @@ export async function initAllDatabases() {
     // Heavy DBs (verse-summaries, verse-tags, search-graph, vxref, footnotes) are
     // lazy-loaded on first use to avoid OOM crashes on Android devices.
     const isCapacitorNative = typeof window !== 'undefined' &&
-      (window.location?.protocol === 'capacitor:' || window?.Capacitor?.isNativePlatform?.());
+      window?.Capacitor?.isNativePlatform?.();
     const optionalBundled = isCapacitorNative
       ? [
           ['tg',        'topical-guide.db'],
@@ -206,7 +212,7 @@ export async function initAllDatabases() {
       try {
         const db = await loadDatabase(filename);
         if (db) databases.set(key, db);
-      } catch {}
+      } catch (e) { console.warn(`db-manager: optional DB ${filename} failed:`, e.message); }
     }));
 
     // Restore previously downloaded language DBs from IndexedDB
@@ -223,9 +229,9 @@ export async function initAllDatabases() {
             databases.set(lang, db);
             setLangState(lang, 'ready', 100);
           }
-        } catch {}
+        } catch (e) { console.warn(`db-manager: cached ${lang} restore failed:`, e.message); }
       }));
-    } catch {}
+    } catch (e) { console.warn('db-manager: IDB restore failed:', e.message); }
 
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length} bundled + ${databases.size - loaded.length} cached databases`);
@@ -237,6 +243,8 @@ export async function initAllDatabases() {
 
     return databases;
   })();
+  // If init fails, clear the cached promise so the next call retries
+  initPromise.catch(() => { initPromise = null; });
   return initPromise;
 }
 
