@@ -1,164 +1,123 @@
-# Scriptures in View (scicp)
+# Scriptures in View
 
-Scriptures in View is a scripture presentation app for church worship, lessons, talks, and home study.  
-One person controls the verses, and the congregation sees a clean display screen.
-
-Built and maintained by **Dagami Ward Dev**.
+A free, real-time scripture presentation tool for worship services, seminary, family study, and personal devotion.
 
 ---
 
-## What the app can do
+## Overview
 
-- Search scripture references quickly (example: `John 3:16`)
-- Search by topic and related ideas
-- Stage verses first, then send them live to the display
-- Show primary and secondary language together
-- Move to previous/next verse or segment for long passages
-- Highlight words or phrases during teaching
-- Save visual themes and prepared verse lists
-- Run on Web, Desktop, and Android, including offline use
+- **Real-time projection** of scripture verses via WebSocket
+- **Intelligent search** — FTS5 full-text retrieval, semantic embeddings, and graph propagation
+- **Multi-language support** — English, Tagalog, Cebuano
+- **Reader mode** for personal study with highlights, bookmarks, and analytics
+- **Cross-platform** — Web, Desktop (Electron), and Mobile (Android)
 
 ---
 
-## Allowed Use
+## Platforms
 
-This software is for **non-commercial church use and home use only**.  
-Users are responsible for using the app in accordance with applicable laws and regulations.
+| Platform | Directory | Technology | Offline |
+|----------|-----------|------------|---------|
+| Web | `frontend/` | React 19, Vite 7 | No |
+| Backend | `backend/` | Node.js 20, Fastify 5, Socket.IO 4 | — |
+| Desktop | `electron/` | Electron 35, embedded backend | ✅ Full |
+| Mobile | `mobile/` | Capacitor 7, Vite, React | No |
+| Shared | `shared/` | CommonJS utilities | — |
 
 ---
 
-## Web App Quick Start
+## Features
+
+### Presenter Mode
+
+- Search by reference, topic, keyword, or concept
+- Stage verses before sending live to displays
+- Set lists with verse ordering and private notes
+- Dual-language display (primary + secondary)
+- Real-time theme customization (background, font, colors)
+- Session system with PIN protection and QR code connection
+- Highlight text on-screen for emphasis
+
+### Reader Mode
+
+- Personal scripture study with continuous prose reading
+- 5 visual themes (Night, Dim, Sepia, Day, AMOLED)
+- Font size, line height, and font family customization
+- 4-color verse highlighting (long-press)
+- Bookmarks with search and categorization
+- Reading analytics (dwell time, pace, coverage)
+- Chapter and verse context sheets (summary, people, related)
+- Offline chapter caching (last 10 chapters)
+
+### Search Intelligence
+
+41-component mathematical pipeline:
+
+1. **Input parsing** — reference detection, abbreviation expansion, doctrine alias expansion (50+ topics)
+2. **FTS5 retrieval** — BM25 ranking, AND query with OR fallback
+3. **Semantic scoring** — MiniLM-L6 embeddings, ZCA whitening, cosine similarity
+4. **Entity resolution** — named entity recognition with polynomial scoring
+5. **Graph propagation** — kNN verse graph, spectral features, cross-reference boosting
+6. **Fusion** — Reciprocal Rank Fusion (RRF)
+7. **Re-ranking** — MMR diversity, session context, learned weights (Adam optimizer)
+8. **Calibration** — isotonic regression, sigmoid tier gating
+
+
+---
+
+## Supported Scriptures
+
+- Holy Bible (King James Version)
+- Book of Mormon
+- Doctrine and Covenants
+- Pearl of Great Price
+- **41,995 verses** across all volumes
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 20+
+- npm 10+
+
+### Install
 
 ```bash
-# Install all dependencies (backend + frontend workspaces)
+git clone https://github.com/your-org/scicp.git
+cd scicp
 npm install
-
-# Run each in a separate terminal:
-npm run dev --workspace=backend    # port 3000
-npm run dev --workspace=frontend   # port 5173
 ```
-
-Open the Presenter at `http://localhost:5173/presenter` and the Client display at `http://localhost:5173/client`.
-
-For production:
-
-```bash
-npm run build
-npm start
-```
-
-The backend serves the built frontend on port 3000.
-
----
-
-## Desktop App (Electron)
 
 ### Development
 
 ```bash
-npm run electron:dev
+# Start backend (port 3000) + frontend (port 5173)
+# Run in separate terminals:
+npm run dev --workspace=backend
+npm run dev --workspace=frontend
+
+# Mobile dev
+cd mobile && npx vite dev
 ```
 
-Builds the frontend and launches the Electron app with the embedded server. The Presenter opens on the primary display; if a second monitor is connected, the Client projection window opens there automatically.
-
-### Build Installers
+### Build
 
 ```bash
-npm run electron:build           # Current platform
-npm run electron:build:win       # Windows (NSIS installer)
-npm run electron:build:mac       # macOS (DMG)
-npm run electron:build:linux     # Linux (AppImage + .deb)
+npm run build                        # Build frontend
+npm run build --workspace=frontend   # Frontend only
+cd mobile && npx vite build          # Mobile
 ```
 
-Installers are written to `dist-electron/`.
-
-### Release Checksum Digests
-
-- Windows SHA256: `4feeb9e6620197a8a3136aabcbb9fd849f482a8f4afc254b390225a7327d6ddd`
-- Linux SHA256: `e6291127b52c1c3d025375361bb3e79544177da67a69c8552f9759a885b9c1b4`
-- Mac SHA256: `ec5d380ce6200833887d8d5c5ae8403644b9829d62d80265d44bcd20453f77b2`
-
-### Auto-Updates
-
-The desktop app checks for updates on startup. Updates are published to [GitHub Releases](https://github.com/chainuser1/scicp/releases). On Linux AppImage, the app directs you to the releases page instead.
-
-**Release workflow:**
-1. Bump `version` in `package.json`
-2. Commit and tag: `git tag v1.1.0`
-3. Push the tag: `git push origin v1.1.0`
-4. GitHub Actions builds all platforms and publishes to Releases
-
----
-
-## Mobile App
+### Test
 
 ```bash
-cd mobile
-npm install
-npm run build          # copies DBs + builds Vite bundle
-npx cap sync android   # sync to Android project
-npx cap open android   # open in Android Studio
+npm test --workspace=backend         # Backend: 119 tests (Jest)
+cd mobile && npx vitest run          # Mobile: 73 tests (Vitest)
+npm run lint --workspace=frontend    # Frontend lint (ESLint)
+npm run check:prod                   # Full CI: build + test + lint
 ```
-
-The mobile app is a fully offline PWA/Android app. All 9 scripture databases and the Topical Guide are bundled as static assets loaded via sql.js WASM.
-
-- Android SHA256: `11a670361a6426981391d5250895d06977a99b697480127ff1cd4b0c4463a604`
-
----
-
-## Deployment
-
-### Docker
-
-```bash
-docker build -t scicp .
-docker run -p 8080:8080 scicp
-```
-
-### Railway
-
-The repository includes `railway.toml` using the Dockerfile. Push to your Railway project — it builds automatically. Health check: `/health`.
-
-> **Note:** `REBUILD_FTS_ON_START` is set to `false` in both `railway.toml` and the `Dockerfile`. All FTS5 indexes are pre-built in the committed database files — Railway starts instantly without rebuilding indexes.
-
----
-
-## Supported Languages
-
-| Code | Language | Database |
-|---|---|---|
-| `en` | English (KJV / LDS) | lds-scriptures-sqlite.db |
-| `nrsvue` | English (NRSVUE) | nrsvue-scriptures-sqlite.db |
-| `tl` | Tagalog | tagalog-scriptures-sqlite.db |
-| `ceb` | Cebuano | cebuano-scriptures-sqlite.db |
-| `ilo` | Ilocano | ilocano-scriptures-sqlite.db |
-| `war` | Waray | waray-scriptures-sqlite.db |
-| `es` | Spanish | spanish-scriptures-sqlite.db |
-| `el` | Greek (interlinear) | greek-scriptures-sqlite.db |
-| `ja` | Japanese | japanese-scriptures-sqlite.db |
-
----
-
-## LDS Topical Guide
-
-The app includes the complete [LDS Topical Guide](https://www.churchofjesuschrist.org/study/scriptures/tg) as a separate SQLite database (`topical-guide.db`):
-
-- **3,512 topics** covering doctrinal, historical, and thematic subjects
-- **62,878 verse-topic mappings** — 100% of verses mapped
-- Used for search (authoritative topic clusters), related-verse scoring, and offline mobile search
-- Queries like `faith`, `repentance`, `missionary work`, `baptism for the dead` resolve directly to the canonical verse list for that topic
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | Node.js 20, Fastify 5, Socket.IO 4 |
-| Database | SQLite via better-sqlite3 (server/Electron), sql.js WASM (mobile) |
-| Frontend | React 19, Vite 7, React Router 7 |
-| Desktop | Electron 35, electron-builder |
-| Mobile | Capacitor, sql.js, PWA |
 
 ---
 
@@ -166,22 +125,88 @@ The app includes the complete [LDS Topical Guide](https://www.churchofjesuschris
 
 ```
 scicp/
-├── backend/          # Fastify server, Socket.IO handlers, all routes (~2000 lines)
-├── frontend/         # React SPA (Presenter, Client, About, Contact pages)
-├── electron/         # Electron main process + preload script
-├── mobile/           # Offline PWA/Android app (sql.js + Capacitor)
-├── shared/           # scripture-engine.js + db-adapter.js shared by all platforms
-│   └── data/         # book abbreviations, citations, language maps
-├── resources/db/     # SQLite scripture databases (FTS5 pre-built)
+├── backend/
+│   ├── index.js              # All server code (Fastify + Socket.IO)
+│   ├── package.json
+│   └── __tests__/
+│       └── index.test.js     # 119 tests
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx           # Router + Home
+│   │   ├── socket.js         # Socket.IO singleton
+│   │   ├── pages/            # About, Client, Contact, Download, Presenter, Privacy, Terms
+│   │   └── components/       # Footer, ScriptureReader
+│   ├── vite.config.js
+│   └── eslint.config.js
+├── mobile/
+│   ├── src/
+│   │   ├── App.jsx           # 4-tab root navigation (Home, Read, Present, More)
+│   │   ├── pages/
+│   │   │   ├── reader/       # ReaderApp, ChapterReader, ReaderHome, ReaderBrowse, etc.
+│   │   │   ├── info/         # AboutPage, ContactPage, PrivacyPage, TermsPage
+│   │   │   ├── HomePage.jsx  # Landing page with mode cards
+│   │   │   ├── Preview.jsx   # Presenter staging/preview
+│   │   │   └── MorePage.jsx  # Settings hub
+│   │   ├── hooks/            # useSocket, useSearch, useHighlights, useReaderBookmarks, etc.
+│   │   ├── components/       # StatusHeader, RootTabBar, QrScanner, reader/
+│   │   └── styles/           # reader.css, info.css
+│   ├── __tests__/            # 73 tests across 15 files
+│   └── vite.config.js
+├── electron/                 # Electron main process
+├── shared/                   # Common utilities
+├── resources/db/             # SQLite databases
 ├── Dockerfile
 ├── railway.toml
-└── package.json      # npm workspaces: backend + frontend
+└── package.json              # Root workspaces: backend + frontend
 ```
 
-For developer workspace details, see [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
+---
+
+## Database
+
+SQLite via `better-sqlite3` (synchronous API).
+
+| Database | Purpose |
+|----------|---------|
+| `lds-scriptures-sqlite.db` | English scriptures, themes, FTS5 index |
+| `tagalog-scriptures-sqlite.db` | Tagalog translations |
+| `cebuano-scriptures-sqlite.db` | Cebuano translations |
+| `verse-embeddings.db` | 384D MiniLM embeddings (raw + whitened) |
+| `search-graph.db` | kNN graph, spectral features, training pairs |
+
+---
+
+## Session Model
+
+- Sessions stored in-memory (not persisted)
+- Client (TV) creates session → Presenter joins via QR code or session code
+- One presenter per session; second presenter triggers takeover prompt
+- Grace period: 30 min (presenter), 5 min (client)
+- Max 50 concurrent sessions
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` / `8080` (Docker) | Server listen port |
+| `NODE_ENV` | `development` | Controls static file serving |
+| `PUBLIC_ORIGIN` | from Host header | For QR code URLs behind proxies |
+| `REBUILD_FTS_ON_START` | `false` | Force FTS5 index rebuild |
+| `SESSION_GRACE_MS` | `1800000` | Session keep-alive after disconnect |
+
+---
+
+## Deployment
+
+- **Docker:** `docker build .` → serves on port 8080
+- **Railway:** Auto-deploy via `railway.toml`, health check at `/health`
+- **Desktop:** Electron Builder → Windows/macOS/Linux installers
+- **Mobile:** Capacitor → Android APK
 
 ---
 
 ## License
 
-ISC
+See LICENSE file.
