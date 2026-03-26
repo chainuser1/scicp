@@ -229,6 +229,12 @@ export async function initAllDatabases() {
 
     const loaded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
     console.log(`db-manager: loaded ${loaded.length} bundled + ${databases.size - loaded.length} cached databases`);
+
+    // English DB is mandatory — if it failed, throw so callers know init failed
+    if (!databases.has('en')) {
+      throw new Error('Failed to load English scripture database. The app cannot function without it.');
+    }
+
     return databases;
   })();
   return initPromise;
@@ -406,7 +412,7 @@ export function getLoadedLanguages() {
 }
 
 export function isReady() {
-  return databases.size > 0;
+  return databases.has('en');
 }
 
 let embeddingsPromise = null;

@@ -278,6 +278,10 @@ async function emit(event, payload, ackCallback) {
           }
         } catch { /* fall through to local */ }
       }
+      // Ensure local DBs are ready before searching
+      if (!svc.isReady || !svc.isReady()) {
+        try { await svc.init(); } catch {}
+      }
       try {
         const result = await svc.search(query, page, pageSize, language);
         fire('search-results', { ...result, query, language });
