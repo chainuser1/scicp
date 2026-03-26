@@ -27,7 +27,7 @@ const TRANSITIONS = ['Fade', 'Slide', 'Push', 'Zoom', 'Morph', 'Wipe', 'Split', 
 const LAYOUTS = ['Centered', 'Lower Third'];
 const BG_COLORS = ['#0a0a0f', '#0d1b2a', '#1a2e1a', '#2d1810', '#f5f0e8', '#0f1626'];
 
-export default function SettingsSheet({ session, onClose }) {
+export default function SettingsSheet({ session, onClose, onSwitchToReader }) {
   const {
     sessionId, viewerCount, joinSession, leaveSession,
     isConnected, connectionState, error,
@@ -247,6 +247,16 @@ export default function SettingsSheet({ session, onClose }) {
         </section>
 
         <button className="ss-close-btn" onClick={onClose}>Close</button>
+
+        {onSwitchToReader && (
+          <button
+            className="ss-close-btn"
+            style={{ marginTop: 8, background: 'var(--obsidian-light, #1a1a24)', color: 'var(--gold, #c9a84c)' }}
+            onClick={onSwitchToReader}
+          >
+            📖 Switch to Reader Mode
+          </button>
+        )}
       </div>
 
       {scannerOpen && (
