@@ -12,6 +12,7 @@ backend/logs/
 # Environment files
 .env*
 !.env.example
+!.env.production
 
 # OS-specific files
 .DS_Store
