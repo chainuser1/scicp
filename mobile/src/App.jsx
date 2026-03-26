@@ -4,7 +4,7 @@ import { useToast } from './hooks/useToast';
 import { addToast } from './hooks/useToast';
 import { useHistory } from './hooks/useHistory';
 import { useBookmarks } from './hooks/useBookmarks';
-import TabBar from './components/TabBar';
+import RootTabBar from './components/RootTabBar';
 import StatusHeader from './components/StatusHeader';
 import SubTabs from './components/SubTabs';
 import ToastContainer from './components/ToastContainer';
@@ -15,33 +15,40 @@ import BrowsePage from './pages/Browse';
 import RecentPage from './pages/Recent';
 import SettingsSheet from './pages/SettingsSheet';
 import TVClient from './pages/TVClient';
+import HomePage from './pages/HomePage';
+import MorePage from './pages/MorePage';
 import { SERVER_URL } from './socket';
 import './styles/app.css';
 
 const ReaderApp = lazy(() => import('./pages/reader/ReaderApp'));
 
 const APP_MODE = import.meta.env.VITE_APP_MODE || 'presenter';
-const MODE_KEY = 'scicp_app_mode';
 
 export default function App() {
   if (APP_MODE === 'tv') return <TVClient />;
 
-  const [appMode, setAppMode] = useState(
-    () => localStorage.getItem(MODE_KEY) || 'reader'
-  );
-  const switchMode = useCallback((mode) => {
-    localStorage.setItem(MODE_KEY, mode);
-    setAppMode(mode);
+  const [rootTab, setRootTab] = useState('home');
+
+  const handleNavigate = useCallback((tab) => {
+    setRootTab(tab);
   }, []);
 
-  if (appMode === 'reader') {
-    return (
-      <Suspense fallback={<div style={{ background: '#f5f0e8', height: '100%' }} />}>
-        <ReaderApp onSwitchMode={() => switchMode('presenter')} />
-      </Suspense>
-    );
-  }
-  return <PresenterApp onSwitchToReader={() => switchMode('reader')} />;
+  return (
+    <div className="app-root">
+      {/* Root content area */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {rootTab === 'home' && <HomePage onNavigate={handleNavigate} />}
+        {rootTab === 'read' && (
+          <Suspense fallback={<div style={{ background: '#f5f0e8', height: '100%' }} />}>
+            <ReaderApp hideTabBar />
+          </Suspense>
+        )}
+        {rootTab === 'present' && <PresenterApp />}
+        {rootTab === 'more' && <MorePage />}
+      </div>
+      <RootTabBar active={rootTab} onChange={handleNavigate} />
+    </div>
+  );
 }
 
 /* Maps bottom tabs to default sub-tabs */
@@ -49,7 +56,7 @@ const TAB_TO_SUBTAB = { search: 'search', preview: null, setlists: 'setlist', br
 /* Maps sub-tabs to bottom tabs */
 const SUBTAB_TO_TAB = { search: 'search', recent: 'search', setlist: 'setlists', browse: 'browse' };
 
-function PresenterApp({ onSwitchToReader }) {
+function PresenterApp() {
   const [tab, setTab] = useState('search');
   const [subTab, setSubTab] = useState('search');
   const [staged, setStaged] = useState(null);
@@ -138,7 +145,7 @@ function PresenterApp({ onSwitchToReader }) {
   const headerTitle = showBrowse ? 'Browse' : 'Scripture';
 
   return (
-    <div className="app-root">
+    <>
       <StatusHeader
         sessionId={session.sessionId}
         viewerCount={session.viewerCount}
@@ -201,16 +208,14 @@ function PresenterApp({ onSwitchToReader }) {
           />
         )}
       </main>
-      <TabBar active={tab} onChange={handleTabChange} />
 
       {/* Settings as slide-up sheet */}
       {settingsOpen && (
         <SettingsSheet
           session={session}
           onClose={() => setSettingsOpen(false)}
-          onSwitchToReader={onSwitchToReader}
         />
       )}
-    </div>
+    </>
   );
 }

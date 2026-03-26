@@ -12,10 +12,9 @@ import ReaderBrowse from './ReaderBrowse';
 import ChapterReader from './ChapterReader';
 import ReadingTab from './ReadingTab';
 import ReaderBookmarks from './ReaderBookmarks';
-import ReaderMore from './ReaderMore';
 import '../../styles/reader.css';
 
-export default function ReaderApp({ onSwitchMode }) {
+export default function ReaderApp({ onSwitchMode, hideTabBar }) {
   const [tab, setTab] = useState('home');
   const prefs = useReaderPrefs();
   const highlights = useHighlights();
@@ -86,14 +85,8 @@ export default function ReaderApp({ onSwitchMode }) {
             onOpenChapter={openChapter}
           />
         )}
-        {tab === 'more' && (
-          <ReaderMore
-            prefs={prefs}
-            onSwitchMode={onSwitchMode}
-          />
-        )}
       </div>
-      <ReaderTabBar active={tab} onSelect={handleTabSelect} />
+      {!hideTabBar && <ReaderTabBar active={tab} onSelect={handleTabSelect} />}
     </div>
   );
 }
