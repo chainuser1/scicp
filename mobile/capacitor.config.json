@@ -1,21 +1,19 @@
 {
-  "appId": "com.scripturesinview.mobile",
+  "appId": "live.teyyko.scicp",
   "appName": "Scriptures in View",
   "webDir": "dist",
-  "server": {},
-  "ios": {
-    "contentInset": "always",
-    "allowsLinkPreview": false,
-    "scrollEnabled": false
+  "server": {
+    "androidScheme": "https"
   },
   "plugins": {
-    "LocalNotifications": {
-      "smallIcon": "ic_notification",
-      "iconColor": "#C9A84C",
-      "sound": null
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "androidScaleType": "CENTER_CROP",
+      "backgroundColor": "#0a0a0f"
     },
-    "App": {
-      "launchUrl": "scicp://"
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0a0a0f"
     }
   }
 }
