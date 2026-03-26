@@ -1,3 +1,19 @@
+// ── Sentry crash reporting (must be first) ──────────────────────────────────
+const Sentry = require('@sentry/node');
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    release: `scicp-backend@${require('./package.json').version}`,
+    tracesSampleRate: 0.1,
+    // Don't send expected errors (4xx, validation, etc.)
+    beforeSend(event) {
+      if (event.exception?.values?.[0]?.type === 'FastifyError') return null;
+      return event;
+    },
+  });
+}
+
 const fastify = require('fastify')({ logger: true, bodyLimit: 1048576 });
 const { Server } = require("socket.io");
 const path = require('path');
