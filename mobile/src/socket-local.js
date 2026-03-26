@@ -10,6 +10,7 @@
  * ExternalDisplay plugin (when casting to a TV).
  */
 import * as svc from './scripture-service';
+import * as remote from './scripture-service-remote';
 import { ExternalDisplay } from 'capacitor-external-display';
 
 const listeners = new Map();
@@ -262,6 +263,17 @@ async function emit(event, payload, ackCallback) {
       if (!query || !String(query).trim()) {
         fire('search-results', { results: [], total: 0, page: 0, pageSize });
         return;
+      }
+      // Try web API first when a server URL is configured and network is available
+      const remoteBase = remote.getServerUrl();
+      if (remoteBase && navigator.onLine) {
+        try {
+          const result = await remote.search(query, page, pageSize, language);
+          if (result && Array.isArray(result.results)) {
+            fire('search-results', { ...result, query, language });
+            break;
+          }
+        } catch { /* fall through to local */ }
       }
       try {
         const result = await svc.search(query, page, pageSize, language);

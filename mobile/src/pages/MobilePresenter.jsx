@@ -340,8 +340,8 @@ function getCitation(language, volumeId, secondaryLanguage) {
 
 /* ─── Main component ─── */
 const MobilePresenter = () => {
-  const { socket, mode, isOnline, switchMode, serverUrl } = useSocketCtx();
-  const svcProxy = useMemo(() => createServiceProxy(isOnline, serverUrl), [isOnline, serverUrl]);
+  const { socket, mode, isOnline, networkAvailable, switchMode, serverUrl } = useSocketCtx();
+  const svcProxy = useMemo(() => createServiceProxy(networkAvailable, serverUrl), [networkAvailable, serverUrl]);
 
   // Track previous socket ref so we can detect hot-swaps
   const prevSocketRef = useRef(socket);

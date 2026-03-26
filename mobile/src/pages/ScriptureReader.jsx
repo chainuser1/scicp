@@ -13,6 +13,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as svc from '../scripture-service';
+import * as remote from '../scripture-service-remote';
 import { useSocketCtx } from '../socket-context';
 import { Share } from '@capacitor/share';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
@@ -91,7 +92,7 @@ const recallStr = (k, fb) => { try { return localStorage.getItem(k) || fb; } cat
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function ScriptureReader({ onExit }) {
-  const { serverUrl } = useSocketCtx() || {};
+  const { serverUrl, networkAvailable } = useSocketCtx() || {};
 
   // ── Prefs (persist across launches) ──────────────────────────────────────
   const [theme,      setThemeId]    = useState(() => recallStr(SK.theme, 'night'));
@@ -457,15 +458,34 @@ export default function ScriptureReader({ onExit }) {
   const doSearch = useCallback((q, p = 0, append = false) => {
     if (!q.trim()) { setSearchResults([]); return; }
     setSearching(true);
-    svc.search(q, p, PAGE_SIZE, lang)
+    // Try remote API when network is available, fall back to local SQL.js
+    const remoteBase = serverUrl || remote.getServerUrl();
+    const useRemote = networkAvailable && !!remoteBase;
+    if (useRemote) remote.setServerUrl(remoteBase);
+    const searchFn = useRemote ? () => remote.search(q, p, PAGE_SIZE, lang) : () => svc.search(q, p, PAGE_SIZE, lang);
+    searchFn()
       .then(data => {
         const list = data?.results ?? data ?? [];
         setSearchResults(prev => append ? [...prev, ...list] : list);
         setSearchHasMore(list.length === PAGE_SIZE);
         setSearching(false);
       })
-      .catch(() => setSearching(false));
-  }, [lang]);
+      .catch(() => {
+        // On remote failure, fall back to local
+        if (useRemote) {
+          svc.search(q, p, PAGE_SIZE, lang)
+            .then(data => {
+              const list = data?.results ?? data ?? [];
+              setSearchResults(prev => append ? [...prev, ...list] : list);
+              setSearchHasMore(list.length === PAGE_SIZE);
+              setSearching(false);
+            })
+            .catch(() => setSearching(false));
+        } else {
+          setSearching(false);
+        }
+      });
+  }, [lang, networkAvailable, serverUrl]);
 
   const handleQueryChange = e => {
     const q = e.target.value;

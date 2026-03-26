@@ -1,24 +1,25 @@
 /**
  * scripture-service-proxy.js — Unified service that routes to local (offline)
- * or remote (online) scripture service based on current mode.
+ * or remote scripture service.
  *
- * All methods are async. When offline, they call the synchronous local svc.*
- * and wrap in a resolved promise. When online, they call the remote HTTP API.
+ * Uses the remote API whenever the server URL is known AND the device has
+ * network connectivity — regardless of session mode (online vs offline cast).
+ * Falls back to local SQL.js when offline or the API is unreachable.
  *
  * Usage in MobilePresenter:
  *   import { createServiceProxy } from '../scripture-service-proxy';
- *   const svcProxy = useMemo(() => createServiceProxy(isOnline, serverUrl), [isOnline, serverUrl]);
+ *   const svcProxy = useMemo(() => createServiceProxy(networkAvailable, serverUrl), [networkAvailable, serverUrl]);
  *   // then: const data = await svcProxy.getChapterSummary(chapterId);
  */
 import * as local from './scripture-service';
 import * as remote from './scripture-service-remote';
 
-export function createServiceProxy(isOnline, serverUrl) {
-  if (isOnline && serverUrl) {
+export function createServiceProxy(networkAvailable, serverUrl) {
+  if (networkAvailable && serverUrl) {
     remote.setServerUrl(serverUrl);
   }
 
-  const useRemote = isOnline && !!serverUrl;
+  const useRemote = networkAvailable && !!serverUrl;
 
   return {
     // ── Search ──
