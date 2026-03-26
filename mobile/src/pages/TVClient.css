@@ -1,4 +1,4 @@
-/* ── TV Client — 10-foot UI ── */
+/* ── TV Client — 10-foot UI (full parity with web Client) ── */
 .tv-root {
   position: fixed;
   inset: 0;
@@ -6,11 +6,11 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Cormorant Garamond', Georgia, serif;
   transition: background-color 0.6s ease, color 0.6s ease;
 }
 
-/* Background layers */
+/* ── Background layers ── */
 .tv-bg {
   position: absolute;
   inset: 0;
@@ -18,130 +18,130 @@
   background-position: center;
   z-index: 0;
 }
-.tv-bg-prev { opacity: 1; }
-.tv-bg-enter { animation: tvFadeIn 0.6s ease forwards; }
-@keyframes tvFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.tv-bg-current { z-index: 0; }
+.tv-bg-prev { z-index: 1; animation: tvBgFadeOut 1.4s ease forwards; }
+@keyframes tvBgFadeOut { from { opacity: 1; } to { opacity: 0; } }
 
-/* Idle screen */
+/* ── Idle screen ── */
 .tv-idle {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
   height: 100%;
 }
-
 .tv-idle-content {
   text-align: center;
   max-width: 600px;
   padding: 40px;
 }
 
-.tv-app-title {
-  font-size: 3rem;
-  font-weight: 700;
-  color: #c9a84c;
-  margin-bottom: 16px;
-  letter-spacing: -0.02em;
+/* ── Idle cross animation (matches web) ── */
+.tv-idle-cross {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 24px;
+  opacity: 0.15;
+}
+.tv-idle-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+.tv-idle-cross-h {
+  position: absolute;
+  top: 38%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: currentColor;
+}
+.tv-idle-line {
+  width: 120px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.1;
+  margin: 16px auto 0;
 }
 
-.tv-idle-status {
-  font-size: 1.5rem;
-  opacity: 0.6;
-  margin-bottom: 32px;
-}
-
-.tv-session-badge {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 16px 32px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.1);
-}
-
-.tv-session-label {
-  font-size: 0.875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+/* ── Presenter left notice ── */
+.tv-presenter-left-notice {
+  font-size: 1.2rem;
   opacity: 0.5;
+  margin-bottom: 24px;
+  animation: tvNoticeIn 0.3s ease;
 }
+@keyframes tvNoticeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 0.5; transform: translateY(0); } }
 
-.tv-session-id {
-  font-size: 2.5rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.tv-join-form {
-  margin-top: 24px;
-}
-
-.tv-join-input {
-  padding: 16px 24px;
-  font-size: 1.5rem;
-  background: rgba(255,255,255,0.08);
-  border: 2px solid rgba(255,255,255,0.15);
-  border-radius: 12px;
-  color: inherit;
-  text-align: center;
-  outline: none;
-  width: 300px;
-}
-.tv-join-input:focus {
-  border-color: #c9a84c;
-}
-
-/* QR code section — displayed when no presenter */
-.tv-qr-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.tv-qr-canvas {
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-}
-
-.tv-qr-hint {
-  font-size: 1rem;
-  opacity: 0.4;
-  margin-top: 8px;
-}
-
-/* Verse display */
+/* ── Verse display ── */
 .tv-verse-container {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   padding: 48px 64px;
-  max-width: 85%;
+  max-width: 88%;
   width: 100%;
 }
 
-.tv-verse-text {
-  font-size: 3rem;
-  line-height: 1.4;
-  font-weight: 400;
-  text-shadow: 0 2px 12px rgba(0,0,0,0.5);
-  margin-bottom: 24px;
+.tv-verse-body {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.tv-verse-body.tv-text-visible {
+  opacity: 1;
 }
 
-.tv-verse-ref {
-  font-size: 1.5rem;
-  font-weight: 600;
-  opacity: 0.7;
+.tv-verse-text {
+  font-size: 1em;
+  line-height: 1.52;
+  font-weight: 400;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.5);
+}
+
+.tv-verse-secondary {
+  font-size: 0.55em;
+  line-height: 1.5;
+  opacity: 0.75;
+  margin-top: 0.55em;
   font-style: italic;
+}
+
+.tv-verse-sub {
+  font-size: 0.7em;
+  opacity: 0.65;
+  margin-top: 0.5em;
+}
+
+.tv-verse-caption {
+  font-size: clamp(0.7rem, 1.2vw, 1.1rem);
+  margin-top: 1.2em;
+  opacity: 0.6;
+  font-style: italic;
+  font-weight: 600;
+}
+.tv-caption-volume {
+  display: block;
+  font-size: 0.85em;
+  opacity: 0.5;
+  margin-top: 0.2em;
+}
+.tv-votd-label {
+  display: block;
+  font-size: 0.8em;
+  color: #c9a84c;
+  margin-top: 0.3em;
+  letter-spacing: 0.05em;
 }
 
 .tv-highlight {
@@ -151,7 +151,193 @@
   border-radius: 4px;
 }
 
-/* Settings overlay */
+/* ── Segment dots ── */
+.tv-segment-dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 1em;
+}
+.tv-seg-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  transition: background 0.2s;
+}
+.tv-seg-dot--active {
+  background: #c9a84c;
+}
+
+/* ── QR overlay — persistent bottom-right badge ── */
+.tv-qr-overlay {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(10, 10, 15, 0.85);
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px);
+  transition: all 0.4s ease;
+}
+.tv-qr-overlay--live {
+  bottom: 16px;
+  right: 16px;
+  padding: 10px;
+  border-radius: 12px;
+}
+.tv-qr-overlay--locked {
+  opacity: 0.6;
+}
+.tv-qr-img {
+  width: clamp(100px, 15vw, 200px);
+  height: auto;
+  border-radius: 8px;
+}
+.tv-qr-overlay--live .tv-qr-img {
+  width: clamp(64px, 8vw, 120px);
+}
+.tv-qr-label {
+  font-size: clamp(0.6rem, 1vw, 0.85rem);
+  opacity: 0.6;
+  text-align: center;
+  letter-spacing: 0.03em;
+  font-family: 'Inter', sans-serif;
+}
+.tv-qr-error {
+  font-size: 0.75rem;
+  opacity: 0.5;
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── "✓ Presenter connected" flash ── */
+.tv-joining-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 15, 0.7);
+  animation: tvJoiningIn 0.3s ease, tvJoiningOut 0.4s ease 1.4s forwards;
+}
+.tv-joining-check {
+  font-size: 5rem;
+  color: #4ade80;
+  font-weight: 700;
+}
+.tv-joining-text {
+  font-size: 1.8rem;
+  margin-top: 12px;
+  opacity: 0.8;
+  font-family: 'Inter', sans-serif;
+}
+@keyframes tvJoiningIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tvJoiningOut { from { opacity: 1; } to { opacity: 0; pointer-events: none; } }
+
+/* ── Reconnect banner ── */
+.tv-reconnect-banner {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: rgba(220, 50, 50, 0.8);
+  color: white;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: 'Inter', sans-serif;
+  backdrop-filter: blur(8px);
+}
+.tv-reconnect-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fbbf24;
+  animation: tvPulse 1s ease infinite;
+}
+@keyframes tvPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── Session watermark ── */
+.tv-session-watermark {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  font-size: 0.75rem;
+  opacity: 0.2;
+  letter-spacing: 0.08em;
+  font-family: 'Inter', monospace;
+}
+.tv-session-watermark--lost {
+  opacity: 0.5;
+  color: #ef4444;
+}
+
+/* ── Font controls ── */
+.tv-font-controls {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.tv-root:hover .tv-font-controls,
+.tv-root:focus-within .tv-font-controls {
+  opacity: 0.6;
+}
+.tv-font-controls button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: inherit;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+.tv-font-controls button:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* ── Fullscreen button ── */
+.tv-fullscreen-btn {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5rem;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+.tv-root:hover .tv-fullscreen-btn {
+  opacity: 0.3;
+}
+.tv-fullscreen-btn:hover {
+  opacity: 0.7 !important;
+}
+
+/* ── Settings overlay ── */
 .tv-settings-overlay {
   position: fixed;
   inset: 0;
@@ -161,13 +347,13 @@
   justify-content: center;
   z-index: 100;
 }
-
 .tv-settings-panel {
   background: #1a1a24;
   padding: 40px;
   border-radius: 16px;
   text-align: center;
   min-width: 300px;
+  font-family: 'Inter', sans-serif;
 }
 .tv-settings-panel h2 {
   font-size: 1.5rem;
@@ -175,14 +361,52 @@
   color: #c9a84c;
 }
 .tv-settings-panel p {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   margin-bottom: 8px;
+  opacity: 0.8;
+}
+.tv-settings-hint {
+  opacity: 0.4 !important;
+  font-size: 0.9rem !important;
+  margin-top: 16px !important;
 }
 
-/* Connection dot — bottom-right corner */
+/* ── Screensaver ── */
+.tv-screensaver { cursor: pointer; }
+.tv-screensaver-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.85);
+  animation: tvScreensaverIn 2s ease;
+}
+@keyframes tvScreensaverIn { from { opacity: 0; } to { opacity: 1; } }
+.tv-screensaver-overlay .tv-idle-cross {
+  opacity: 0.08;
+  width: 80px;
+  height: 80px;
+  animation: tvScreensaverPulse 4s ease infinite;
+}
+@keyframes tvScreensaverPulse { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.15; } }
+
+/* ── Connection dot ── */
 .tv-conn-dot {
   position: fixed;
   bottom: 16px;
   right: 16px;
   z-index: 50;
 }
+.tv-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: background 0.3s;
+}
+.tv-status-connected    { background: #4ade80; }
+.tv-status-disconnected { background: #ef4444; }
+.tv-status-connecting   { background: #fbbf24; animation: tvPulse 1s ease infinite; }
+.tv-status-error        { background: #ef4444; }

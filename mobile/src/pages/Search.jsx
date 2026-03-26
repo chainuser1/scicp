@@ -10,7 +10,7 @@ const QUICK_TOPICS = [
   'tithing', 'service', 'family',
 ];
 
-export default function SearchPage({ onStage, history, clearHistory, bookmarks, sessionId }) {
+export default function SearchPage({ onStage, history, clearHistory, bookmarks, sessionId, onAddToSetlist }) {
   const { query, setQuery, results, meta, loading, search, loadMore, clear } = useSearch();
   const inputRef = useRef(null);
   const listRef = useRef(null);
@@ -168,6 +168,7 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
             isBookmarked={bookmarks?.isBookmarked?.(v.verse_id)}
             onToggleBookmark={() => bookmarks?.toggle?.(v)}
             onCopy={() => copyVerse(v)}
+            onAddToSetlist={onAddToSetlist ? () => onAddToSetlist(v) : undefined}
           />
         ))}
 
@@ -262,7 +263,7 @@ export default function SearchPage({ onStage, history, clearHistory, bookmarks, 
   );
 }
 
-function VerseCard({ verse, onTap, isBookmarked, onToggleBookmark, onCopy }) {
+function VerseCard({ verse, onTap, isBookmarked, onToggleBookmark, onCopy, onAddToSetlist }) {
   const title = verse.verse_title || `${verse.book_title} ${verse.chapter_number}:${verse.verse_number}`;
   const text = verse.scripture_text || '';
   const preview = text.length > 180 ? text.slice(0, 180) + '…' : text;
@@ -283,6 +284,15 @@ function VerseCard({ verse, onTap, isBookmarked, onToggleBookmark, onCopy }) {
         )}
       </button>
       <div className="verse-card-actions">
+        {onAddToSetlist && (
+          <button
+            className="verse-action-btn"
+            onClick={(e) => { e.stopPropagation(); onAddToSetlist(); }}
+            title="Add to setlist"
+          >
+            ＋
+          </button>
+        )}
         <button
           className="verse-action-btn"
           onClick={(e) => { e.stopPropagation(); onCopy?.(); }}
