@@ -7,7 +7,7 @@ const PLATFORM_META = [
     platform: 'windows',
     category: 'desktop',
     icon: '🪟',
-    note: 'Chapel computers & laptops',
+    note: 'Chapel computers & laptops · Fully offline',
     guide: ['Download the installer.', 'Open it and follow the on-screen steps.', 'Launch from Start and begin presenting scriptures.'],
   },
   {
@@ -15,7 +15,7 @@ const PLATFORM_META = [
     platform: 'mac',
     category: 'desktop',
     icon: '🍎',
-    note: 'MacBook and iMac',
+    note: 'MacBook and iMac · Fully offline',
     guide: ['Download the app file.', 'Open it and move the app to Applications.', 'Start the app and begin scripture display.'],
   },
   {
@@ -23,7 +23,7 @@ const PLATFORM_META = [
     platform: 'linux-appimage',
     category: 'desktop',
     icon: '🐧',
-    note: 'All Linux distributions',
+    note: 'All Linux distributions · Fully offline',
     guide: ['Download the .AppImage file.', 'Make it executable: chmod +x *.AppImage', 'Double-click or run it — no install needed.'],
   },
   {
@@ -31,7 +31,7 @@ const PLATFORM_META = [
     platform: 'linux-deb',
     category: 'desktop',
     icon: '🐧',
-    note: 'Debian, Ubuntu, Kali, Mint',
+    note: 'Debian, Ubuntu, Kali, Mint · Fully offline',
     guide: ['Download the .deb package.', 'Install: sudo dpkg -i scriptures*.deb', 'Open from your applications menu.'],
   },
   {
@@ -39,8 +39,17 @@ const PLATFORM_META = [
     platform: 'android',
     category: 'mobile',
     icon: '📱',
-    note: 'Phones and tablets',
+    note: 'Phones and tablets · Requires internet',
     guide: ['Download the app file.', 'Tap it and allow installation when prompted.', 'Open and begin presenting scriptures.'],
+  },
+  {
+    label: 'iOS',
+    platform: 'ios',
+    category: 'mobile',
+    icon: '🍏',
+    note: 'iPhone and iPad · Coming soon',
+    guide: ['iOS version is currently in development.', 'Check back for updates on availability.'],
+    comingSoon: true,
   },
 ];
 
@@ -296,6 +305,19 @@ export default function Download() {
               </button>
             </div>
 
+            {activeTab === 'desktop' && (
+              <p className="dl-capability-note">
+                Desktop apps bundle all scripture databases locally and work completely offline — 
+                no internet connection needed after installation.
+              </p>
+            )}
+            {activeTab === 'mobile' && (
+              <p className="dl-capability-note">
+                Mobile apps connect to the Scriptures in View server for search, scripture data, 
+                and real-time projection. An internet connection is required.
+              </p>
+            )}
+
             {/* Cards */}
             <div className={`dl-grid dl-grid--${activeTab}`}>
               {visiblePlatforms.map(item => (
@@ -308,6 +330,15 @@ export default function Download() {
                   </div>
                   <h2 className="dl-card-title">{item.label}</h2>
                   <p className="dl-card-note">{item.note}</p>
+                  {item.category === 'desktop' && (
+                    <span className="dl-offline-badge">✓ Works without internet</span>
+                  )}
+                  {item.platform === 'android' && (
+                    <span className="dl-online-badge">⚡ Requires server connection</span>
+                  )}
+                  {item.comingSoon && (
+                    <span className="dl-coming-badge">Coming Soon</span>
+                  )}
                   <div className="dl-card-rule" aria-hidden="true" />
                   <p className="dl-steps-label">How to get started</p>
                   <ol className="dl-steps" aria-label={`Installation steps for ${item.label}`}>
@@ -322,11 +353,11 @@ export default function Download() {
                     <button
                       type="button"
                       className="dl-btn"
-                      disabled={!accepted || !item.url}
-                      aria-disabled={!accepted || !item.url}
-                      onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                      disabled={!accepted || !item.url || item.comingSoon}
+                      aria-disabled={!accepted || !item.url || item.comingSoon}
+                      onClick={() => !item.comingSoon && window.open(item.url, '_blank', 'noopener,noreferrer')}
                     >
-                      Download for {item.label}
+                      {item.comingSoon ? 'Coming Soon' : `Download for ${item.label}`}
                     </button>
                     <span className="dl-source">
                       {item.source === 'release' ? `Latest · ${releaseTag}` : (

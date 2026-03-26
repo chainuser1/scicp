@@ -7770,6 +7770,41 @@ button, [role="button"] {
   line-height: 1.5;
 }
 
+.dl-offline-badge,
+.dl-online-badge,
+.dl-coming-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  margin-top: 0.4rem;
+}
+
+.dl-offline-badge {
+  background: rgba(39, 174, 96, 0.15);
+  color: #27ae60;
+}
+
+.dl-online-badge {
+  background: rgba(230, 126, 34, 0.15);
+  color: #e67e22;
+}
+
+.dl-coming-badge {
+  background: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+}
+
+.dl-capability-note {
+  font-size: 0.85rem;
+  text-align: center;
+  color: var(--text-secondary, #8a7c52);
+  max-width: 520px;
+  margin: 0 auto 20px;
+  line-height: 1.5;
+}
+
 @media (max-width: 860px) {
   .dl-grid--desktop {
     grid-template-columns: repeat(2, 1fr);
