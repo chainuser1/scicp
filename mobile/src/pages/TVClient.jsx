@@ -6,36 +6,62 @@ import './TVClient.css';
 export default function TVClient() {
   const conn = useConnectionState();
   const [sessionId, setSessionId] = useState(() => localStorage.getItem('scicp_tv_session') || '');
-  const [joinInput, setJoinInput] = useState('');
+  const [mainClientToken, setMainClientToken] = useState(() => localStorage.getItem('scicp_tv_token') || '');
   const [verse, setVerse] = useState(null);
   const [theme, setTheme] = useState({ backgroundColor: '#0a0a0f', textColor: '#f0ece4' });
   const [highlightedText, setHighlightedText] = useState('');
   const [presenterJoined, setPresenterJoined] = useState(false);
-  const [votd, setVotd] = useState(null);
   const [bgUrl, setBgUrl] = useState('');
   const [prevBg, setPrevBg] = useState('');
   const [bgFading, setBgFading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fontScale, setFontScale] = useState(() => parseFloat(localStorage.getItem('scicp_tv_fontscale') || '1'));
+  const qrCanvasRef = useRef(null);
 
-  // Create client session on mount
+  // Create or rejoin client session on connect
   useEffect(() => {
     if (conn !== 'connected') return;
-    if (sessionId) {
-      socket.emit('join-session', { sessionId, role: 'client' });
-    } else {
-      socket.emit('create-client-session');
-    }
+    socket.emit('create-client-session', {
+      preferredSessionId: sessionId || undefined,
+      mainClientToken: mainClientToken || undefined,
+    });
   }, [conn]);
 
+  // Session created by server
   useSocketEvent('client-session-created', (data) => {
     setSessionId(data.sessionId);
+    if (data.mainClientToken) setMainClientToken(data.mainClientToken);
     localStorage.setItem('scicp_tv_session', data.sessionId);
+    if (data.mainClientToken) localStorage.setItem('scicp_tv_token', data.mainClientToken);
+    setPresenterJoined(false);
+    setVerse(null);
   });
 
   useSocketEvent('session-joined', (data) => {
     setSessionId(data.sessionId);
     localStorage.setItem('scicp_tv_session', data.sessionId);
+  });
+
+  // Session expired / not found → create fresh session with new QR
+  useSocketEvent('session-error', (data) => {
+    const msg = data.message || '';
+    if (msg.includes('not found') || msg.includes('expired')) {
+      localStorage.removeItem('scicp_tv_session');
+      localStorage.removeItem('scicp_tv_token');
+      setSessionId('');
+      setMainClientToken('');
+      setPresenterJoined(false);
+      setVerse(null);
+      // Auto-create a new session
+      socket.emit('create-client-session', {});
+    }
+  });
+
+  // Presenter lifecycle
+  useSocketEvent('presenter-joined', () => setPresenterJoined(true));
+  useSocketEvent('presenter-left', () => {
+    setPresenterJoined(false);
+    // Client stays alive, waiting for a new presenter to scan QR
   });
 
   useSocketEvent('update-verse', (data) => {
@@ -66,18 +92,18 @@ export default function TVClient() {
     }
   });
 
-  useSocketEvent('presenter-joined', () => setPresenterJoined(true));
-
-  // Fetch VOTD
+  // Generate QR code for presenter to scan
   useEffect(() => {
-    fetch(`${SERVER_URL}/health`).then(r => r.json()).catch(() => null);
-  }, []);
-
-  const joinManual = () => {
-    if (!joinInput.trim()) return;
-    socket.emit('join-session', { sessionId: joinInput.trim(), role: 'client' });
-    setJoinInput('');
-  };
+    if (!sessionId || !qrCanvasRef.current) return;
+    import('qrcode').then(QRCode => {
+      const mod = QRCode.default || QRCode;
+      mod.toCanvas(qrCanvasRef.current, sessionId, {
+        width: 280,
+        margin: 2,
+        color: { dark: '#c9a84c', light: '#0a0a0f' },
+      });
+    }).catch(() => {});
+  }, [sessionId]);
 
   // D-pad handler
   useEffect(() => {
@@ -123,7 +149,7 @@ export default function TVClient() {
         <div className={`tv-bg ${bgFading ? 'tv-bg-enter' : ''}`} style={{ backgroundImage: `url(${bgUrl})` }} />
       )}
 
-      {/* Idle / Waiting */}
+      {/* Idle / Waiting — show QR for presenter to scan */}
       {!verse && (
         <div className="tv-idle">
           <div className="tv-idle-content">
@@ -133,24 +159,20 @@ export default function TVClient() {
                 ? 'Connecting to server…'
                 : presenterJoined
                   ? 'Presenter connected — waiting for verse…'
-                  : 'Waiting for presenter…'}
+                  : 'Scan QR code with your phone to present'}
             </p>
-            {sessionId && (
-              <div className="tv-session-badge">
-                <span className="tv-session-label">Session</span>
-                <span className="tv-session-id">{sessionId}</span>
+            {sessionId && !presenterJoined && (
+              <div className="tv-qr-section">
+                <canvas ref={qrCanvasRef} className="tv-qr-canvas" />
+                <div className="tv-session-badge">
+                  <span className="tv-session-label">Session Code</span>
+                  <span className="tv-session-id">{sessionId}</span>
+                </div>
+                <p className="tv-qr-hint">Open the mobile app → Settings → Scan QR</p>
               </div>
             )}
             {!sessionId && conn === 'connected' && (
-              <div className="tv-join-form">
-                <input
-                  className="tv-join-input"
-                  placeholder="Enter session ID"
-                  value={joinInput}
-                  onChange={e => setJoinInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && joinManual()}
-                />
-              </div>
+              <p className="tv-idle-status">Creating session…</p>
             )}
           </div>
         </div>
