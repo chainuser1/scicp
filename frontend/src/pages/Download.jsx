@@ -350,7 +350,15 @@ export default function Download() {
                       className="dl-btn"
                       disabled={!accepted || !item.url || item.comingSoon}
                       aria-disabled={!accepted || !item.url || item.comingSoon}
-                      onClick={() => !item.comingSoon && window.open(item.url, '_blank', 'noopener,noreferrer')}
+                      onClick={() => {
+                        if (item.comingSoon || !item.url) return;
+                        const a = document.createElement('a');
+                        a.href = item.url;
+                        a.download = '';
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                      }}
                     >
                       {item.comingSoon ? 'Coming Soon' : `Download for ${item.label}`}
                     </button>
