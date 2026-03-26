@@ -51,3 +51,6 @@ resources/db/user-data.db
 
 # Mobile prebake artifact (regenerate with: node scripts/prebake-search-graph.js)
 resources/db/search-graph.db
+
+# Electron pre-build dep staging
+electron/backend-deps/

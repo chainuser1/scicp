@@ -259,7 +259,7 @@ async function emit(event, payload, ackCallback) {
 
   switch (event) {
     case 'search': {
-      const { query, page = 0, pageSize = 10, language = 'en' } = payload || {};
+      const { query, page = 0, cursor, pageSize = 10, language = 'en' } = payload || {};
       if (!query || !String(query).trim()) {
         fire('search-results', { results: [], total: 0, page: 0, pageSize });
         return;
@@ -268,7 +268,10 @@ async function emit(event, payload, ackCallback) {
       const remoteBase = remote.getServerUrl();
       if (remoteBase && navigator.onLine) {
         try {
-          const result = await remote.search(query, page, pageSize, language);
+          // Pass cursor for cursor-based pagination; fall back to page offset
+          const result = cursor
+            ? await remote.search(query, 0, pageSize, language, cursor)
+            : await remote.search(query, page, pageSize, language);
           if (result && Array.isArray(result.results)) {
             fire('search-results', { ...result, query, language });
             break;
