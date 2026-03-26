@@ -219,7 +219,9 @@ fastify.get('/config', async (request) => {
 
 // ── /db/:filename — serve scripture DB files for on-demand language downloads.
 //    Only allows known .db files from the DB_DIR; prevents path traversal.
+//    Requires X-SCICP-Token header to prevent unauthorized scraping.
 const DOWNLOADABLE_DBS = new Set([
+  'lds-scriptures-sqlite.db',
   'tagalog-scriptures-sqlite.db',
   'cebuano-scriptures-sqlite.db',
   'spanish-scriptures-sqlite.db',
@@ -228,8 +230,21 @@ const DOWNLOADABLE_DBS = new Set([
   'japanese-scriptures-sqlite.db',
   'nrsvue-scriptures-sqlite.db',
   'waray-scriptures-sqlite.db',
+  'topical-guide.db',
+  'chapter-summaries-fts.db',
+  'verse-tags.db',
+  'verse-summaries.db',
+  'verse-cross-refs.db',
+  'search-graph.db',
+  'footnotes-lds-summaries.db',
+  'verse-embeddings.db',
 ]);
+const DB_DOWNLOAD_TOKEN = process.env.DB_DOWNLOAD_TOKEN || 'scicp-v2-db-access';
 fastify.get('/db/:filename', async (request, reply) => {
+  const token = request.headers['x-scicp-token'];
+  if (token !== DB_DOWNLOAD_TOKEN) {
+    return reply.code(403).send({ error: 'Forbidden' });
+  }
   const { filename } = request.params;
   if (!DOWNLOADABLE_DBS.has(filename)) {
     return reply.code(404).send({ error: 'Not found' });

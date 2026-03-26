@@ -46,6 +46,10 @@ const FALLBACK_SERVERS = [
   'https://backend-production-9a27.up.railway.app',
 ];
 
+// Auth token for /db/:filename endpoint — must match backend's DB_DOWNLOAD_TOKEN
+const DB_AUTH_TOKEN = 'scicp-v2-db-access';
+const DB_AUTH_HEADERS = { 'X-SCICP-Token': DB_AUTH_TOKEN };
+
 /** Check if a buffer starts with the SQLite magic header. */
 function isValidSqlite(buf) {
   if (!buf || buf.byteLength < 16) return false;
@@ -224,7 +228,7 @@ async function downloadDbFromServer(filename, cacheKey) {
       const timeout = setTimeout(() => controller.abort(), 90_000);
       let response;
       try {
-        response = await fetch(url, { signal: controller.signal });
+        response = await fetch(url, { signal: controller.signal, headers: DB_AUTH_HEADERS });
       } finally {
         clearTimeout(timeout);
       }
@@ -422,7 +426,7 @@ export async function downloadLanguage(lang, serverUrl) {
       const fetchTimeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
       let response;
       try {
-        response = await fetch(url, { signal: controller.signal });
+        response = await fetch(url, { signal: controller.signal, headers: DB_AUTH_HEADERS });
       } finally {
         clearTimeout(fetchTimeout);
       }
