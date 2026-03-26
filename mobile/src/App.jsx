@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import * as Sentry from '@sentry/react';
 import { ExternalDisplay } from 'capacitor-external-display';
 import { App as CapApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
@@ -17,7 +18,10 @@ import ScriptureReader from './pages/ScriptureReader.jsx';
 export class AppErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
-  componentDidCatch(error, info) { console.error('[scicp] Render error:', error, info?.componentStack); }
+  componentDidCatch(error, info) {
+    console.error('[scicp] Render error:', error, info?.componentStack);
+    Sentry.captureException(error, { contexts: { react: { componentStack: info?.componentStack } } });
+  }
   render() {
     if (!this.state.error) return this.props.children;
     return (

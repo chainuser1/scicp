@@ -1,7 +1,21 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import * as Sentry from '@sentry/react'
 import './index.css'
 import App from './App.jsx'
+
+// ── Sentry crash reporting ──────────────────────────────────────────────────
+const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: import.meta.env.MODE,
+    release: `scicp-frontend@${import.meta.env.VITE_APP_VERSION || 'dev'}`,
+    integrations: [Sentry.browserTracingIntegration()],
+    tracesSampleRate: 0.1,
+    replaysOnErrorSampleRate: 0.5,
+  });
+}
 
 // Register service worker for PWA installability + asset caching
 if ('serviceWorker' in navigator) {

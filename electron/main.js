@@ -40,15 +40,31 @@ try {
   console.warn('electron-updater unavailable; auto-update disabled:', err.message);
 }
 
+// ─── Sentry crash reporting (main process) ───────────────────────────────────
+let Sentry = null;
+try {
+  Sentry = require('@sentry/node');
+  if (process.env.SENTRY_DSN) {
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: app.isPackaged ? 'production' : 'development',
+      release: `scicp-electron@${app.getVersion()}`,
+      tracesSampleRate: 0.1,
+    });
+  }
+} catch { /* @sentry/node not bundled — skip */ }
+
 // ─── Global error handlers ────────────────────────────────────────────────────
 process.on('uncaughtException', (err) => {
   console.error('[FATAL] Uncaught exception:', err);
+  if (Sentry) Sentry.captureException(err);
   dialog.showErrorBox('Unexpected Error', `${err.message}\n\nThe application will restart.`);
   app.relaunch();
   app.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection:', reason);
+  if (Sentry) Sentry.captureException(reason instanceof Error ? reason : new Error(String(reason)));
 });
 
 function logLifecycle(msg) {
