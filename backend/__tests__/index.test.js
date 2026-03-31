@@ -654,11 +654,9 @@ describe('Backend API Tests', () => {
   });
 
   describe('expandWithSynonyms function', () => {
-    test("'love' expands to include charity/affection-related terms", () => {
+    test("'love' returns base query when synonym expansion is disabled", () => {
       const expanded = expandWithSynonyms('love');
-      expect(expanded).toContain('love');
-      expect(expanded.length).toBeGreaterThan(1);
-      expect(expanded).toEqual(expect.arrayContaining(['charity']));
+      expect(expanded).toEqual(['love']);
     });
 
     test('empty string returns array with empty string', () => {
@@ -1258,24 +1256,19 @@ describe('expandWithSynonyms', () => {
     expect(result).toContain('grace');
   });
 
-  test('expands known synonym "god"', () => {
+test('returns base token when synonym expansion is disabled (god)', () => {
     const result = expandWithSynonyms('god');
-    expect(result).toContain('god');
-    // 'god' maps to lord, jehovah, etc.
-    expect(result.length).toBeGreaterThan(1);
+    expect(result).toEqual(['god']);
   });
 
-  test('expands known synonym "faith"', () => {
+  test('returns base token when synonym expansion is disabled (faith)', () => {
     const result = expandWithSynonyms('faith');
-    expect(result).toContain('faith');
-    expect(result).toContain('believe');
+    expect(result).toEqual(['faith']);
   });
 
-  test('handles multi-word phrase "holy ghost" — expands its synonyms', () => {
+  test('returns phrase tokens when synonym expansion is disabled (holy ghost)', () => {
     const result = expandWithSynonyms('holy ghost');
-    // The phrase is split into individual words; synonyms for "holy ghost" are added
-    expect(result).toContain('holy spirit');
-    expect(result).toContain('comforter');
+    expect(result).toEqual(['holy ghost']);
   });
 
   test('handles unknown word gracefully', () => {
