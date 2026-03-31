@@ -199,6 +199,10 @@ let dba_japanese   = db_japanese ? new BetterSqliteAdapter(db_japanese) : null;
 let dba_nrsvue     = db_nrsvue   ? new BetterSqliteAdapter(db_nrsvue)   : null;
 let dba_waray      = db_waray    ? new BetterSqliteAdapter(db_waray)    : null;
 
+// ── Script search configuration toggles ──
+const ENABLE_SYNONYMS = false; // disable synonym expansion for stable relevance behavior
+const ENABLE_PMI = true;      // PMI can be used for single-word fallback if needed
+
 // ── Scripture synonym dictionary (offline, pre-baked) ──
 let scriptureSynonyms = {};
 try { scriptureSynonyms = require('../shared/scripture-synonyms.json'); } catch (_) {}
@@ -2056,23 +2060,32 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
       const out = await embeddingPipe(query, { pooling: 'mean', normalize: true });
       qvec = new Float32Array(out.data);
     }
-    const scores = [];
-    for (const [vid, vvec] of embeddingCache) {
-      if (excludeIds.has(vid)) continue;
-      scores.push({ verse_id: vid, score: cosineSimilarity(qvec, vvec) });
+
+    let hits = [];
+    if (hnswIndex) {
+      hits = hnswIndex.query(qvec, 200, 150)
+        .filter((h) => !excludeIds.has(h.verse_id));
+    } else {
+      const scores = [];
+      for (const [vid, vvec] of embeddingCache) {
+        if (excludeIds.has(vid)) continue;
+        scores.push({ verse_id: vid, score: cosineSimilarity(qvec, vvec) });
+      }
+      scores.sort((a, b) => b.score - a.score);
+      hits = scores.slice(0, 200);
     }
-    scores.sort((a, b) => b.score - a.score);
-    const offset = page * pageSize;
-    const paged = scores.slice(offset, offset + pageSize);
+
     const stmtVerse = dba.prepare(`
       SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
       FROM scriptures WHERE verse_id = ?
     `);
-    const results = paged.map(({ verse_id, score }) => {
+
+    const results = hits.slice(page * pageSize, (page + 1) * pageSize).map(({ verse_id, score }) => {
       const row = stmtVerse.get(verse_id);
-      return row ? { ...row, similarity_score: +score.toFixed(4) } : null;
+      return row ? { ...row, similarity_score: +score.toFixed(4), _source: 'semantic' } : null;
     }).filter(Boolean);
-    return { results, total: Math.min(scores.length, 200), page, pageSize, semantic: true };
+
+    return { results, total: Math.min(hits.length, 200), page, pageSize, semantic: true };
   } catch (err) {
     fastify.log.warn('[SemanticSearch] failed:', err.message);
     return null;
@@ -2081,6 +2094,9 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
 
 // ── #2 Synonym expansion: expand query terms using scripture-synonyms.json ──
 function expandWithSynonyms(query) {
+  if (!ENABLE_SYNONYMS) {
+    return [query.trim()];
+  }
   const words = query.toLowerCase().split(/\s+/);
   const expanded = new Set(words);
   const lowerQuery = query.toLowerCase();
@@ -2101,6 +2117,126 @@ function expandWithSynonyms(query) {
     }
   }
   return [...expanded];
+}
+
+// ── HNSW approximate nearest neighbors index for quick semantic retrieval ──
+let hnswIndex = null;
+
+class HNSWIndex {
+  constructor(dims, M = 16, ef = 200) {
+    this.dims = dims;
+    this.M = M;
+    this.ef = ef;
+    this.nodes = [];
+    this.entryPoint = -1;
+    this.maxLevel = -1;
+    this.levelMultiplier = 1 / Math.log(1.0 * M);
+  }
+
+  _dist(a, b) {
+    let sum = 0;
+    for (let i = 0; i < this.dims; i++) {
+      const d = a[i] - b[i];
+      sum += d * d;
+    }
+    return Math.sqrt(sum);
+  }
+
+  _searchLayer(qvec, entryDist, entryIdx, ef, level) {
+    const visited = new Set();
+    const results = [[entryDist, entryIdx]];
+    let candidates = [[entryDist, entryIdx]];
+
+    while (candidates.length > 0) {
+      candidates.sort((a, b) => a[0] - b[0]);
+      const [dist, idx] = candidates.shift();
+      if (dist > results[results.length - 1][0]) break;
+      const neighbors = this.nodes[idx].neighbors.get(level) || [];
+      for (const nIdx of neighbors) {
+        if (visited.has(nIdx)) continue;
+        visited.add(nIdx);
+        const nd = this._dist(qvec, this.nodes[nIdx].vec);
+        if (results.length < ef || nd < results[results.length - 1][0]) {
+          results.push([nd, nIdx]);
+          results.sort((a, b) => a[0] - b[0]);
+          if (results.length > ef) results.pop();
+          candidates.push([nd, nIdx]);
+        }
+      }
+    }
+    return results;
+  }
+
+  insert(id, vec) {
+    const node = { id, vec, neighbors: new Map() };
+    this.nodes.push(node);
+    const idx = this.nodes.length - 1;
+    const level = Math.floor(-Math.log(Math.random()) * this.levelMultiplier);
+
+    if (this.entryPoint === -1) {
+      this.entryPoint = idx;
+      this.maxLevel = level;
+      return;
+    }
+
+    let ep = this.entryPoint;
+    let epDist = this._dist(vec, this.nodes[ep].vec);
+    for (let lc = this.maxLevel; lc > level; lc--) {
+      const layerResult = this._searchLayer(vec, epDist, ep, 1, lc);
+      if (layerResult.length > 0) {
+        ep = layerResult[0][1];
+        epDist = layerResult[0][0];
+      }
+    }
+
+    for (let lc = Math.min(level, this.maxLevel); lc >= 0; lc--) {
+      const neighbors = this._searchLayer(vec, epDist, ep, this.ef, lc).slice(0, this.M);
+      const ev = neighbors.map(([d, i]) => [d, i]);
+      this.nodes[idx].neighbors.set(lc, ev.map(([, i]) => i));
+      for (const [, nIdx] of neighbors) {
+        if (!this.nodes[nIdx].neighbors.has(lc)) this.nodes[nIdx].neighbors.set(lc, []);
+        const nList = this.nodes[nIdx].neighbors.get(lc);
+        nList.push(idx);
+        if (nList.length > this.M) {
+          nList.sort((a, b) => this._dist(this.nodes[nIdx].vec, this.nodes[a].vec) - this._dist(this.nodes[nIdx].vec, this.nodes[b].vec));
+          this.nodes[nIdx].neighbors.set(lc, nList.slice(0, this.M));
+        }
+      }
+      if (neighbors.length > 0) {
+        ep = neighbors[0][1];
+        epDist = neighbors[0][0];
+      }
+    }
+
+    if (level > this.maxLevel) {
+      this.maxLevel = level;
+      this.entryPoint = idx;
+    }
+  }
+
+  query(qvec, k = 30, ef = 100) {
+    if (this.entryPoint === -1) return [];
+    let ep = this.entryPoint;
+    let epDist = this._dist(qvec, this.nodes[ep].vec);
+    for (let lc = this.maxLevel; lc > 0; lc--) {
+      const res = this._searchLayer(qvec, epDist, ep, 1, lc);
+      if (res.length > 0) {
+        ep = res[0][1];
+        epDist = res[0][0];
+      }
+    }
+    const finalRes = this._searchLayer(qvec, epDist, ep, ef, 0);
+    finalRes.sort((a, b) => a[0] - b[0]);
+    return finalRes.slice(0, k).map(([dist, idx]) => ({ verse_id: this.nodes[idx].id, score: 1 - dist }));
+  }
+}
+
+function buildHNSWIndex() {
+  if (!embeddingsReady || embeddingCache.size === 0) return;
+  hnswIndex = new HNSWIndex(EMBED_DIM, 16, 200);
+  for (const [verse_id, vec] of embeddingCache) {
+    hnswIndex.insert(verse_id, vec);
+  }
 }
 
 // ── #3 Concept expansion via MiniLM: find nearest pre-embedded concepts ──
@@ -2621,11 +2757,12 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       }
     }
 
-    // Steps 5-6: Synonym expansion + multi-source RRF fusion
-    const expanded = expandWithSynonyms(query.trim());
+    // Steps 5-6: Multi-source RRF fusion (synonym expansion is disabled for stable ML-first relevance)
+    const expanded = ENABLE_SYNONYMS ? expandWithSynonyms(query.trim()) : [query.trim()];
+    const expandedQuery = expanded.join(' ');
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
-    const synonymTermsAdded = expanded.filter(t => !queryWords.has(t)).slice(0, 8);
-    let fusionResult = multiSourceFusion(query.trim(), expanded.join(' '), 200);
+    const synonymTermsAdded = ENABLE_SYNONYMS ? expanded.filter(t => !queryWords.has(t)).slice(0, 8) : [];
+    let fusionResult = multiSourceFusion(query.trim(), expandedQuery, 200);
 
     // Step 7: Sigmoid confidence gate → concept expansion
     const topRrfScore  = fusionResult.results[0]?._rrfScore || 0;
@@ -3010,6 +3147,10 @@ function buildEmbeddingCache() {
   }
   embeddingsReady = true;
   fastify.log.info(`[Embeddings] Loaded ${count} vectors (${useWhitened && whiteningW ? 'whitened' : 'raw'})`);
+
+  // Build HNSW ANN over loaded verse embeddings for high-speed semantic nearest neighbors
+  buildHNSWIndex();
+
   retrofitEmbeddings(embeddingCache);
 
   // Load spectral graph embeddings if available
