@@ -280,7 +280,19 @@ fastify.setNotFoundHandler((request, reply) => {
 });
 
 fastify.get('/health', async () => {
-  return { status: 'ok' };
+  return {
+    status: 'ok',
+    ready: !!(dba && db),
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+  };
+});
+
+process.on('unhandledRejection', (reason) => {
+  fastify.log.error({ reason }, 'unhandledRejection');
+});
+process.on('uncaughtException', (err) => {
+  fastify.log.error(err, 'uncaughtException');
 });
 
 // ── /config — returns the canonical public origin so Client can build a correct
@@ -5372,32 +5384,40 @@ const start = async () => {
     // Initialize FTS in background so health checks can pass immediately.
     // Skip in production/Electron — DBs are pre-built with FTS tables.
     if (!SKIP_RECOMPUTE) {
-    setImmediate(() => {
-      const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
-      const ftsOpts = { forceRebuild, log: fastify.log };
-      initializeFts(dba, 'English', ftsOpts);
-      initializeFts(dba_tagalog, 'Tagalog', ftsOpts);
-      initializeFts(dba_cebuano, 'Cebuano', ftsOpts);
-      initializeFts(dba_spanish, 'Spanish', ftsOpts);
-      initializeFts(dba_greek,   'Greek', ftsOpts);
-      initializeFts(dba_ilocano, 'Ilocano', ftsOpts);
-      if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
-      if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
-      if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
-      // M26: Quick integrity check on primary English FTS index
-      try {
-        dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get();
-      } catch (ftsErr) {
-        fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding');
-        dba.exec('DROP TABLE IF EXISTS scriptures_fts');
-        initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log });
-      }
-    });
+      setImmediate(() => {
+        try {
+          const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
+          const ftsOpts = { forceRebuild, log: fastify.log };
+          initializeFts(dba, 'English', ftsOpts);
+          initializeFts(dba_tagalog, 'Tagalog', ftsOpts);
+          initializeFts(dba_cebuano, 'Cebuano', ftsOpts);
+          initializeFts(dba_spanish, 'Spanish', ftsOpts);
+          initializeFts(dba_greek,   'Greek', ftsOpts);
+          initializeFts(dba_ilocano, 'Ilocano', ftsOpts);
+          if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
+          if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
+          if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
+          try {
+            dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get();
+          } catch (ftsErr) {
+            fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding');
+            dba.exec('DROP TABLE IF EXISTS scriptures_fts');
+            initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log });
+          }
+        } catch (err) {
+          fastify.log.error(err, '[FTS] initialization failed');
+        }
+      });
     } else {
       fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.');
     }
-    // Load embedding cache (fast: just reads pre-stored data, never re-computes in production)
-    setImmediate(() => initEmbeddings());
+    setImmediate(() => {
+      try {
+        initEmbeddings();
+      } catch (err) {
+        fastify.log.error(err, '[Embeddings] initialization failed');
+      }
+    });
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
