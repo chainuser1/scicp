@@ -2961,10 +2961,10 @@ const Presenter = () => {
                   placeholder={'Search scriptures… e.g. faith, John 3:16, anger issues'}
                   value={query}
                   onChange={handleSearch}
-                  onKeyDown={handleSearchKeyDown}
+                  onKeyUp={handleSearchKeyDown}
                   autoComplete="off"
                   autoCorrect="off"
-                  spellCheck={false}
+                  spellCheck={currentLanguage === 'en' || currentLanguage === 'nrsvue'}
                   autoFocus={drawerOpen && drawerTab === 'search'}
                   onBlur={() => setTimeout(() => setSuggestions([]), 150)}
                 />
