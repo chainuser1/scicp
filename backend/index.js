@@ -2542,7 +2542,7 @@ async function expandWithConcepts(query, topN = 5, qvec = null) {
 // ═══════════════════════════════════════════════════════════════════════════
 //  MULTI-SOURCE FUSION with RRF + IDF + Chapter Aggregation
 // ═══════════════════════════════════════════════════════════════════════════
-function multiSourceFusion(query, expandedQuery, pageSize) {
+function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const stmtVerse = dba.prepare(`
     SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
     FROM scriptures WHERE verse_id = ?
@@ -2758,12 +2758,14 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
     }
   }
 
-  // ── RRF: merge all sources — list weights driven by current learned weights ──
+  // ── RRF: merge all sources — list weights driven by per-intent learned weights ──
+  // If an intent type is provided, use its learned weight vector; fall back to global.
   // W = [bm25, semantic, pagerank, cross_ref, cluster, dwell]
   // Mapping: fts→bm25, phrase→bm25×3, summary→cross_ref, tg→cross_ref,
   //          entity→pagerank, xref→cross_ref×5
-  // Over time, Adam updates W so the heavy signals naturally float to the top.
-  const W = learnedWeights;
+  const W = (intentType && intentWeights.has(intentType))
+    ? intentWeights.get(intentType)
+    : learnedWeights;
   const rrfScores = reciprocalRankFusion(
     [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked, xrefRanked],
     queryTopicSlugs,
@@ -3054,6 +3056,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Steps 5-6: Multi-source RRF fusion
+    // Pass 1: run with global weights to get confidence + preliminary intent
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
     const synonymTermsAdded = [];
     let fusionResult = multiSourceFusion(query.trim(), query.trim(), 200);
@@ -3064,6 +3067,16 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     const confidence = sigmoidConfidence(topBm25, fusionResult.total);
     const queryWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
     const isShortQuery = queryWordCount <= 2;
+
+    // Pass 2: re-run fusion with per-intent weights if embeddings are ready (supervised refinement)
+    // Intent can only be classified once we have qvec; skip re-fusion for reference/short queries
+    if (qvec && queryWordCount >= 2) {
+      const prelimIntent = classifyQueryIntent(query.trim(), confidence, qvec);
+      if (intentWeights.has(prelimIntent.type)) {
+        fusionResult = multiSourceFusion(query.trim(), query.trim(), 200, prelimIntent.type);
+      }
+    }
+
     // PMI only for single-word queries — multi-word PMI produces noise
     const pmiTermsAdded = queryWordCount <= 1 ? expandWithPmi(query.trim()).slice(0, 5).map(t => t.term) : [];
     let conceptTermsUsed = [];
@@ -3166,15 +3179,16 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Step 6b: MMR diversity reranking
-    // λ adapts from entropy (existing) — additionally nudged by per-intent semantic weight:
+    // λ adapts from entropy — nudged by per-intent semantic weight:
     // high semantic weight → lower λ (more diversity), low → higher λ (relevance focus)
     if (results.length > 1 && qvec) {
-      // Peek at intent for MMR λ nudge (confidence + qvec already available here)
       const _preIntentClass = classifyQueryIntent(query.trim(), confidence, qvec);
       const _iW = getIntentWeights(_preIntentClass.type);
-      // Semantic weight normalized [0.1, 1.4] → λ bias in [+0.1, -0.1]
+      // Semantic weight normalized [0.1, 1.4] → λ bias ∈ [+0.08, -0.08]
       const _semNorm  = Math.min(1.0, Math.max(0.0, (_iW[1] - 0.1) / 1.3));
-      const _mmrLambda = null; // keep null → let entropy drive it; nudge applied via SEM_THRESHOLD below
+      // High semantic weight (conceptual/situational queries) → lower λ → more diversity
+      // Low semantic weight (keyword/reference) → higher λ → tighter relevance focus
+      const _mmrLambda = 0.5 + (0.5 - _semNorm) * 0.16; // [0.42, 0.58]
       results = mmrRerank(results, qvec, _mmrLambda, Math.min(200, results.length));
       results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? r.similarity_score ?? 0).toFixed(4) }));
     }
@@ -3197,24 +3211,83 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       results = contextBoost(results, contextVerseId);
     }
 
+    // Step 6.6: RWR graph diffusion — inject structurally related verses from pre-baked scores
+    // Seeds from top-3 FTS results; picks up highly connected neighbours not found by FTS/HNSW.
+    if (rwrStmt && results.length > 0) {
+      try {
+        const existingIds = new Set(results.map(r => r.verse_id));
+        const stmtVerse = dba.prepare(
+          'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
+        );
+        const toInject = new Map(); // verse_id → best rwr_score
+        for (const seed of results.slice(0, 3)) {
+          const rwrRows = rwrStmt.all(seed.verse_id);
+          for (const rr of rwrRows) {
+            if (existingIds.has(rr.neighbor_id)) {
+              // Already present — boost its RRF score instead of injecting
+              const existing = results.find(r => r.verse_id === rr.neighbor_id);
+              if (existing) existing._rrfScore = (existing._rrfScore || 0) + rr.rwr_score * 0.1;
+            } else if ((toInject.get(rr.neighbor_id) || 0) < rr.rwr_score) {
+              toInject.set(rr.neighbor_id, rr.rwr_score);
+            }
+          }
+        }
+        // Inject top-5 RWR neighbours not already in results
+        const candidates = [...toInject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+        for (const [vid, rwrScore] of candidates) {
+          const row = stmtVerse.get(vid);
+          if (row) {
+            const vec = embeddingCache.get(vid);
+            const simScore = (vec && qvec) ? +cosineSimilarity(qvec, vec).toFixed(4) : 0;
+            results.push({ ...row, _source: 'rwr', _rrfScore: rwrScore * 0.08, similarity_score: simScore });
+          }
+        }
+      } catch {}
+    }
+
     // Step 7.5: WMD reranking for multi-concept queries
-    // When query has multiple meaningful words and confidence is moderate,
-    // compute Sinkhorn WMD between per-word query embeddings and each candidate.
-    // This avoids the "averaging problem" where "faith and repentance" matches neither well.
+    // Sinkhorn EMD between per-word query embeddings and IDF-weighted per-word verse tokens.
+    // Uses concept-cache as a word embedding lookup for verse words; skips words not found.
+    // This correctly measures the minimum-cost transport between the query's word distribution
+    // and the verse's word distribution — avoiding the "averaging problem".
     if (queryWordVecs && queryWordVecs.length >= 2 && confidence < 0.7 && results.length > 0) {
+      // Build word→vec lookup from conceptCache single-word entries (pre-baked)
+      const wordVecLookup = new Map();
+      for (const c of conceptCache) {
+        if (!c.phrase.includes(' ')) wordVecLookup.set(c.phrase.toLowerCase(), c.vec);
+      }
       const wmdLimit = Math.min(50, results.length);
       for (let i = 0; i < wmdLimit; i++) {
         const r = results[i];
-        const vVec = embeddingCache.get(r.verse_id);
-        if (!vVec) continue;
-        // Use verse's full embedding as single-token distribution (relaxed WMD)
-        const verseTokens = [{ vec: vVec, weight: 1.0 }];
-        const wmd = sinkhornWMD(queryWordVecs, verseTokens);
-        const wmdScore = Math.exp(-wmd * 3.0); // scale and convert to similarity
-        // Blend: 70% cosine + 30% WMD similarity
         const cosSim = r.similarity_score || 0;
-        if (cosSim > 0) {
+        if (cosSim <= 0) continue;
+        // Build IDF-weighted per-word token distribution for the verse
+        const verseMeta = verseMetaCache.get(r.verse_id);
+        const verseText = verseMeta?.scripture_text || r.scripture_text || '';
+        const verseWords = verseText.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2);
+        const verseTokens = [];
+        for (const w of [...new Set(verseWords)]) {
+          const vec = wordVecLookup.get(w);
+          if (!vec) continue;
+          const idfScore = idfStmt ? (idfStmt.get(w)?.idf || 3.0) : 1.0;
+          if (idfScore < 1.0) continue; // skip stopwords
+          verseTokens.push({ vec, weight: idfScore });
+        }
+        // Fall back to single-token if no word embeddings found in concept cache
+        const vVec = embeddingCache.get(r.verse_id);
+        if (verseTokens.length < 2) {
+          if (!vVec) continue;
+          const wmd = sinkhornWMD(queryWordVecs, [{ vec: vVec, weight: 1.0 }]);
+          const wmdScore = Math.exp(-wmd * 3.0);
           r.similarity_score = +(0.7 * cosSim + 0.3 * wmdScore).toFixed(4);
+        } else {
+          // Normalize token weights to sum to 1 (required by Sinkhorn)
+          const wSum = verseTokens.reduce((s, t) => s + t.weight, 0);
+          for (const t of verseTokens) t.weight /= wSum;
+          const wmd = sinkhornWMD(queryWordVecs, verseTokens);
+          const wmdScore = Math.exp(-wmd * 3.0);
+          // Blend: 60% cosine + 40% WMD (more WMD weight now verse side is real)
+          r.similarity_score = +(0.6 * cosSim + 0.4 * wmdScore).toFixed(4);
         }
       }
     }
@@ -3271,6 +3344,10 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         const rrf = r._rrfScore || 0;
         const rrfNorm = Math.min(rrf * 8, 0.99);
         const isTopicalSource = (r._source || '').includes('topical');
+        // QPPR graph-authority score (0–1, normalised); 0 if not in local subgraph
+        const qpprBoost = (qpprScores && qpprScores.get(r.verse_id)) || 0;
+        // Spectral similarity for tier promotion (computed in Step 6 above)
+        const specSim = r._spectralSim || 0;
         let tier, tierScore;
 
         if (phraseIdsSet.has(r.verse_id)) {
@@ -3288,6 +3365,11 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
             // Tier 4: topical with sub-threshold semantic — blend gate + RRF
             tier = 4;
             tierScore = Math.min(gate * simScore + (1 - gate) * rrfNorm, 0.99);
+          } else if (specSim > 0.55 && qpprBoost > 0.3) {
+            // Spectral + QPPR promotion: graph-structurally central AND spectrally close
+            // → promote tier 5 candidate to tier 4 (unsupervised structure signal)
+            tier = 4;
+            tierScore = Math.min(specSim * 0.6 + rrfNorm * 0.4, 0.99);
           } else {
             // Tier 5: weak semantic — use RRF with small cosine nudge
             tier = 5;
@@ -3304,7 +3386,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         }
 
         // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
-        let specificityScore = (6 - tier) + tierScore;
+        // Apply QPPR within-tier boost: max +0.15 — cannot cross tier boundary (gap=1.0)
+        let specificityScore = (6 - tier) + tierScore + qpprBoost * 0.15;
         if (calibrationCurves.size > 0) {
           specificityScore = calibrateScore(tier, specificityScore);
         }
@@ -3328,6 +3411,22 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       qpprActive:      !!(qpprScores && qpprScores.size > 0),
       phraseMatchCount: phraseHits.length,
     };
+
+    // Auto-populate search_calibration: write top-20 tier+raw_score rows
+    // so PAV calibration can fit curves without requiring client to send them manually.
+    try {
+      const calIns = db_user.prepare(
+        'INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, 0)'
+      );
+      const now = Date.now();
+      db_user.transaction(() => {
+        for (const r of results.slice(0, 20)) {
+          if (r._tier != null && r._specificity_score != null) {
+            calIns.run(now, r._tier, +r._specificity_score.toFixed(4));
+          }
+        }
+      })();
+    } catch {}
 
     results = results.map(r => {
       const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _specificity_score, ...clean } = r;
