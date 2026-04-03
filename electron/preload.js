@@ -26,11 +26,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return Promise.reject(new Error('Invalid mode'));
   },
 
-  // Auto-updater events — forward from main process to renderer
+  // Auto-updater events — forward from main process to renderer.
+  // removeAllListeners before re-binding so hot-reloads / StrictMode double-invocations
+  // don't pile up duplicate listeners on the same IPC channel.
   onUpdateStatus: (cb) => {
+    ipcRenderer.removeAllListeners('update-status');
     ipcRenderer.on('update-status', (_e, data) => cb(data));
   },
   onUpdateDownloadProgress: (cb) => {
+    ipcRenderer.removeAllListeners('update-download-progress');
     ipcRenderer.on('update-download-progress', (_e, data) => cb(data));
   },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),

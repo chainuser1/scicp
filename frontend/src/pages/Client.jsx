@@ -36,8 +36,10 @@ const generateQrDataUrl = async (text) => {
 
 const TV_SESSION_KEY = 'siv.tv_session_id';
 
+// Primary: external CDN image. Gradient is the CSS fallback if the image fails to load
+// so the display screen never shows a broken white background.
 const DEFAULT_BG =
-  "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default')";
+  "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default'), linear-gradient(160deg, #0d0d1a 0%, #1a1a2e 55%, #0f2040 100%)";
 
 const DEFAULT_THEME = {
   background_url: DEFAULT_BG,
