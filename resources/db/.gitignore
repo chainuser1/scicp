@@ -5,3 +5,8 @@ __pycache__/
 # SQLite WAL-mode sidecars (auto-managed by SQLite, not for version control)
 *.db-shm
 *.db-wal
+
+# Build artifacts from scripture DB build scripts (not version-controlled)
+ylt-raw.csv
+user-data.db
+
