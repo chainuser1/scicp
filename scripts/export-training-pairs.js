@@ -31,8 +31,9 @@ const OUT     = path.join(ROOT, 'resources/training-pairs.json');
 
 // ── Load all language DBs ────────────────────────────────────────────────────
 const LANG_DBS = {
-  lds: 'lds-scriptures-sqlite.db',
-  ylt: 'ylt-scriptures-sqlite.db',
+  lds:       'lds-scriptures-sqlite.db',
+  ylt:       'ylt-scriptures-sqlite.db',
+  rotherham: 'rotherham-scriptures-sqlite.db',
   // Only English sources — non-English translations risk contaminating
   // the embedding space with bad translations and split capacity across
   // languages we don't use for semantic search.
@@ -70,7 +71,7 @@ for (const [lang, map] of versesByLang) {
     }
   }
 }
-console.log(`\n1. Translation pairs (LDS↔YLT): ${translationCount.toLocaleString()}`);
+console.log(`\n1. Translation pairs (LDS↔YLT↔Rotherham): ${translationCount.toLocaleString()}`);
 
 // (Cross-translation pairs removed — English-only training)
 
@@ -226,6 +227,24 @@ try {
 } catch (e) { console.log('  same-triple error:', e.message); }
 console.log(`8. Same-topic verse pairs (Triple): ${sameTripleCount.toLocaleString()}`);
 
+// ── 9. Strong's semantic expansion pairs ────────────────────────────────────
+let strongsCount = 0;
+const STRONGS_PAIRS = path.join(ROOT, 'resources/strongs-pairs.json');
+try {
+  if (fs.existsSync(STRONGS_PAIRS)) {
+    const strongsPairs = JSON.parse(fs.readFileSync(STRONGS_PAIRS, 'utf8'));
+    for (const p of strongsPairs) {
+      if (p.anchor && p.positive && p.anchor.length > 15 && p.positive.length > 15) {
+        pairs.push(p);
+        strongsCount++;
+      }
+    }
+  } else {
+    console.log('  strongs-pairs.json not found — run scripts/build-strongs-pairs.js to generate');
+  }
+} catch (e) { console.log('  strongs-pairs error:', e.message); }
+console.log(`9. Strong's semantic pairs: ${strongsCount.toLocaleString()}`);
+
 // ── Shuffle and write ───────────────────────────────────────────────────────
 // Deterministic shuffle with seed
 let seed = 42;
@@ -240,7 +259,7 @@ console.log(`Total pairs: ${pairs.length.toLocaleString()}`);
 console.log(`File: ${OUT} (${sizeMB} MB)`);
 console.log(`════════════════════════════════════════`);
 console.log(`\nBreakdown:`);
-console.log(`  Translation (LDS↔YLT):    ${translationCount.toLocaleString()}`);
+console.log(`  Translation (LDS↔YLT↔Rotherham): ${translationCount.toLocaleString()}`);
 console.log(`  Topical guide:            ${topicCount.toLocaleString()}`);
 console.log(`  Triple Index:             ${tripleTopicCount.toLocaleString()}`);
 console.log(`  Cross-references:         ${crossRefCount.toLocaleString()}`);
@@ -248,4 +267,5 @@ console.log(`  kNN neighbors:            ${knnCount.toLocaleString()}`);
 console.log(`  Adjacent verses:          ${adjCount.toLocaleString()}`);
 console.log(`  Same-topic (TG):          ${sameTopicCount.toLocaleString()}`);
 console.log(`  Same-topic (Triple):      ${sameTripleCount.toLocaleString()}`);
+  console.log(`  Strong's semantic:        ${strongsCount.toLocaleString()}`);
 console.log(`\nNext: upload resources/training-pairs.json to Google Colab`);
