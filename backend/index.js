@@ -1110,6 +1110,12 @@ function calibrateScore(tier, rawScore) {
   const curve = calibrationCurves.get(tier);
   if (!curve || curve.length < 2) return rawScore;
 
+  // Guard: if the curve's output range is essentially zero (all-zero click data —
+  // no user feedback yet), applying it would collapse all scores to near-0 and
+  // destroy tier-based ordering. Return rawScore unchanged in that case.
+  const maxY = curve.reduce((m, p) => Math.max(m, p.y), 0);
+  if (maxY < 0.01) return rawScore;
+
   // Piecewise linear interpolation
   if (rawScore <= curve[0].x) return curve[0].y;
   if (rawScore >= curve[curve.length - 1].x) return curve[curve.length - 1].y;
@@ -3107,6 +3113,35 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       results = [...phraseHits, ...results];
     }
 
+    // Step 4d: Proactive semantic injection for multi-word queries
+    // Problem: BM25 OR-fallback returns enough results to suppress the semantic semFallback
+    // (Step 8), so semantic-only matches — verses with no keyword overlap but high embedding
+    // similarity to the full phrase — never enter the candidate pool at all.
+    // Fix: always run HNSW for queries with 2+ words and inject top semantic hits.
+    // semInjectWeight = min(0.95, 0.40 + (N−1) × 0.08) — pure mathematics, no hardcoding:
+    //   N=2 → 0.48,  N=3 → 0.56,  N=5 → 0.72,  N=8 → 0.95
+    // Longer phrases get stronger semantic injection; short queries stay keyword-dominant.
+    if (qvec && queryWordCount >= 2 && embeddingsReady && embeddingPipe) {
+      const semInjectWeight = Math.min(0.95, 0.40 + (queryWordCount - 1) * 0.08);
+      try {
+        const semProbe = await semanticSearch(query.trim(), 0, 50, new Set(), qvec);
+        if (semProbe && semProbe.results.length > 0) {
+          const existingIds = new Set(results.map(r => r.verse_id));
+          for (const sr of semProbe.results) {
+            if (!existingIds.has(sr.verse_id)) {
+              results.push({
+                ...sr,
+                _source: 'sem-inject',
+                _rrfScore: Math.max(0.01, sr.similarity_score * semInjectWeight * 0.06),
+              });
+              existingIds.add(sr.verse_id);
+            }
+          }
+          total = results.length;
+        }
+      } catch {}
+    }
+
     // Step 5.5: kNN graph expansion
     if (qvec && db_graph && results.length > 0) {
       const existingIds = new Set(results.map(r => r.verse_id));
@@ -3143,14 +3178,25 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
 
     // Step 6: Attach spectral similarity if available
     if (spectralReady && qvec && results.length > 0) {
-      // Infer query spectral vector as cosine-weighted avg of top results' spectral embeddings
+      // Infer query spectral vector from pure semantic (HNSW) neighbors, not fusion results.
+      // Using fusion-top results would poison qSpec when entity-intent pulls the wrong domain
+      // (e.g. "God calling many but only few chosen" → fusion puts Genesis 1 at top →
+      // qSpec collapses to Genesis cluster → spectral blending demotes correct results).
+      // HNSW top-5 are purely embedding-nearest and unaffected by BM25/entity intent weights.
       const topK = Math.min(5, results.length);
       const qSpec = new Float32Array(SPECTRAL_DIM);
       let wSum = 0;
-      for (let i = 0; i < topK; i++) {
-        const sv = spectralCache.get(results[i].verse_id);
+      let spectralSeeds;
+      if (hnswIndex) {
+        spectralSeeds = hnswIndex.query(qvec, topK, topK * 4)
+          .map(h => h.verse_id);
+      } else {
+        spectralSeeds = results.slice(0, topK).map(r => r.verse_id);
+      }
+      for (const vid of spectralSeeds) {
+        const sv = spectralCache.get(vid);
         if (!sv) continue;
-        const vec = embeddingCache.get(results[i].verse_id);
+        const vec = embeddingCache.get(vid);
         const w = vec ? Math.max(0, cosineSimilarity(qvec, vec)) : 0.1;
         for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] += w * sv[d];
         wSum += w;
