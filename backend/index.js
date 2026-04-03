@@ -282,7 +282,11 @@ fastify.setNotFoundHandler((request, reply) => {
 fastify.get('/health', async () => {
   return {
     status: 'ok',
+    version: require('./package.json').version,
     ready: !!(dba && db),
+    hnswReady: !!hnswIndex,
+    embeddingsReady,
+    intentWeightsActive: intentWeights.size > 0,
     uptime: process.uptime(),
     timestamp: Date.now(),
   };
