@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { socket } from '../socket';
 import SEO from '../components/SEO';
+import { normalizeThemeBg, normalizeBgUrl } from '../utils/bgUtils';
 
 const POV_TINT = {
   'prayer or praise':      'rgba(120, 80, 200, 0.12)',
@@ -36,10 +37,10 @@ const generateQrDataUrl = async (text) => {
 
 const TV_SESSION_KEY = 'siv.tv_session_id';
 
-// Primary: external CDN image. Gradient is the CSS fallback if the image fails to load
-// so the display screen never shows a broken white background.
+// Background image is bundled locally in /bg/ so it works offline in Electron.
+// The gradient is a CSS fallback for very slow networks or any image load failure.
 const DEFAULT_BG =
-  "url('https://www.churchofjesuschrist.org/imgs/ae2c3112eda211edae1aeeeeac1ef8149c058327/full/%21500%2C/0/default'), linear-gradient(160deg, #0d0d1a 0%, #1a1a2e 55%, #0f2040 100%)";
+  "url('/bg/bg-default.jpg'), linear-gradient(160deg, #0d0d1a 0%, #1a1a2e 55%, #0f2040 100%)";
 
 const DEFAULT_THEME = {
   background_url: DEFAULT_BG,
@@ -508,7 +509,7 @@ function Client() {
       setShowQrOverlay(false);
       resetScreensaver();
       const newBg = data.theme?.background_url;
-      if (newBg) crossfadeBackground(newBg);
+      if (newBg) crossfadeBackground(normalizeBgUrl(newBg));
       // Track for kiosk resume — if kiosk turns on later, it picks up from here
       if (data.verse_id) kioskCurVerseRef.current = data.verse_id;
       // Fetch POV tags for backdrop tint
@@ -541,12 +542,13 @@ function Client() {
     };
 
     const handleTheme = (theme) => {
+      const t = normalizeThemeBg(theme);
       resetScreensaver();
-      if (theme.background_url) crossfadeBackground(theme.background_url);
-      setVerse((v) => ({ ...v, theme }));
+      if (t.background_url) crossfadeBackground(t.background_url);
+      setVerse((v) => ({ ...v, theme: t }));
       // Presenter remote font scale — same fontScale state as local A-/A+ buttons
-      if (theme.font_scale != null && !isNaN(theme.font_scale)) {
-        const s = Math.min(2.0, Math.max(0.5, theme.font_scale));
+      if (t.font_scale != null && !isNaN(t.font_scale)) {
+        const s = Math.min(2.0, Math.max(0.5, t.font_scale));
         setFontScale(s);
         localStorage.setItem('scicp.client_font_scale', s);
       }
@@ -565,11 +567,11 @@ function Client() {
       if (v) {
         setVerse(v);
         setIsIdle(false);
-        if (v.theme?.background_url) setBgUrl(v.theme.background_url);
+        if (v.theme?.background_url) setBgUrl(normalizeBgUrl(v.theme.background_url));
       }
       if (t) {
-        setVerse((prev) => ({ ...prev, theme: t }));
-        if (t.background_url) setBgUrl(t.background_url);
+        setVerse((prev) => ({ ...prev, theme: normalizeThemeBg(t) }));
+        if (t.background_url) setBgUrl(normalizeBgUrl(t.background_url));
       }
       if (v) setDisplayVerse(v);
       requestAnimationFrame(() => requestAnimationFrame(() => setTextVisible(true)));

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scriptures in View — Loading</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0d0d1a;
+      font-family: 'Georgia', serif;
+      color: #c9a84c;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .emblem {
+      width: 72px;
+      height: 72px;
+      opacity: 0.85;
+    }
+    h1 {
+      font-size: 1.4rem;
+      letter-spacing: 0.06em;
+      font-weight: normal;
+      color: #e8d8a0;
+    }
+    p {
+      font-size: 0.85rem;
+      color: #888;
+      letter-spacing: 0.04em;
+    }
+    .dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #c9a84c;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.2; transform: scale(0.8); }
+      50%       { opacity: 1;   transform: scale(1.1); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Inline SVG emblem so it works without network access -->
+    <svg class="emblem" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="36" cy="36" r="34" stroke="#c9a84c" stroke-width="1.5" opacity="0.4"/>
+      <text x="36" y="48" text-anchor="middle" font-size="36" fill="#c9a84c" font-family="Georgia,serif">&#x2726;</text>
+    </svg>
+    <h1>Scriptures in View</h1>
+    <div class="dots">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+    <p>Loading search index&hellip;</p>
+  </div>
+</body>
+</html>

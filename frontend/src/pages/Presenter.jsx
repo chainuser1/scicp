@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { socket, isRemoteMode } from '../socket';
 import SEO from '../components/SEO';
+import { normalizeThemeBg } from '../utils/bgUtils';
 
 const API_URL = import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000';
 
 const themes = {
   light: {
-    background_url: "url('https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default')",
+    background_url: "url('/bg/bg-nt-light.jpg')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.1rem",
     layout: "centered",
     tone: "light"
   },
   dark: {
-    background_url: "url('https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default')",
+    background_url: "url('/bg/bg-nt-dark.jpg')",
     font_family: "'Cormorant Garamond', Georgia, serif",
     font_size: "4.8rem",
     layout: "centered",
@@ -22,13 +23,17 @@ const themes = {
 };
 
 const BG_PRESETS = [
-  { label: 'Auto',     url: null },
-  { label: 'NT Dark',  url: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default' },
-  { label: 'NT Light', url: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default' },
-  { label: 'OT Dark',  url: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default' },
-  { label: 'OT Light', url: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default' },
-  { label: 'BoM Dark', url: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default' },
-  { label: 'D&C Dark', url: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default' },
+  { label: 'Auto',      url: null },
+  { label: 'NT Dark',   url: '/bg/bg-nt-dark.jpg' },
+  { label: 'NT Light',  url: '/bg/bg-nt-light.jpg' },
+  { label: 'OT Dark',   url: '/bg/bg-ot-dark.jpg' },
+  { label: 'OT Light',  url: '/bg/bg-ot-light.jpg' },
+  { label: 'BoM Dark',  url: '/bg/bg-bom-dark.jpg' },
+  { label: 'BoM Light', url: '/bg/bg-bom-light.jpg' },
+  { label: 'D&C Dark',  url: '/bg/bg-dc-dark.jpg' },
+  { label: 'D&C Light', url: '/bg/bg-dc-light.jpg' },
+  { label: 'PGP Dark',  url: '/bg/bg-pgp-dark.jpg' },
+  { label: 'PGP Light', url: '/bg/bg-pgp-light.jpg' },
 ];
 
 const FONT_FAMILIES = [
@@ -43,26 +48,11 @@ const FONT_FAMILIES = [
 ];
 
 const VOLUME_THEME_BACKGROUNDS = {
-  ot: {
-    light: 'https://www.churchofjesuschrist.org/imgs/91a96141d4471eac93f6d58e7d6db42cd6fd4192/full/1080%2C/0/default',
-    dark: 'https://www.churchofjesuschrist.org/imgs/850c3faf9ed39b2193c9280a929f73469094982c/full/1080%2C/0/default',
-  },
-  nt: {
-    light: 'https://www.churchofjesuschrist.org/imgs/5a979a326ee432c192220903e9c48b5332409a34/full/1080%2C/0/default',
-    dark: 'https://www.churchofjesuschrist.org/imgs/b1a19c15b0a1fd4b274d6e3decde033329db53f2/full/1080%2C/0/default',
-  },
-  bom: {
-    light: 'https://www.churchofjesuschrist.org/imgs/c827eb43191d54ef97f880db05170ad2a31ad643/full/1080%2C/0/default',
-    dark: 'https://www.churchofjesuschrist.org/imgs/bc303ddc99f44c59f8c3b0743367f2180c9e91ef/full/1080%2C/0/default',
-  },
-  dc: {
-    light: 'https://www.churchofjesuschrist.org/imgs/d51970e2a6003156c90973409c0c94f44c0d9b64/full/1080%2C/0/default',
-    dark: 'https://www.churchofjesuschrist.org/imgs/d424eaa659d3102b717c1825b0e48388d689a966/full/1080%2C/0/default',
-  },
-  pgp: {
-    light: 'https://www.churchofjesuschrist.org/imgs/4b344419a83be3d625e222be5c77c4453b0e0184/full/1080%2C/0/default',
-    dark: 'https://www.churchofjesuschrist.org/imgs/b4c6ca482db211efb2a5eeeeac1ea3e2eeb3cea8/full/1080%2C/0/default',
-  },
+  ot:  { light: '/bg/bg-ot-light.jpg',  dark: '/bg/bg-ot-dark.jpg'  },
+  nt:  { light: '/bg/bg-nt-light.jpg',  dark: '/bg/bg-nt-dark.jpg'  },
+  bom: { light: '/bg/bg-bom-light.jpg', dark: '/bg/bg-bom-dark.jpg' },
+  dc:  { light: '/bg/bg-dc-light.jpg',  dark: '/bg/bg-dc-dark.jpg'  },
+  pgp: { light: '/bg/bg-pgp-light.jpg', dark: '/bg/bg-pgp-dark.jpg' },
 };
 
 // Per-volume visual tokens: highlight colour + font pairing
@@ -811,7 +801,7 @@ const Presenter = () => {
       const s = JSON.parse(raw);
       if (s.liveVerse)     setLiveVerse(s.liveVerse);
       if (s.staged)        setStaged(s.staged);
-      if (s.currentTheme)  setCurrentTheme(s.currentTheme);
+      if (s.currentTheme)  setCurrentTheme(normalizeThemeBg(s.currentTheme));
       if (s.currentLanguage) setCurrentLanguage(s.currentLanguage);
       if (s.secondaryLanguage) setSecondaryLanguage(s.secondaryLanguage);
       if (Array.isArray(s.history) && s.history.length) setHistory(s.history);
@@ -1265,10 +1255,11 @@ const Presenter = () => {
     };
     const handleUpdateVerse = data => { setLiveVerse(data); setCurrentSegment(data.currentSegment || 0); };
     const handleThemeReceived = theme => {
-      setCurrentTheme(theme);
-      setStaged(prev => prev ? { ...prev, theme: themeForVerse(theme, prev) } : prev);
-      if (theme?.font_scale != null && !isNaN(theme.font_scale)) {
-        setFontScale(theme.font_scale);
+      const t = normalizeThemeBg(theme);
+      setCurrentTheme(t);
+      setStaged(prev => prev ? { ...prev, theme: themeForVerse(t, prev) } : prev);
+      if (t?.font_scale != null && !isNaN(t.font_scale)) {
+        setFontScale(t.font_scale);
       }
     };
     socket.on('search-results', handleSearchResults);
