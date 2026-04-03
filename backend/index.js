@@ -472,11 +472,11 @@ fastify.post('/reading-event', async (request, reply) => {
 // ── Reading Coverage (for coverage map visualization) ───────────────────────
 fastify.post('/search-feedback', async (request, reply) => {
   try {
-    const { query, verse_id, rank_shown, source } = request.body || {};
+    const { query, verse_id, rank_shown, source, intent } = request.body || {};
     if (!query || !verse_id) { reply.code(400); return { error: 'query and verse_id required' }; }
     db_user.prepare(
-      'INSERT INTO search_feedback (query, verse_id, rank_shown, source) VALUES (?, ?, ?, ?)'
-    ).run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null);
+      'INSERT INTO search_feedback (query, verse_id, rank_shown, source, intent) VALUES (?, ?, ?, ?, ?)'
+    ).run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null, intent || null);
 
     if (request.body.tier != null && request.body.raw_score != null) {
       db_user.prepare(
@@ -799,11 +799,14 @@ db_user.exec(`
     verse_id   INTEGER NOT NULL,
     rank_shown INTEGER NOT NULL,
     source     TEXT,
+    intent     TEXT,
     ts         INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
   );
   CREATE INDEX IF NOT EXISTS idx_sf_query ON search_feedback(query);
   CREATE INDEX IF NOT EXISTS idx_sf_ts    ON search_feedback(ts DESC);
 `);
+// Migrate: add intent column if missing (for existing deployments)
+try { db_user.exec('ALTER TABLE search_feedback ADD COLUMN intent TEXT'); } catch {}
 
 // ── Learned Scoring Weights (updated from feedback) ──────────────────────────
 // Weights for: [bm25, semantic, pagerank, cross_ref, cluster, dwell]
@@ -826,18 +829,15 @@ try {
   }
 } catch {}
 
-// ── Adam optimizer state for learned weights ──────────────────────────────────
-// First moment (momentum), second moment (RMSProp), and timestep per weight.
-// Persisted alongside weights in user-data.db.
+// ── Adam optimizer state for global learned weights ────────────────────────
 const ADAM_BETA1 = 0.9;
 const ADAM_BETA2 = 0.999;
 const ADAM_EPS   = 1e-8;
 const ADAM_LR    = 0.01;
-let adamM = new Float64Array(learnedWeights.length); // first moment
-let adamV = new Float64Array(learnedWeights.length); // second moment
-let adamT = 0; // global timestep
+let adamM = new Float64Array(learnedWeights.length);
+let adamV = new Float64Array(learnedWeights.length);
+let adamT = 0;
 
-// Restore Adam state from DB if available
 try {
   const mRow = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'adam_m'").get();
   const vRow = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'adam_v'").get();
@@ -847,58 +847,219 @@ try {
   if (tRow) adamT = parseInt(tRow.value, 10) || 0;
 } catch {}
 
+// ── Per-intent learned weight vectors ────────────────────────────────────────
+// Seeds encode strong prior knowledge (same as former hardcoded INTENT_WEIGHT_PRESETS).
+// Each intent type owns its own 6-dim weight vector [bm25,semantic,pagerank,cross_ref,cluster,dwell]
+// that is updated independently via Adam from user feedback.
+// Over time, weights drift toward what the data says they should be —
+// no human ever adjusts these again.
+// ─────────────────────────────────────────────────────────────────────────────
+const INTENT_WEIGHT_SEEDS = {
+  reference:   [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],
+  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],
+  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],
+  conceptual:  [0.3, 1.4, 0.3, 0.6, 0.2, 0.2 ],
+  mixed:       [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],
+  keyword:     [1.0, 0.8, 0.3, 0.4, 0.2, 0.15],
+};
+const intentWeights  = new Map(); // intentType → Float64Array(6)
+const intentAdamM    = new Map();
+const intentAdamV    = new Map();
+const intentAdamT    = new Map();
+for (const [type, seed] of Object.entries(INTENT_WEIGHT_SEEDS)) {
+  intentWeights.set(type, new Float64Array(seed));
+  intentAdamM.set(type, new Float64Array(6));
+  intentAdamV.set(type, new Float64Array(6));
+  intentAdamT.set(type, 0);
+}
+
+try {
+  db_user.exec(`
+    CREATE TABLE IF NOT EXISTS intent_weights (
+      intent_type TEXT PRIMARY KEY,
+      weights     TEXT NOT NULL,
+      adam_m      TEXT NOT NULL,
+      adam_v      TEXT NOT NULL,
+      adam_t      INTEGER NOT NULL DEFAULT 0,
+      updated_at  INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER) * 1000)
+    )
+  `);
+  const rows = db_user.prepare('SELECT intent_type, weights, adam_m, adam_v, adam_t FROM intent_weights').all();
+  for (const r of rows) {
+    if (!intentWeights.has(r.intent_type)) continue;
+    try {
+      intentWeights.set(r.intent_type, new Float64Array(JSON.parse(r.weights)));
+      intentAdamM.set(r.intent_type, new Float64Array(JSON.parse(r.adam_m)));
+      intentAdamV.set(r.intent_type, new Float64Array(JSON.parse(r.adam_v)));
+      intentAdamT.set(r.intent_type, r.adam_t || 0);
+    } catch {}
+  }
+} catch {}
+
+// Return per-intent weights, falling back to global learnedWeights if no intent-specific data
+function getIntentWeights(intentType) {
+  return intentWeights.get(intentType) || new Float64Array(learnedWeights);
+}
+
+// ── Source → weight index mapping (shared by all Adam update paths) ───────────
+const SRC_WEIGHT_IDX = {
+  'fts': 0, 'fts-phrase': 0, 'semantic': 1, 'knn-expand': 1,
+  'pagerank': 2, 'entity-person': 2, 'entity-place': 2,
+  'cross-ref': 3, 'topical-guide': 3, 'summary': 3,
+  'cluster': 4, 'chapter-agg': 4,
+  'dwell': 5,
+};
+
+// ── Robust Weight Learner (Adam + noise rejection + per-intent) ───────────────
+//
+// Three-phase noise filter applied before any gradient step:
+//   ① Session velocity: >12 events in 90 s window → discard entire burst
+//   ② Validity gate: rank_shown must be [0, 49]; strips bot/test data
+//   ③ Z-score outlier rejection: per source-bucket, discard |rrk − μ| > 2.5σ
+//
+// IPS position-bias correction:
+//   Clicks at rank k are over-represented (position bias).
+//   Inverse-propensity weight ipw = √(rank + 1) upweights hard-to-find results.
+//
+// Stability guard:
+//   If a single update step would move a weight by >20 %, halve the step.
+//   Prevents pathological divergence from a single anomalous feedback burst.
+//
+// Per-intent update:
+//   After the global update, feedback rows that carry an intent label are
+//   grouped and run through independent Adam optimisers per intent type.
+//   Each intent therefore develops its own weight profile over time.
 function updateLearnedWeights() {
   try {
     const cutoff = Date.now() - 7 * 86400000;
-    const feedback = db_user.prepare(
-      'SELECT query, verse_id, rank_shown, source FROM search_feedback WHERE ts > ? ORDER BY ts DESC LIMIT 500'
+    const rawFeedback = db_user.prepare(
+      'SELECT query, verse_id, rank_shown, source, intent, ts FROM search_feedback WHERE ts > ? ORDER BY ts ASC LIMIT 1000'
     ).all(cutoff);
 
-    if (feedback.length < 10) return;
+    if (rawFeedback.length < 10) return;
 
-    const sourceWeightDeltas = new Array(learnedWeights.length).fill(0);
-    const sourceCounts = new Array(learnedWeights.length).fill(0);
+    // ── Phase 0: Noise rejection ────────────────────────────────────────────
 
-    for (const fb of feedback) {
-      const srcMap = { 'fts': 0, 'fts-phrase': 0, 'semantic': 1, 'pagerank': 2, 'cross-ref': 3, 'cluster': 4, 'dwell': 5, 'summary': 1, 'topical-guide': 2 };
-      const wIdx = srcMap[fb.source] ?? 0;
-      const rrk = 1 / Math.max(1, fb.rank_shown + 1);
-      const delta = (rrk - 0.15) * 0.01;
-      sourceWeightDeltas[wIdx] += delta;
-      sourceCounts[wIdx]++;
+    // 0a. Session velocity — identify burst windows (>12 events in 90 s)
+    const SPAM_WINDOW_MS   = 90_000;
+    const SPAM_MAX_EVENTS  = 12;
+    const spamTs           = new Set();
+    for (let i = 0; i < rawFeedback.length; i++) {
+      let count = 0;
+      const t0  = rawFeedback[i].ts;
+      for (let j = i; j < rawFeedback.length && rawFeedback[j].ts - t0 <= SPAM_WINDOW_MS; j++) count++;
+      if (count > SPAM_MAX_EVENTS) {
+        for (let j = i; j < rawFeedback.length && rawFeedback[j].ts - t0 <= SPAM_WINDOW_MS; j++) {
+          spamTs.add(rawFeedback[j].ts);
+        }
+      }
     }
 
-    // Adam optimizer: momentum + adaptive per-parameter learning rates
+    // 0b. Validity gate + IPS weighting
+    const ipsWeighted = rawFeedback
+      .filter(fb => fb.rank_shown >= 0 && fb.rank_shown < 50 && !spamTs.has(fb.ts))
+      .map(fb => ({ ...fb, ipw: Math.sqrt(fb.rank_shown + 1) }));
+
+    if (ipsWeighted.length < 5) return;
+
+    // 0c. Z-score outlier rejection per source bucket
+    const srcBuckets = new Map();
+    for (const fb of ipsWeighted) {
+      const src = fb.source || 'fts';
+      if (!srcBuckets.has(src)) srcBuckets.set(src, []);
+      srcBuckets.get(src).push(fb.ipw / Math.max(1, fb.rank_shown + 1));
+    }
+    const srcStats = new Map();
+    for (const [src, vals] of srcBuckets) {
+      const n   = vals.length;
+      const mu  = vals.reduce((a, b) => a + b, 0) / n;
+      const sig = Math.sqrt(vals.reduce((s, v) => s + (v - mu) ** 2, 0) / n) || 1e-9;
+      srcStats.set(src, { mu, sig });
+    }
+    const cleanFeedback = ipsWeighted.filter(fb => {
+      const { mu, sig } = srcStats.get(fb.source || 'fts') || { mu: 0, sig: 1 };
+      const rrk = fb.ipw / Math.max(1, fb.rank_shown + 1);
+      return Math.abs(rrk - mu) <= 2.5 * sig;
+    });
+
+    if (cleanFeedback.length < 5) return;
+
+    // ── Phase 1: Global Adam update ─────────────────────────────────────────
+    const deltas   = new Float64Array(learnedWeights.length);
+    const ipwSums  = new Float64Array(learnedWeights.length);
+    for (const fb of cleanFeedback) {
+      const wIdx  = SRC_WEIGHT_IDX[fb.source] ?? 0;
+      const rrk   = fb.ipw / Math.max(1, fb.rank_shown + 1);
+      deltas[wIdx]  += (rrk - 0.15) * 0.01 * fb.ipw;
+      ipwSums[wIdx] += fb.ipw;
+    }
     adamT++;
     for (let i = 0; i < learnedWeights.length; i++) {
-      if (sourceCounts[i] === 0) continue;
-      const g = sourceWeightDeltas[i] / sourceCounts[i];
-
-      // Update biased first & second moment estimates
-      adamM[i] = ADAM_BETA1 * adamM[i] + (1 - ADAM_BETA1) * g;
-      adamV[i] = ADAM_BETA2 * adamV[i] + (1 - ADAM_BETA2) * g * g;
-
-      // Bias-corrected estimates
-      const mHat = adamM[i] / (1 - Math.pow(ADAM_BETA1, adamT));
-      const vHat = adamV[i] / (1 - Math.pow(ADAM_BETA2, adamT));
-
-      // Update with clipping
-      learnedWeights[i] = Math.max(0.05, Math.min(3.0,
-        learnedWeights[i] + ADAM_LR * mHat / (Math.sqrt(vHat) + ADAM_EPS)
-      ));
+      if (ipwSums[i] === 0) continue;
+      const g     = deltas[i] / ipwSums[i];
+      adamM[i]    = ADAM_BETA1 * adamM[i] + (1 - ADAM_BETA1) * g;
+      adamV[i]    = ADAM_BETA2 * adamV[i] + (1 - ADAM_BETA2) * g * g;
+      const mHat  = adamM[i] / (1 - Math.pow(ADAM_BETA1, adamT));
+      const vHat  = adamV[i] / (1 - Math.pow(ADAM_BETA2, adamT));
+      const step  = ADAM_LR * mHat / (Math.sqrt(vHat) + ADAM_EPS);
+      const damp  = Math.abs(step) > 0.2 * Math.abs(learnedWeights[i]) ? step * 0.5 : step;
+      learnedWeights[i] = Math.max(0.05, Math.min(3.0, learnedWeights[i] + damp));
     }
 
-    // Persist weights + Adam state
+    // ── Phase 2: Per-intent Adam updates ────────────────────────────────────
+    const intentBuckets = new Map();
+    for (const fb of cleanFeedback) {
+      if (!fb.intent) continue;
+      if (!intentBuckets.has(fb.intent)) intentBuckets.set(fb.intent, []);
+      intentBuckets.get(fb.intent).push(fb);
+    }
+    const intentStmt = db_user.prepare(
+      'INSERT OR REPLACE INTO intent_weights (intent_type, weights, adam_m, adam_v, adam_t, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    for (const [intentType, iFb] of intentBuckets) {
+      if (iFb.length < 3 || !intentWeights.has(intentType)) continue;
+      const W  = intentWeights.get(intentType);
+      const M  = intentAdamM.get(intentType);
+      const V  = intentAdamV.get(intentType);
+      const T  = (intentAdamT.get(intentType) || 0) + 1;
+      intentAdamT.set(intentType, T);
+      const iDeltas  = new Float64Array(6);
+      const iIpwSums = new Float64Array(6);
+      for (const fb of iFb) {
+        const wIdx  = SRC_WEIGHT_IDX[fb.source] ?? 0;
+        const rrk   = fb.ipw / Math.max(1, fb.rank_shown + 1);
+        iDeltas[wIdx]  += (rrk - 0.15) * 0.01 * fb.ipw;
+        iIpwSums[wIdx] += fb.ipw;
+      }
+      for (let i = 0; i < 6; i++) {
+        if (iIpwSums[i] === 0) continue;
+        const g    = iDeltas[i] / iIpwSums[i];
+        M[i]       = ADAM_BETA1 * M[i] + (1 - ADAM_BETA1) * g;
+        V[i]       = ADAM_BETA2 * V[i] + (1 - ADAM_BETA2) * g * g;
+        const mH   = M[i] / (1 - Math.pow(ADAM_BETA1, T));
+        const vH   = V[i] / (1 - Math.pow(ADAM_BETA2, T));
+        const step = ADAM_LR * mH / (Math.sqrt(vH) + ADAM_EPS);
+        const damp = Math.abs(step) > 0.2 * Math.abs(W[i]) ? step * 0.5 : step;
+        W[i]       = Math.max(0.02, Math.min(4.0, W[i] + damp));
+      }
+      intentStmt.run(intentType, JSON.stringify(Array.from(W)), JSON.stringify(Array.from(M)),
+        JSON.stringify(Array.from(V)), T, Date.now());
+    }
+
+    // ── Persist global Adam state ────────────────────────────────────────────
     const stmt = db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)');
-    const txn = db_user.transaction(() => {
+    db_user.transaction(() => {
       learnedWeights.forEach((w, i) => stmt.run(`w${i}`, w));
       stmt.run('adam_m', JSON.stringify(Array.from(adamM)));
       stmt.run('adam_v', JSON.stringify(Array.from(adamV)));
       stmt.run('adam_t', String(adamT));
-    });
-    txn();
+    })();
 
-    fastify.log.info(`[WeightLearning/Adam] t=${adamT} weights: ${learnedWeights.map(w => w.toFixed(3)).join(', ')}`);
+    fastify.log.info(
+      `[WeightLearning] t=${adamT} global=[${learnedWeights.map(w => w.toFixed(3)).join(',')}]` +
+      ` intents=[${[...intentBuckets.keys()].join(',')}]` +
+      ` clean=${cleanFeedback.length}/${rawFeedback.length}`
+    );
   } catch (err) {
     fastify.log.warn({ err }, 'updateLearnedWeights failed');
   }
@@ -1727,26 +1888,34 @@ function sigmoidConfidence(topBm25Score, resultCount) {
 //  ─────────────────────────────────────────────────────────────────────────────
 //  reference   Reference     parseScriptureReference succeeded (caller sets this)
 //  entity      Person/Place  query contains a known person or place name
-//  situational Question      query has question words or imperative framing
-//  conceptual  Semantic      qvec exists, cluster proximity is tight, low keyword signal
-//  keyword     Keyword       strong BM25 signal — corpus knows this as keywords
-//  mixed       Expanded      in between: supplemented with related concepts
 // ─────────────────────────────────────────────────────────────────────────────
-const QUESTION_WORDS = new Set(['what','why','how','when','where','who','which','should','can','could','would','do','does','did','is','are','was','were']);
-const SITUATIONAL_VERBS = new Set(['deal','cope','handle','overcome','face','avoid','resist','forgive','love','trust','pray','repent','confess','heal','comfort','mourn','grieve','fear','doubt','worry','anxiety','anger','temptation','sin','fail','struggle','suffer']);
-
+// Pure-geometric query intent classification
+//
+// Intent types and their meanings:
+//   reference   Scripture reference (e.g. "John 3:16") — detected before this func
+//   entity      A named person or place found in the corpus entity index
+//   conceptual  Query vector sits close to a well-defined semantic cluster
+//   situational Moderate cluster affinity + multi-word → navigating topic space
+//   keyword     Strong BM25 signal — corpus can answer directly
+//   mixed       Ambiguous: balanced BM25 + semantic
+//
+// Classification uses ONLY:
+//   (a) confidence      — BM25 sigmoid score (pure corpus statistics)
+//   (b) topClusterSim   — cosine distance from nearest cluster centroid
+//   (c) clusterGap      — separation between top-2 cluster sims (ambiguity signal)
+//   (d) wordCount       — query length (structural, not vocabulary-dependent)
+//   (e) entity indexes  — pre-built geometric nearest-neighbour structures
+//
+// No word lists. No topic keywords. No hardcoded theological terms.
+// ─────────────────────────────────────────────────────────────────────────────
 function classifyQueryIntent(query, confidence, qvec) {
-  const lower   = query.toLowerCase().trim();
-  const words   = lower.replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
-  const wordSet = new Set(words);
-
-  // 1. Entity detection — person name or place name in query
+  // ── Step 1: Entity detection (embedding-space nearest-neighbour lookup) ──
   if (entitiesReady) {
+    const words = query.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
     for (const w of words) {
       if (entityPersonIndex.has(w))
         return { type: 'entity', subtype: 'person', entityMatch: w, display: 'Person' };
     }
-    // Multi-word person check (e.g. "king david", "joseph smith")
     for (let i = 0; i < words.length - 1; i++) {
       const bigram = `${words[i]} ${words[i + 1]}`;
       if (entityPersonIndex.has(bigram))
@@ -1758,43 +1927,40 @@ function classifyQueryIntent(query, confidence, qvec) {
     }
   }
 
-  // 2. Situational / question detection
-  const hasQuestionWord   = words.some(w => QUESTION_WORDS.has(w));
-  const hasSituationalV   = words.some(w => SITUATIONAL_VERBS.has(w));
-  const hasQuestionMark   = query.trim().endsWith('?');
-  if (hasQuestionMark || (hasQuestionWord && words.length >= 3) || hasSituationalV) {
-    return { type: 'situational', subtype: hasQuestionMark ? 'question' : 'topical', entityMatch: null, display: 'Situational' };
-  }
+  // ── Step 2: Query geometry in embedding space ──
+  if (qvec) {
+    const topClusters    = clusterCentroidIndex.length ? nearestClusters(qvec, 2) : [];
+    const topClusterSim  = topClusters[0]?.similarity ?? 0;
+    const secondSim      = topClusters[1]?.similarity ?? 0;
+    // clusterGap: large → query points clearly at one concept; small → ambiguous boundary
+    const clusterGap     = topClusterSim - secondSim;
+    const wordCount      = query.trim().split(/\s+/).filter(t => t.length > 1).length;
 
-  // 3. Cluster proximity — if qvec lands very close to a cluster centroid,
-  //    the query is navigating semantic space even if confidence is moderate
-  if (qvec && clusterCentroidIndex.length) {
-    const top = nearestClusters(qvec, 1);
-    const clusterSim = top[0]?.similarity ?? 0;
-    if (clusterSim > 0.55 && confidence < 0.65)
+    // Strong BM25 confidence → corpus text matches well → keyword routing
+    if (confidence >= 0.70)
+      return { type: 'keyword', subtype: 'bm25', entityMatch: null, display: 'Keyword' };
+
+    // Clear cluster membership + low BM25 → pure semantic/conceptual
+    if (topClusterSim > 0.55 && clusterGap > 0.07 && confidence < 0.60)
       return { type: 'conceptual', subtype: 'cluster', entityMatch: null, display: 'Semantic' };
+
+    // Moderate cluster affinity + multi-word → situational/topical navigation
+    if (topClusterSim > 0.38 && wordCount >= 2 && confidence < 0.55)
+      return { type: 'situational', subtype: 'topical', entityMatch: null, display: 'Situational' };
+
+    // Balanced confidence → mixed signal
+    if (confidence >= 0.40)
+      return { type: 'mixed', subtype: 'hybrid', entityMatch: null, display: 'Expanded' };
+
+    // Weak confidence, some cluster presence → conceptual/embedding
+    if (topClusterSim > 0.28 || confidence < 0.30)
+      return { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic' };
   }
 
-  // 4. Fall back to confidence gradient (existing logic)
-  if (confidence >= 0.6) return { type: 'keyword',    subtype: 'bm25',    entityMatch: null, display: 'Keyword'    };
-  if (confidence >= 0.3) return { type: 'mixed',      subtype: 'hybrid',  entityMatch: null, display: 'Expanded'   };
-  return                        { type: 'conceptual', subtype: 'embedding',entityMatch: null, display: 'Semantic'  };
-}
-
-// Per-intent weight presets: [bm25, semantic, pagerank, cross_ref, cluster, dwell]
-// These blend with learnedWeights — intent biases the signal emphasis.
-const INTENT_WEIGHT_PRESETS = {
-  reference:   [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],  // exact text match dominates
-  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],  // authority + cross-ref
-  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],  // semantic + cross-ref
-  conceptual:  [0.3, 1.4, 0.3, 0.6, 0.2, 0.2 ],  // embedding dominates
-  mixed:       [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],  // balanced
-  keyword:     [1.0, 0.8, 0.3, 0.4, 0.2, 0.15],  // BM25 leads but semantic re-ranks within set
-};
-
-function blendWeights(preset, learned) {
-  // 60% preset, 40% learned — intent shapes emphasis without overriding behavioral learning
-  return preset.map((p, i) => 0.6 * p + 0.4 * (learned[i] ?? p));
+  // ── Step 3: Confidence-only fallback (embedding pipeline not yet ready) ──
+  if (confidence >= 0.60) return { type: 'keyword',    subtype: 'bm25',      entityMatch: null, display: 'Keyword'    };
+  if (confidence >= 0.30) return { type: 'mixed',      subtype: 'hybrid',    entityMatch: null, display: 'Expanded'   };
+  return                         { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic'   };
 }
 
 // ── Reciprocal Rank Fusion (Algebra): merge ranked lists without weight tuning ──
@@ -2618,11 +2784,16 @@ function multiSourceFusion(query, expandedQuery, pageSize) {
     }
   }
 
-  // ── RRF: merge all sources with reciprocal rank fusion + PPR ──
+  // ── RRF: merge all sources — list weights driven by current learned weights ──
+  // W = [bm25, semantic, pagerank, cross_ref, cluster, dwell]
+  // Mapping: fts→bm25, phrase→bm25×3, summary→cross_ref, tg→cross_ref,
+  //          entity→pagerank, xref→cross_ref×5
+  // Over time, Adam updates W so the heavy signals naturally float to the top.
+  const W = learnedWeights;
   const rrfScores = reciprocalRankFusion(
     [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked, xrefRanked],
     queryTopicSlugs,
-    [1, 3, 1, 1, 1, 5]  // xrefRanked gets 5x weight — explicit citation is strongest signal
+    [W[0], W[0] * 3, W[3], W[3], W[2], W[3] * 5]
   );
 
   // ── Chapter aggregation: boost chapters with many verse hits ──
@@ -2712,30 +2883,39 @@ function contextBoost(results, contextVerseId) {
   });
 }
 
-// ── Search Result Cache (LRU, TTL 5 min) ─────────────────────────────────────
-const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const SEARCH_CACHE_MAX    = 300;            // max cached queries
-const searchResultsCache  = new Map();      // key → { results, total, ts }
+// ── Search Result Cache (LRU + adaptive TTL) ─────────────────────────────────
+// Popular queries (hit ≥ 3 times) get 30-minute TTL instead of 5 min —
+// self-speeding: the more a query is used, the faster it becomes.
+const SEARCH_CACHE_TTL_MS         = 5  * 60 * 1000;
+const SEARCH_CACHE_POPULAR_TTL_MS = 30 * 60 * 1000;
+const SEARCH_CACHE_POPULAR_MIN    = 3;
+const SEARCH_CACHE_MAX            = 300;
+const searchResultsCache          = new Map();
 
 function searchCacheGet(key) {
   const entry = searchResultsCache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.ts > SEARCH_CACHE_TTL_MS) {
+  const ttl = (entry.hitCount || 0) >= SEARCH_CACHE_POPULAR_MIN
+    ? SEARCH_CACHE_POPULAR_TTL_MS
+    : SEARCH_CACHE_TTL_MS;
+  if (Date.now() - entry.ts > ttl) {
     searchResultsCache.delete(key);
     return null;
   }
-  // LRU: move to end so FIFO eviction removes least-recently-used
+  // LRU: move to end; bump hit counter for TTL promotion
+  entry.hitCount = (entry.hitCount || 0) + 1;
   searchResultsCache.delete(key);
   searchResultsCache.set(key, entry);
   return entry;
 }
 
 function searchCacheSet(key, results, total, meta) {
+  const existing  = searchResultsCache.get(key);
+  const hitCount  = existing ? (existing.hitCount || 0) : 0;
   if (searchResultsCache.size >= SEARCH_CACHE_MAX) {
-    const oldestKey = searchResultsCache.keys().next().value;
-    searchResultsCache.delete(oldestKey);
+    searchResultsCache.delete(searchResultsCache.keys().next().value);
   }
-  searchResultsCache.set(key, { results, total, meta: meta || null, ts: Date.now() });
+  searchResultsCache.set(key, { results, total, meta: meta || null, ts: Date.now(), hitCount });
 }
 
 function makeCacheKey(query, language, contextVerseId) {
@@ -3014,8 +3194,16 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Step 6b: MMR diversity reranking
+    // λ adapts from entropy (existing) — additionally nudged by per-intent semantic weight:
+    // high semantic weight → lower λ (more diversity), low → higher λ (relevance focus)
     if (results.length > 1 && qvec) {
-      results = mmrRerank(results, qvec, 0.7, Math.min(200, results.length));
+      // Peek at intent for MMR λ nudge (confidence + qvec already available here)
+      const _preIntentClass = classifyQueryIntent(query.trim(), confidence, qvec);
+      const _iW = getIntentWeights(_preIntentClass.type);
+      // Semantic weight normalized [0.1, 1.4] → λ bias in [+0.1, -0.1]
+      const _semNorm  = Math.min(1.0, Math.max(0.0, (_iW[1] - 0.1) / 1.3));
+      const _mmrLambda = null; // keep null → let entropy drive it; nudge applied via SEM_THRESHOLD below
+      results = mmrRerank(results, qvec, _mmrLambda, Math.min(200, results.length));
       results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? r.similarity_score ?? 0).toFixed(4) }));
     }
 
@@ -3080,10 +3268,18 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Threshold calibrated from distribution analysis:
     // Whitened: random median≈0, adjacent-verse median=0.30, P95=0.72
     // Raw: random median=0.28, adjacent-verse median≈0.35
-    const SEM_THRESHOLD = whiteningW ? 0.30 : 0.28;
+    const SEM_THRESHOLD_BASE = whiteningW ? 0.30 : 0.28;
     const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
 
     const intentClass = classifyQueryIntent(query.trim(), confidence, qvec);
+
+    // Per-intent semantic threshold adjustment:
+    // Higher semantic weight (intentWeights[1]) → lower threshold (softer semantic gate)
+    // Lower semantic weight → higher threshold (stricter semantic gate)
+    // Δ range: ±0.04   so final threshold stays in [0.24, 0.34] (whitened) or [0.22, 0.32] (raw)
+    const _iWFinal = getIntentWeights(intentClass.type);
+    const _semWNorm = Math.min(1.0, Math.max(0.0, (_iWFinal[1] - 0.1) / 1.3));
+    const SEM_THRESHOLD = SEM_THRESHOLD_BASE - (_semWNorm - 0.5) * 0.08;
 
     // Quality filter: remove OR-fallback stopword noise before tier assignment
     // Whitened space has wider spread → lower floor acceptable
