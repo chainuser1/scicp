@@ -1,4 +1,4 @@
-const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers } = require('../index');
+const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, expandWithSynonyms, fastify, registerSocketHandlers } = require('../index');
 const { getVerseOfTheDay } = require('../../shared/scripture-engine');
 const Database = require('better-sqlite3');
 
@@ -653,6 +653,26 @@ describe('Backend API Tests', () => {
     });
   });
 
+  describe('expandWithSynonyms function', () => {
+    test("'love' expands to include charity/affection-related terms", () => {
+      const expanded = expandWithSynonyms('love');
+      expect(expanded).toContain('love');
+      expect(expanded.length).toBeGreaterThan(1);
+      expect(expanded).toEqual(expect.arrayContaining(['charity']));
+    });
+
+    test('empty string returns array with empty string', () => {
+      const expanded = expandWithSynonyms('');
+      expect(Array.isArray(expanded)).toBe(true);
+      expect(expanded).toEqual(['']);
+    });
+
+    test('unknown word returns just the word itself', () => {
+      const expanded = expandWithSynonyms('xyzzyplugh');
+      expect(expanded).toEqual(['xyzzyplugh']);
+    });
+  });
+
   // ─── New coverage ────────────────────────────────────────────────────────────
 
   describe('getVersionCitation function', () => {
@@ -955,11 +975,11 @@ describe('Backend API Tests', () => {
         expect(Array.isArray(results)).toBe(true);
       });
 
-      test('YLT search uses full pipeline', async () => {
-        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=ylt&pageSize=5' });
+      test('NRSVUE search uses full pipeline', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=nrsvue&pageSize=5' });
         const { results } = JSON.parse(res.payload);
         expect(results.length).toBeGreaterThan(0);
-        // YLT results should have tier metadata (full pipeline)
+        // NRSVUE results should have tier metadata (full pipeline)
         expect(results[0]).toHaveProperty('_tier');
       });
     });
@@ -1230,6 +1250,47 @@ function makeMockSocket(querySession = '') {
   return socket;
 }
 
+describe('expandWithSynonyms', () => {
+  test('returns at least the original word', () => {
+    const result = expandWithSynonyms('grace');
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain('grace');
+  });
+
+  test('expands known synonym "god"', () => {
+    const result = expandWithSynonyms('god');
+    expect(result).toContain('god');
+    // 'god' maps to lord, jehovah, etc.
+    expect(result.length).toBeGreaterThan(1);
+  });
+
+  test('expands known synonym "faith"', () => {
+    const result = expandWithSynonyms('faith');
+    expect(result).toContain('faith');
+    expect(result).toContain('believe');
+  });
+
+  test('handles multi-word phrase "holy ghost" — expands its synonyms', () => {
+    const result = expandWithSynonyms('holy ghost');
+    // The phrase is split into individual words; synonyms for "holy ghost" are added
+    expect(result).toContain('holy spirit');
+    expect(result).toContain('comforter');
+  });
+
+  test('handles unknown word gracefully', () => {
+    const result = expandWithSynonyms('xyzzy');
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toContain('xyzzy');
+  });
+
+  test('de-duplicates synonyms', () => {
+    const result = expandWithSynonyms('god');
+    const unique = new Set(result);
+    expect(unique.size).toBe(result.length);
+  });
+});
+
 describe('Socket.IO session logic via registerSocketHandlers', () => {
   let io;
   let triggerConnection;
@@ -1247,7 +1308,7 @@ describe('Socket.IO session logic via registerSocketHandlers', () => {
       db_greek: null,
       db_ilocano: null,
       db_japanese: null,
-      db_ylt: null,
+      db_nrsvue: null,
       db_waray: null,
     });
     triggerConnection = (socket) => {
