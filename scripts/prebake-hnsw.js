@@ -28,8 +28,10 @@ const DEFAULT_KEY = 'hnsw_v1';
 // ---------------------------------------------------------------------------
 const args = process.argv.slice(2);
 let storeKey = DEFAULT_KEY;
+let forceRaw = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--key' && args[i + 1]) storeKey = args[++i];
+  if (args[i] === '--raw') forceRaw = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,14 +256,15 @@ function main() {
   const t0 = Date.now();
 
   // Try whitened embeddings first; fall back to raw
+  // Use --raw flag to force raw embeddings (e.g., when whitening is disabled in backend)
   const tables = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('verse_embeddings_white','verse_embeddings')"
   ).all().map(r => r.name);
 
-  const sourceTable = tables.includes('verse_embeddings_white')
-    ? 'verse_embeddings_white'
-    : 'verse_embeddings';
-  console.log('[prebake-hnsw] Embedding source table:', sourceTable);
+  const sourceTable = (forceRaw || !tables.includes('verse_embeddings_white'))
+    ? 'verse_embeddings'
+    : 'verse_embeddings_white';
+  console.log('[prebake-hnsw] Embedding source table:', sourceTable, forceRaw ? '(forced raw)' : '');
 
   const rows = db.prepare(`SELECT verse_id, embedding FROM ${sourceTable}`).all();
   console.log(`[prebake-hnsw] Loaded ${rows.length} embeddings in ${Date.now() - t0} ms`);

@@ -51,25 +51,32 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 
 ### Search Intelligence
 
-41-component mathematical pipeline:
+Comprehensive 41-component mathematical pipeline optimized for scriptural semantic understanding:
 
-1. **Input parsing** — reference detection, abbreviation expansion, doctrine alias expansion (50+ topics)
-2. **FTS5 retrieval** — BM25 ranking, AND query with OR fallback
-3. **Semantic scoring** — fine-tuned MiniLM-L6 embeddings (384D), ZCA whitening, cosine similarity
-4. **Entity resolution** — named entity recognition with polynomial scoring
-5. **Graph propagation** — kNN verse graph, spectral features, cross-reference boosting
-6. **Fusion** — Reciprocal Rank Fusion (RRF)
-7. **Re-ranking** — MMR diversity, session context, learned weights (Adam optimizer)
-8. **Calibration** — isotonic regression, sigmoid tier gating
+1. **Input normalization** — KJV spelling variants (neighbor↔neighbour, color↔colour, etc.), reference detection, abbreviation expansion, doctrine alias expansion (50+ theological topics)
+2. **Multi-source retrieval** — FTS5 (BM25 ranking, AND/OR queries), phrase detection, scripture reference parsing
+3. **Semantic scoring (v2.0)** — fine-tuned MiniLM-L6 embeddings (384D raw, L2-normalized), HNSW approximate nearest neighbors, cosine similarity with proactive injection for multi-word queries
+4. **Entity resolution** — named entity recognition with polynomial feature scoring (people, places, themes)
+5. **Graph propagation** — kNN verse similarity graph, spectral features, cross-reference boosting, topical guide integration
+6. **Fusion** — Reciprocal Rank Fusion (RRF) combining FTS + semantic + graph signals with learned weights
+7. **Re-ranking** — Maximum Marginal Relevance (MMR) diversity, session context, learned weight optimization (Adam)
+8. **Tier calibration** — 5-tier specificity scoring with sigmoid soft-gates, per-intent weighting, deadzone isolation
 
 
-### Latest Achievements (Apr 2026)
+### Latest Improvements (Apr 2026)
 
-- Training corpus expanded to about **460,979 pairs** (~461k)
-- Added **LDS ↔ Rotherham** same-verse translation pairs
-- Added **Strong's lexicon** semantic expansion pairs
-- Added Kaggle fine-tuning notebook and standardized post-training rebuild workflow
-- Added one-command rebuild script: `scripts/post-train-rebuild.sh`
+**Search Engine v2.0 Overhaul:**
+- ✅ **Disabled ZCA whitening** — was inverting cosine similarity rankings; now uses raw L2-normalized embeddings
+- ✅ **KJV spelling normalization** — 18 rules (neighbor→neighbour, savior→saviour, etc.) applied at query parse time
+- ✅ **Exposed `_specificity_score`** — all results show their 5-tier specificity (T1 ≈ 6.0, T2 ≈ 4.8, T3 ≈ 3.8, etc.)
+- ✅ **Raw HNSW index** — rebuilt from raw embeddings, fixes negative similarity scores
+- ✅ **Proactive semantic injection** — multi-word queries (N≥2) automatically inject non-keyword-overlapping semantic matches
+- ✅ **Semantic thresholds tuned** — SEM_THRESHOLD_BASE=0.28, SIM_FLOOR=0.15 for raw vectors
+
+**Prior work:**
+- Training corpus: **460,979 pairs** (~461k)
+- LDS ↔ Rotherham, Strong's lexicon, Kaggle fine-tuning pipeline
+- One-command rebuild: `scripts/post-train-rebuild.sh`
 
 
 ---

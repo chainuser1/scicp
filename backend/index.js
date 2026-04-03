@@ -2241,18 +2241,18 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
   try {
     if (!qvec) {
       const out = await embeddingPipe(query, { pooling: 'mean', normalize: true });
-      // Always whiten — embeddingCache stores whitened vectors; raw vs whitened
-      // cosine produces negative/garbage scores.
-      qvec = whitenVector(new Float32Array(out.data));
+      // Use raw vectors — embeddingCache stores raw (ZCA whitening disabled)
+      qvec = new Float32Array(out.data);
     }
 
     let hits = [];
     if (hnswIndex) {
-      // Deduplicate by verse_id — HNSW can occasionally return the same node twice
+      // Deduplicate by verse_id and filter non-positive scores.
+      // HNSW score = 1 - L2_dist; negative means cos < 0 (anti-correlated, irrelevant).
       const seen = new Set();
       hits = hnswIndex.query(qvec, 200, 150)
         .filter((h) => {
-          if (excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
+          if (h.score <= 0 || excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
           seen.add(h.verse_id);
           return true;
         });
@@ -2260,7 +2260,9 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
       const scores = [];
       for (const [vid, vvec] of embeddingCache) {
         if (excludeIds.has(vid)) continue;
-        scores.push({ verse_id: vid, score: cosineSimilarity(qvec, vvec) });
+        const s = cosineSimilarity(qvec, vvec);
+        if (s <= 0) continue; // skip anti-correlated verses
+        scores.push({ verse_id: vid, score: s });
       }
       scores.sort((a, b) => b.score - a.score);
       hits = scores.slice(0, 200);
@@ -2924,8 +2926,41 @@ function decodeCursor(cursor) {
   }
 }
 
+// American-to-KJV spelling normalization table.
+// The DB uses KJV British spellings; normalize common US variants
+// before queries reach FTS so "neighbor" matches "neighbour", etc.
+const KJV_SPELLINGS = [
+  [/\bneighbors\b/gi, 'neighbours'],
+  [/\bneighbor\b/gi,  'neighbour'],
+  [/\bsaviors\b/gi,   'saviours'],
+  [/\bsavior\b/gi,    'saviour'],
+  [/\bhonored\b/gi,   'honoured'],
+  [/\bhonoring\b/gi,  'honouring'],
+  [/\bhonors\b/gi,    'honours'],
+  [/\bhonor\b/gi,     'honour'],
+  [/\bfavored\b/gi,   'favoured'],
+  [/\bfavors\b/gi,    'favours'],
+  [/\bfavor\b/gi,     'favour'],
+  [/\blabored\b/gi,   'laboured'],
+  [/\blabors\b/gi,    'labours'],
+  [/\blabor\b/gi,     'labour'],
+  [/\barmors\b/gi,    'armours'],
+  [/\barmor\b/gi,     'armour'],
+  [/\bcolors\b/gi,    'colours'],
+  [/\bcolor\b/gi,     'colour'],
+];
+function normalizeKJVSpellings(q) {
+  // Only normalize the word part, preserving ~ and " prefixes
+  const prefix = q.startsWith('~') ? '~' : q.startsWith('"') ? '' : '';
+  let s = q;
+  for (const [re, rep] of KJV_SPELLINGS) s = s.replace(re, rep);
+  return s;
+}
+
 async function runSearchPipeline(query, language, contextVerseId, log, sessionId = null) {
   const lang = String(language || 'en').toLowerCase().trim();
+  // Normalize American→KJV spellings so FTS matches DB text
+  if (lang === 'en' || lang === 'ylt') query = normalizeKJVSpellings(query);
   const cacheKey = makeCacheKey(query, lang, contextVerseId);
 
   const cached = searchCacheGet(cacheKey);
@@ -3004,8 +3039,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       if (semQuery && embeddingsReady && embeddingPipe) {
         try {
           const out  = await embeddingPipe(semQuery, { pooling: 'mean', normalize: true });
-          // Whiten before passing — semanticSearch compares against whitened embeddingCache
-          const qvec = whitenVector(new Float32Array(out.data));
+          // Use raw vector — embeddingCache now stores raw vectors (ZCA whitening disabled)
+          const qvec = new Float32Array(out.data);
           const semResult = await semanticSearch(semQuery, 0, 200, new Set(), qvec);
           if (semResult && semResult.results.length > 0) {
             const facets = nearestClusters(qvec, 4);
@@ -3366,9 +3401,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // ═══════════════════════════════════════════════════════════════════════════
 
     // Threshold calibrated from distribution analysis:
-    // Whitened: random median≈0, adjacent-verse median=0.30, P95=0.72
-    // Raw: random median=0.28, adjacent-verse median≈0.35
-    const SEM_THRESHOLD_BASE = whiteningW ? 0.30 : 0.28;
+    // Raw MiniLM L6: random median≈0.22, adjacent-verse median≈0.35, P95≈0.65
+    // Whitening disabled — always use raw thresholds.
+    const SEM_THRESHOLD_BASE = 0.28; // raw: separates signal (>0.35) from background noise (~0.22)
     const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
 
     const intentClass = classifyQueryIntent(query.trim(), confidence, qvec);
@@ -3376,14 +3411,14 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Per-intent semantic threshold adjustment:
     // Higher semantic weight (intentWeights[1]) → lower threshold (softer semantic gate)
     // Lower semantic weight → higher threshold (stricter semantic gate)
-    // Δ range: ±0.04   so final threshold stays in [0.24, 0.34] (whitened) or [0.22, 0.32] (raw)
+    // Δ range: ±0.04   so final threshold stays in [0.24, 0.32] (raw)
     const _iWFinal = getIntentWeights(intentClass.type);
     const _semWNorm = Math.min(1.0, Math.max(0.0, (_iWFinal[1] - 0.1) / 1.3));
     const SEM_THRESHOLD = SEM_THRESHOLD_BASE - (_semWNorm - 0.5) * 0.08;
 
     // Quality filter: remove OR-fallback stopword noise before tier assignment
-    // Whitened space has wider spread → lower floor acceptable
-    const SIM_FLOOR = whiteningW ? 0.05 : 0.12;
+    // Raw cosine baseline for unrelated pairs ≈ 0.15-0.25; floor at 0.20 to exclude noise
+    const SIM_FLOOR = 0.15;
     if (qvec) {
       results = results.filter(r => {
         if (phraseIdsSet.has(r.verse_id)) return true;
@@ -3484,7 +3519,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     } catch {}
 
     results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _specificity_score, ...clean } = r;
+      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, ...clean } = r;
       return clean;
     });
     total = results.length;
@@ -3567,22 +3602,32 @@ function buildVerseMetaCache() {
 function buildEmbeddingCache() {
   if (!db_embed) return;
 
-  // Load ZCA whitening transform if available (prebaked by scripts/prebake-whitening.js)
-  try {
-    const wRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'W'").get();
-    const mRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'mean'").get();
-    if (wRow && mRow) {
-      whiteningW = new Float32Array(wRow.data.buffer, wRow.data.byteOffset, wRow.data.byteLength / 4);
-      whiteningMean = new Float32Array(mRow.data.buffer, mRow.data.byteOffset, mRow.data.byteLength / 4);
-      fastify.log.info(`[Whitening] Loaded ZCA transform: W(${EMBED_DIM}×${EMBED_DIM}) + μ(${EMBED_DIM})`);
-    }
-  } catch (err) {
-    fastify.log.warn({ err }, '[Whitening] Failed to load — using raw embeddings');
-  }
+  // ZCA whitening is DISABLED: analysis showed the current ZCA transform inverts
+  // cosine similarity rankings (e.g. 1Cor13:13 vs D&C4:5: raw=0.49, whitened=0.01).
+  // Root cause: ZCA over-amplifies low-variance directions, destroying the semantic
+  // signal from high-variance dimensions where the model encodes meaning.
+  // Raw L2-normalized MiniLM vectors preserve the correct similarity ordering.
+  // Keeping the whitening data load commented out until a regularised (PCA-based)
+  // whitening with ε≥0.1 is baked.
+  //
+  // TO RE-ENABLE: uncomment the block below and run scripts/prebake-whitening.js
+  // with a larger epsilon (e.g., EPSILON=0.1) to avoid inverting similarity ord.
+  //
+  // try {
+  //   const wRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'W'").get();
+  //   const mRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'mean'").get();
+  //   if (wRow && mRow) {
+  //     whiteningW = new Float32Array(wRow.data.buffer, wRow.data.byteOffset, wRow.data.byteLength / 4);
+  //     whiteningMean = new Float32Array(mRow.data.buffer, mRow.data.byteOffset, mRow.data.byteLength / 4);
+  //     fastify.log.info(`[Whitening] Loaded ZCA transform: W(${EMBED_DIM}×${EMBED_DIM}) + μ(${EMBED_DIM})`);
+  //   }
+  // } catch (err) {
+  //   fastify.log.warn({ err }, '[Whitening] Failed to load — using raw embeddings');
+  // }
 
-  // Prefer whitened embeddings if available; fall back to raw
-  const useWhitened = whiteningW !== null;
-  const table = useWhitened ? 'verse_embeddings_white' : 'verse_embeddings';
+  // Always use raw L2-normalized embeddings (whitening disabled, see above)
+  const useWhitened = false; // whiteningW !== null;
+  const table = 'verse_embeddings';
   let count = 0;
   try {
     const rows = db_embed.prepare(`SELECT verse_id, embedding FROM ${table}`).all();
@@ -3594,23 +3639,11 @@ function buildEmbeddingCache() {
       count++;
     }
   } catch (err) {
-    // If whitened table missing, fall back to raw
-    if (useWhitened) {
-      fastify.log.warn('[Whitening] verse_embeddings_white not found, falling back to raw');
-      const rows = db_embed.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
-      for (const r of rows) {
-        embeddingCache.set(
-          r.verse_id,
-          new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
-        );
-        count++;
-      }
-      whiteningW = null;
-      whiteningMean = null;
-    }
+    // Whitening disabled — this branch should never fire
+    fastify.log.warn('[Embeddings] Failed to load verse_embeddings — no fallback available');
   }
   embeddingsReady = true;
-  fastify.log.info(`[Embeddings] Loaded ${count} vectors (${useWhitened && whiteningW ? 'whitened' : 'raw'})`);
+  fastify.log.info(`[Embeddings] Loaded ${count} vectors (raw — ZCA whitening disabled)`);
 
   // Build HNSW ANN over loaded verse embeddings for high-speed semantic nearest neighbors
   buildHNSWIndex();
