@@ -29,7 +29,7 @@ const FALLBACK_MODELS = [
 let fallbackIdx = 0;
 
 const DB_TAGS   = path.resolve(__dirname, '../resources/db/verse-tags.db');
-const DB_NRSVUE = path.resolve(__dirname, '../resources/db/nrsvue-scriptures-sqlite.db');
+const DB_YLT = path.resolve(__dirname, '../resources/db/ylt-scriptures-sqlite.db');
 
 const args = process.argv.slice(2);
 const PHASE   = (() => { const i = args.indexOf('--phase'); return i !== -1 ? args[i + 1] : 'all'; })();
@@ -94,7 +94,7 @@ async function main() {
   const db = new Database(DB_TAGS);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 10000');
-  const ndb = new Database(DB_NRSVUE, { readonly: true });
+  const ndb = new Database(DB_YLT, { readonly: true });
 
   // Ensure tables exist
   db.prepare(`

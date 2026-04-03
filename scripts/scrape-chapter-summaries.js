@@ -51,7 +51,7 @@ function rotateModel() {
 
 const DB_TAGS = path.resolve(__dirname, '../resources/db/chapter-summaries-fts.db');
 const DB_SCRIPTURE = path.resolve(__dirname, '../resources/db/lds-scriptures-sqlite.db');
-const DB_NRSVUE = path.resolve(__dirname, '../resources/db/nrsvue-scriptures-sqlite.db');
+const DB_YLT = path.resolve(__dirname, '../resources/db/ylt-scriptures-sqlite.db');
 
 const DELAY_MS = 1000;
 const MAX_TOKENS = 400;
@@ -250,7 +250,7 @@ async function main() {
 
   const db = new Database(DB_TAGS);
   const scriptureDb = new Database(DB_SCRIPTURE, { readonly: true });
-  const nrsvueDb = new Database(DB_NRSVUE, { readonly: true });
+  const yltDb = new Database(DB_YLT, { readonly: true });
 
   const BIBLE_VOLUMES = new Set(['Old Testament', 'New Testament']);
 
@@ -286,15 +286,15 @@ async function main() {
     ORDER BY c.id
   `).all();
 
-  // Verse text: use NRSVUE for Bible (OT/NT), LDS DB for Triple Combination
+  // Verse text: use YLT for Bible (OT/NT), LDS DB for Triple Combination
   const verseStmtLds = scriptureDb.prepare(`
     SELECT verse_number, scripture_text FROM verses WHERE chapter_id=? ORDER BY verse_number
   `);
-  const verseStmtNrsvue = nrsvueDb.prepare(`
+  const verseStmtYlt = yltDb.prepare(`
     SELECT verse_number, scripture_text FROM verses WHERE chapter_id=? ORDER BY verse_number
   `);
   function getVerseText(chapterId, volumeTitle) {
-    const stmt = BIBLE_VOLUMES.has(volumeTitle) ? verseStmtNrsvue : verseStmtLds;
+    const stmt = BIBLE_VOLUMES.has(volumeTitle) ? verseStmtYlt : verseStmtLds;
     const verses = stmt.all(chapterId);
     return verses.map(v => `${v.verse_number}. ${v.scripture_text}`).join('\n');
   }
@@ -553,7 +553,7 @@ Does the summary contain ONLY information present in the chapter text above?
 
   db.close();
   scriptureDb.close();
-  nrsvueDb.close();
+  yltDb.close();
 
   console.log(`\n✅ Done: ${done} generated, ${verified} verified, ${rejected} rejected → repending | ${errors} errors`);
 }

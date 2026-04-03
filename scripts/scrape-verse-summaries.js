@@ -47,7 +47,7 @@ function rotateFallback() {
 }
 
 const DB_TAGS    = path.resolve(__dirname, '../resources/db/verse-tags.db');
-const DB_NRSVUE  = path.resolve(__dirname, '../resources/db/nrsvue-scriptures-sqlite.db');
+const DB_YLT     = path.resolve(__dirname, '../resources/db/ylt-scriptures-sqlite.db');
 const DB_TOPICAL = path.resolve(__dirname, '../resources/db/topical-guide.db');
 
 const DELAY_MS    = 300;
@@ -161,7 +161,7 @@ async function main() {
   const db        = new Database(DB_TAGS);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 10000');
-  const nrsvueDb  = new Database(DB_NRSVUE,  { readonly: true });
+  const yltDb    = new Database(DB_YLT,    { readonly: true });
   const topicalDb = new Database(DB_TOPICAL, { readonly: true });
 
   db.prepare(`
@@ -184,8 +184,8 @@ async function main() {
     console.log('✓ Reset all to pending');
   }
 
-  // Load all verses from NRSVUE (has all 5 volumes)
-  const allVerses = nrsvueDb.prepare(`
+  // Load all verses from YLT (has all 5 volumes)
+  const allVerses = yltDb.prepare(`
     SELECT v.id AS verse_id, v.verse_number, v.scripture_text, v.chapter_id,
            c.chapter_number, b.book_title, vol.volume_title
     FROM verses v
@@ -218,15 +218,15 @@ async function main() {
     console.log('─'.repeat(40));
     console.log(`  ${'total'.padEnd(15)} ${String(total).padStart(6)}`);
     console.log(`  ${'awaiting verify'.padEnd(15)} ${String(unverified).padStart(6)}`);
-    db.close(); nrsvueDb.close(); topicalDb.close();
+    db.close(); yltDb.close(); topicalDb.close();
     return;
   }
 
   const verseMap = new Map(allVerses.map(v => [v.verse_id, v]));
 
-  // Chapter text cache (NRSVUE for all volumes)
+  // Chapter text cache (YLT for all volumes)
   const chapterCache = new Map();
-  const chapterStmt  = nrsvueDb.prepare('SELECT verse_number, scripture_text FROM verses WHERE chapter_id=? ORDER BY verse_number');
+  const chapterStmt  = yltDb.prepare('SELECT verse_number, scripture_text FROM verses WHERE chapter_id=? ORDER BY verse_number');
   function getChapterText(chapterId) {
     if (chapterCache.has(chapterId)) return chapterCache.get(chapterId);
     const text = chapterStmt.all(chapterId).map(v => `${v.verse_number}. ${v.scripture_text}`).join('\n');
@@ -234,14 +234,14 @@ async function main() {
     return text;
   }
 
-  // Cross-references via topical guide → fetch verse texts from NRSVUE
+  // Cross-references via topical guide → fetch verse texts from YLT
   const crossRefStmt   = topicalDb.prepare(`
     SELECT tg.verse_title FROM topical_guide tg
     JOIN topical_guide src ON tg.topic_id = src.topic_id
     WHERE src.verse_title = ? AND tg.verse_title != ?
     GROUP BY tg.verse_title LIMIT 8
   `);
-  const verseTextStmt  = nrsvueDb.prepare(`
+  const verseTextStmt  = yltDb.prepare(`
     SELECT v.scripture_text FROM verses v
     JOIN chapters c  ON v.chapter_id = c.id
     JOIN books b     ON c.book_id    = b.id
@@ -270,7 +270,7 @@ async function main() {
     console.log(`  Verify workers:    ${MODE !== 'generate' ? VERIFY_WORKERS : 0}`);
     console.log(`  Pending to gen:    ${batch.length}`);
     console.log(`  Awaiting verify:   ${toVerify}`);
-    db.close(); nrsvueDb.close(); topicalDb.close();
+    db.close(); yltDb.close(); topicalDb.close();
     return;
   }
 
@@ -386,7 +386,7 @@ const numVerifiers = MODE !== 'generate' ? VERIFY_WORKERS : 0;
   ]);
 
   db.close();
-  nrsvueDb.close();
+  yltDb.close();
   topicalDb.close();
   console.log(`\n✅ Done: ${done} generated, ${verified} verified, ${fixed} fixed`);
 }
