@@ -74,45 +74,6 @@ function parseScriptureReference(str) {
   return { book, chapter, verse };
 }
 
-// ── Doctrine alias helpers ──────────────────────────────────────────────────
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function sanitizeAliasEntry(entry) {
-  const uniqPhrases = [];
-  const seenPhrases = new Set();
-  for (const phrase of entry.phrases || []) {
-    const normalized = String(phrase || '').trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seenPhrases.has(key)) continue;
-    seenPhrases.add(key);
-    uniqPhrases.push(normalized);
-  }
-  const uniqTerms = [];
-  const seenTerms = new Set();
-  for (const term of entry.terms || []) {
-    const normalized = String(term || '').trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seenTerms.has(key)) continue;
-    seenTerms.add(key);
-    uniqTerms.push(normalized);
-  }
-  return { phrases: uniqPhrases, terms: uniqTerms };
-}
-
-function compileDoctrineAliases(aliases) {
-  const normalizedMap = {};
-  const keys = Object.keys(aliases);
-  for (const key of keys) {
-    normalizedMap[key.toLowerCase().trim()] = sanitizeAliasEntry(aliases[key]);
-  }
-  const sortedKeys = Object.keys(normalizedMap).sort((a, b) => b.length - a.length);
-  return { normalizedMap, sortedKeys };
-}
-
 // ── FTS5 query builders ─────────────────────────────────────────────────────
 const buildFTSPhraseQuery = (phrase) => {
   const safe = phrase.replace(/[^a-zA-Z0-9\-\s]/g, ' ').replace(/\s+/g, ' ').trim();

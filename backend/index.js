@@ -200,12 +200,7 @@ let dba_nrsvue     = db_nrsvue   ? new BetterSqliteAdapter(db_nrsvue)   : null;
 let dba_waray      = db_waray    ? new BetterSqliteAdapter(db_waray)    : null;
 
 // ── Script search configuration toggles ──
-const ENABLE_SYNONYMS = false; // disable synonym expansion for stable relevance behavior
 const ENABLE_PMI = true;      // PMI can be used for single-word fallback if needed
-
-// ── Scripture synonym dictionary (offline, pre-baked) ──
-let scriptureSynonyms = {};
-try { scriptureSynonyms = require('../shared/scripture-synonyms.json'); } catch (_) {}
 
 // ── Concept embeddings DB (pre-baked by scripts/build-concept-index.js) ──
 let db_concepts = null;
@@ -2274,32 +2269,7 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
   }
 }
 
-// ── #2 Synonym expansion: expand query terms using scripture-synonyms.json ──
-function expandWithSynonyms(query) {
-  if (!ENABLE_SYNONYMS) {
-    return [query.trim()];
-  }
-  const words = query.toLowerCase().split(/\s+/);
-  const expanded = new Set(words);
-  const lowerQuery = query.toLowerCase();
-  for (const key of Object.keys(scriptureSynonyms)) {
-    if (key.includes(' ') && lowerQuery.includes(key)) {
-      for (const syn of scriptureSynonyms[key]) expanded.add(syn);
-    }
-  }
-  for (const w of words) {
-    const stems = [w, w.replace(/s$/, ''), w.replace(/es$/, ''), w.replace(/ed$/, ''),
-                   w.replace(/ing$/, ''), w.replace(/ing$/, 'e'), w.replace(/eth$/, ''),
-                   w.replace(/eth$/, 'e'), w + 's'];
-    for (const stem of stems) {
-      if (scriptureSynonyms[stem]) {
-        for (const syn of scriptureSynonyms[stem]) expanded.add(syn);
-        break;
-      }
-    }
-  }
-  return [...expanded];
-}
+
 
 // ── HNSW approximate nearest neighbors index for quick semantic retrieval ──
 let hnswIndex = null;
@@ -3083,12 +3053,10 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       }
     }
 
-    // Steps 5-6: Multi-source RRF fusion (synonym expansion is disabled for stable ML-first relevance)
-    const expanded = ENABLE_SYNONYMS ? expandWithSynonyms(query.trim()) : [query.trim()];
-    const expandedQuery = expanded.join(' ');
+    // Steps 5-6: Multi-source RRF fusion
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
-    const synonymTermsAdded = ENABLE_SYNONYMS ? expanded.filter(t => !queryWords.has(t)).slice(0, 8) : [];
-    let fusionResult = multiSourceFusion(query.trim(), expandedQuery, 200);
+    const synonymTermsAdded = [];
+    let fusionResult = multiSourceFusion(query.trim(), query.trim(), 200);
 
     // Step 7: Sigmoid confidence gate → concept expansion
     const topRrfScore  = fusionResult.results[0]?._rrfScore || 0;
@@ -3493,8 +3461,6 @@ function buildEmbeddingCache() {
   // Build HNSW ANN over loaded verse embeddings for high-speed semantic nearest neighbors
   buildHNSWIndex();
 
-  retrofitEmbeddings(embeddingCache);
-
   // Load spectral graph embeddings if available
   try {
     const db_graph_check = db_embed ? null : null; // use verse-graph.db
@@ -3513,36 +3479,6 @@ function buildEmbeddingCache() {
   } catch (err) {
     fastify.log.warn('[Spectral] verse_spectral not available (non-fatal):', err.message);
   }
-}
-
-// ── Domain Embedding Retrofit ────────────────────────────────────────────────
-// Pull theologically synonymous query pairs closer using scriptureSynonyms.
-// One-time projection: v_new = v_old + η * (centroid_of_synonym_group - v_old)
-function retrofitEmbeddings(vectors) {
-  if (!vectors || vectors.size < 100) return;
-  if (!conceptCache || conceptCache.length === 0) return;
-  const η = 0.1;
-  let retrofitCount = 0;
-  for (const [canonical, aliases] of Object.entries(scriptureSynonyms)) {
-    const allTerms = [canonical, ...(Array.isArray(aliases) ? aliases : [aliases])];
-    const termVecs = allTerms
-      .map(t => conceptCache.find(c => c.phrase.toLowerCase() === t.toLowerCase()))
-      .filter(Boolean)
-      .map(c => c.vec);
-    if (termVecs.length < 2) continue;
-    const dim = termVecs[0].length;
-    const centroid = new Float32Array(dim);
-    for (const v of termVecs) for (let i = 0; i < dim; i++) centroid[i] += v[i] / termVecs.length;
-    for (const entry of conceptCache) {
-      if (allTerms.some(t => t.toLowerCase() === entry.phrase.toLowerCase())) {
-        for (let i = 0; i < dim; i++) {
-          entry.vec[i] = entry.vec[i] + η * (centroid[i] - entry.vec[i]);
-        }
-        retrofitCount++;
-      }
-    }
-  }
-  fastify.log.info(`[Retrofit] Adjusted ${retrofitCount} concept embeddings with domain synonyms`);
 }
 
 async function processBatchAsync(pipe, verses, offset) {
@@ -5788,4 +5724,4 @@ async function startElectron() {
 const searchScriptureDefault = (input, page, pageSize) => searchScripture(input, page, pageSize, dba, fastify.log);
 const searchScriptureInDbDefault = (input, page, pageSize, targetDb) => searchScriptureInDb(input, page, pageSize, targetDb, fastify.log);
 
-module.exports = { parseScriptureReference, searchScripture: searchScriptureDefault, segmentVerseText, segmentVerseTextDual, expandWithSynonyms, fastify, registerSocketHandlers, startElectron };
+module.exports = { parseScriptureReference, searchScripture: searchScriptureDefault, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers, startElectron };

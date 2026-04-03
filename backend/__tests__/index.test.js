@@ -1,4 +1,4 @@
-const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, expandWithSynonyms, fastify, registerSocketHandlers } = require('../index');
+const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, fastify, registerSocketHandlers } = require('../index');
 const { getVerseOfTheDay } = require('../../shared/scripture-engine');
 const Database = require('better-sqlite3');
 
@@ -653,24 +653,6 @@ describe('Backend API Tests', () => {
     });
   });
 
-  describe('expandWithSynonyms function', () => {
-    test("'love' returns base query when synonym expansion is disabled", () => {
-      const expanded = expandWithSynonyms('love');
-      expect(expanded).toEqual(['love']);
-    });
-
-    test('empty string returns array with empty string', () => {
-      const expanded = expandWithSynonyms('');
-      expect(Array.isArray(expanded)).toBe(true);
-      expect(expanded).toEqual(['']);
-    });
-
-    test('unknown word returns just the word itself', () => {
-      const expanded = expandWithSynonyms('xyzzyplugh');
-      expect(expanded).toEqual(['xyzzyplugh']);
-    });
-  });
-
   // ─── New coverage ────────────────────────────────────────────────────────────
 
   describe('getVersionCitation function', () => {
@@ -1247,42 +1229,6 @@ function makeMockSocket(querySession = '') {
   };
   return socket;
 }
-
-describe('expandWithSynonyms', () => {
-  test('returns at least the original word', () => {
-    const result = expandWithSynonyms('grace');
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
-    expect(result).toContain('grace');
-  });
-
-test('returns base token when synonym expansion is disabled (god)', () => {
-    const result = expandWithSynonyms('god');
-    expect(result).toEqual(['god']);
-  });
-
-  test('returns base token when synonym expansion is disabled (faith)', () => {
-    const result = expandWithSynonyms('faith');
-    expect(result).toEqual(['faith']);
-  });
-
-  test('returns phrase tokens when synonym expansion is disabled (holy ghost)', () => {
-    const result = expandWithSynonyms('holy ghost');
-    expect(result).toEqual(['holy ghost']);
-  });
-
-  test('handles unknown word gracefully', () => {
-    const result = expandWithSynonyms('xyzzy');
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toContain('xyzzy');
-  });
-
-  test('de-duplicates synonyms', () => {
-    const result = expandWithSynonyms('god');
-    const unique = new Set(result);
-    expect(unique.size).toBe(result.length);
-  });
-});
 
 describe('Socket.IO session logic via registerSocketHandlers', () => {
   let io;
