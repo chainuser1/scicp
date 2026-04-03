@@ -30,7 +30,7 @@ let modelIdx = 0;
 function nextModel() { return MODELS[modelIdx++ % MODELS.length]; }
 
 const DB_TAGS   = path.resolve(__dirname, '../resources/db/verse-tags.db');
-const DB_NRSVUE = path.resolve(__dirname, '../resources/db/nrsvue-scriptures-sqlite.db');
+const DB_YLT = path.resolve(__dirname, '../resources/db/ylt-scriptures-sqlite.db');
 
 const DELAY_MS    = 600;
 const MAX_TOKENS  = 4096;
@@ -160,7 +160,7 @@ async function main() {
   const db       = new Database(DB_TAGS);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 10000');
-  const nrsvueDb = new Database(DB_NRSVUE, { readonly: true });
+  const yltDb = new Database(DB_YLT, { readonly: true });
 
   if (RESET) {
     db.prepare("UPDATE verse_doctrine_tags SET pov = NULL, speaker = NULL").run();
@@ -168,7 +168,7 @@ async function main() {
   }
 
   // Get all chapters
-  const chapters = nrsvueDb.prepare(`
+  const chapters = yltDb.prepare(`
     SELECT c.id AS chapter_id, c.chapter_number, b.book_title, vol.volume_title
     FROM chapters c
     JOIN books b     ON c.book_id   = b.id
@@ -187,7 +187,7 @@ async function main() {
   const batch = LIMIT ? pending.slice(0, LIMIT) : pending;
   console.log(`📖 ${batch.length} chapters to process (${needsProcessing.length} with NULL pov)`);
 
-  const verseStmt  = nrsvueDb.prepare('SELECT id AS verse_id, verse_number, scripture_text FROM verses WHERE chapter_id = ? ORDER BY verse_number');
+  const verseStmt  = yltDb.prepare('SELECT id AS verse_id, verse_number, scripture_text FROM verses WHERE chapter_id = ? ORDER BY verse_number');
   const updateStmt = db.prepare('UPDATE verse_doctrine_tags SET pov = ?, speaker = ? WHERE verse_id = ?');
 
   let done = 0, index = 0;
@@ -272,7 +272,7 @@ async function main() {
   await Promise.all(Array.from({ length: WORKERS }, (_, i) => worker(i + 1)));
 
   db.close();
-  nrsvueDb.close();
+  yltDb.close();
   console.log(`\n✅ Done: ${done} chapters processed`);
 }
 
