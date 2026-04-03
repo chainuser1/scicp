@@ -44,6 +44,11 @@ release.keystore
 resources/models/
 # Generated training data (regenerate with: node scripts/export-training-pairs.js)
 resources/training-pairs.json
+# Strong's semantic expansion pairs (regenerate with: node scripts/build-strongs-pairs.js)
+resources/strongs-pairs.json
+# Raw CSV caches (auto-downloaded by build scripts, large)
+resources/db/ylt-raw.csv
+resources/db/rotherham-raw.csv
 
 # Runtime user data (created by backend at startup)
 resources/db/user-data.db
