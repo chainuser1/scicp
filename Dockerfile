@@ -12,10 +12,11 @@ COPY . .
 
 # Sanity check: ensure DBs are real SQLite files, not LFS pointers.
 # (Deploy workflow extracts DBs from previous GHCR image or falls back to LFS.)
-RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; then \
-      echo "ERROR: DB file is an LFS pointer — deploy workflow did not resolve it." && \
-      exit 1; \
-    fi
+RUN for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
+              tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do \
+      head -c 6 "resources/db/$db" | grep -q 'SQLite' \
+        || (echo "ERROR: $db is an LFS pointer — deploy workflow did not resolve it." && exit 1); \
+    done
 
 # Pre-bake the HNSW approximate-nearest-neighbor index into verse-embeddings.db.
 # Eliminates ~3-8 s cold-build at every server start; index loads in ~50 ms instead.

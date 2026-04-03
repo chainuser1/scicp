@@ -22,6 +22,11 @@ jobs:
   fetch-dbs:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (needed for LFS fallback)
+        uses: actions/checkout@v5
+        with:
+          lfs: false          # Don't download all LFS objects upfront; pull selectively below
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -29,20 +34,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract DBs from GHCR image (no LFS bandwidth used)
+      - name: Extract DBs from GHCR image; fill gaps from LFS
         run: |
           if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
             container=$(docker create ghcr.io/${{ env.IMAGE_NAME }}:latest)
             mkdir -p resources/db
             docker cp "$container:/app/resources/db/." resources/db/
             docker rm "$container"
-            head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite' \
-              && echo "✓ DBs extracted from GHCR image" \
-              || (echo "ERROR: extracted DB is not valid SQLite" && exit 1)
+            echo "✓ DBs extracted from GHCR image"
           else
-            echo "No GHCR image found — falling back to Git LFS"
-            git lfs pull
+            echo "No GHCR image found — will resolve all DBs from LFS"
           fi
+          # Validate each required DB; pull from LFS for any that are missing or
+          # invalid (e.g. a new DB added after the last image was built).
+          missing=0
+          for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
+                    tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do
+            if ! head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite'; then
+              echo "  → $db missing or invalid — fetching from LFS"
+              git lfs pull --include="resources/db/$db" \
+                && echo "  ✓ $db fetched from LFS" \
+                || missing=$((missing + 1))
+            else
+              echo "  ✓ $db OK"
+            fi
+          done
+          [ "$missing" -eq 0 ] \
+            || (echo "ERROR: $missing DB(s) could not be resolved" && exit 1)
 
       - name: Upload DBs as workflow artifact
         uses: actions/upload-artifact@v5
