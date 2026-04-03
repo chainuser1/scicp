@@ -34,34 +34,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract DBs from previous GHCR image
+      - name: Resolve DBs — git (translation) + GHCR (large analysis DBs)
         run: |
-          echo "Attempting to extract DBs from ghcr.io/${{ env.IMAGE_NAME }}:latest ..."
+          # Translation/scripture DBs are regular git binary objects — already
+          # in the working tree from the checkout step above. Do NOT copy them
+          # from the GHCR image, which may be older than the current commit.
+          #
+          # Only extract the large LFS-tracked analysis DBs from the GHCR image.
+          # These are not in regular git checkout (stored in Git LFS, not as
+          # binary objects). Falls back to git lfs pull when no image exists.
+          LFS_DBS="verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
+                   topical-guide.db verse-cross-refs.db triple-index.db \
+                   chapter-summaries-fts.db footnotes-lds-summaries.db"
           if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
             container=$(docker create ghcr.io/${{ env.IMAGE_NAME }}:latest)
-            docker cp "$container:/app/resources/db/." resources/db/
+            for db in $LFS_DBS; do
+              docker cp "$container:/app/resources/db/$db" resources/db/ 2>/dev/null \
+                && echo "  ✓ $db from GHCR" || echo "  skipped $db (not in image)"
+            done
             docker rm "$container"
-            echo "✓ DBs extracted from previous image"
           else
-            echo "No previous image found — will resolve all DBs from LFS"
+            echo "No GHCR image found — falling back to git lfs pull for analysis DBs"
+            git lfs pull
           fi
-          # Validate all required DBs are real SQLite files.
-          # Any missing or invalid DB (e.g. added after the last image was built)
-          # is fetched individually from LFS so a single new DB never blocks deploy.
+          # Validate translation DBs (must be valid SQLite from git checkout)
           missing=0
           for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
                     tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do
-            if ! head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite'; then
-              echo "  → $db missing or invalid — fetching from LFS"
-              git lfs pull --include="resources/db/$db" \
-                && echo "  ✓ $db fetched from LFS" \
-                || missing=$((missing + 1))
-            else
-              echo "  ✓ $db OK"
-            fi
+            head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite' \
+              && echo "  ✓ $db" \
+              || { echo "  ERROR: $db invalid — checkout may have failed"; missing=$((missing+1)); }
           done
-          [ "$missing" -eq 0 ] \
-            || (echo "ERROR: $missing DB(s) could not be resolved" && exit 1)
+          [ "$missing" -eq 0 ] || (echo "ERROR: $missing translation DB(s) invalid" && exit 1)
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

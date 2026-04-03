@@ -29,32 +29,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract DBs from GHCR image (no LFS bandwidth)
+      - name: Resolve DBs — git (translation) + GHCR (large analysis DBs)
         run: |
+          # Translation DBs are regular git binaries — from checkout above.
+          # Only extract large LFS-tracked analysis DBs from the GHCR image.
+          LFS_DBS="verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
+                   topical-guide.db verse-cross-refs.db triple-index.db \
+                   chapter-summaries-fts.db footnotes-lds-summaries.db"
           if docker pull ghcr.io/${{ github.repository }}:latest 2>/dev/null; then
             container=$(docker create ghcr.io/${{ github.repository }}:latest)
-            docker cp "$container:/app/resources/db/." resources/db/
+            for db in $LFS_DBS; do
+              docker cp "$container:/app/resources/db/$db" resources/db/ 2>/dev/null \
+                && echo "  ✓ $db from GHCR" || echo "  skipped $db (not in image)"
+            done
             docker rm "$container"
-            echo "✓ DBs extracted from GHCR image"
           else
-            echo "No GHCR image found — will resolve all DBs from LFS"
+            echo "No GHCR image found — falling back to git lfs pull for analysis DBs"
+            git lfs pull
           fi
-          # Validate each required DB; pull from LFS for any that are missing or
-          # invalid (e.g. a new DB added after the last image was built).
+          # Validate translation DBs (from git checkout)
           missing=0
           for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
                     tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do
-            if ! head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite'; then
-              echo "  → $db missing or invalid — fetching from LFS"
-              git lfs pull --include="resources/db/$db" \
-                && echo "  ✓ $db fetched from LFS" \
-                || missing=$((missing + 1))
-            else
-              echo "  ✓ $db OK"
-            fi
+            head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite' \
+              && echo "  ✓ $db" \
+              || { echo "  ERROR: $db invalid"; missing=$((missing+1)); }
           done
-          [ "$missing" -eq 0 ] \
-            || (echo "ERROR: $missing DB(s) could not be resolved" && exit 1)
+          [ "$missing" -eq 0 ] || (echo "ERROR: $missing translation DB(s) invalid" && exit 1)
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
