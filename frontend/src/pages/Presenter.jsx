@@ -1400,7 +1400,7 @@ const Presenter = () => {
       fetch(`${API_URL}/search-feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source, intent: searchMeta?.intent }),
       }).catch(() => {});
     }
     // Drawer stays open so presenter can keep browsing.
@@ -1419,7 +1419,7 @@ const Presenter = () => {
       fetch(`${API_URL}/search-feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source }),
+        body: JSON.stringify({ query, verse_id: verse.verse_id, rank_shown: rankInResults, source: verse._source, intent: searchMeta?.intent }),
       }).catch(() => {});
     }
   };
