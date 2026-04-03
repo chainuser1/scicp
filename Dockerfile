@@ -17,6 +17,13 @@ RUN if ! head -c 6 resources/db/lds-scriptures-sqlite.db | grep -q 'SQLite'; the
       exit 1; \
     fi
 
+# Pre-bake the HNSW approximate-nearest-neighbor index into verse-embeddings.db.
+# Eliminates ~3-8 s cold-build at every server start; index loads in ~50 ms instead.
+# Non-fatal: if verse-embeddings.db or its embeddings table is absent, image still builds.
+RUN node scripts/prebake-hnsw.js \
+  && echo "✓ HNSW index pre-baked" \
+  || echo "WARN: prebake-hnsw.js skipped (verse-embeddings.db missing or incomplete)"
+
 RUN npm run build --workspace=frontend
 
 # --- Production stage ---
