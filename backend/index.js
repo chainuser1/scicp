@@ -2241,13 +2241,21 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
   try {
     if (!qvec) {
       const out = await embeddingPipe(query, { pooling: 'mean', normalize: true });
-      qvec = new Float32Array(out.data);
+      // Always whiten — embeddingCache stores whitened vectors; raw vs whitened
+      // cosine produces negative/garbage scores.
+      qvec = whitenVector(new Float32Array(out.data));
     }
 
     let hits = [];
     if (hnswIndex) {
+      // Deduplicate by verse_id — HNSW can occasionally return the same node twice
+      const seen = new Set();
       hits = hnswIndex.query(qvec, 200, 150)
-        .filter((h) => !excludeIds.has(h.verse_id));
+        .filter((h) => {
+          if (excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
+          seen.add(h.verse_id);
+          return true;
+        });
     } else {
       const scores = [];
       for (const [vid, vvec] of embeddingCache) {
@@ -2996,7 +3004,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       if (semQuery && embeddingsReady && embeddingPipe) {
         try {
           const out  = await embeddingPipe(semQuery, { pooling: 'mean', normalize: true });
-          const qvec = new Float32Array(out.data);
+          // Whiten before passing — semanticSearch compares against whitened embeddingCache
+          const qvec = whitenVector(new Float32Array(out.data));
           const semResult = await semanticSearch(semQuery, 0, 200, new Set(), qvec);
           if (semResult && semResult.results.length > 0) {
             const facets = nearestClusters(qvec, 4);
