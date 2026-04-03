@@ -82,3 +82,6 @@ node scripts/prebake-search-graph.js
 
 echo "[done] post-training rebuild complete"
 echo "[next] restart backend: npm run dev --workspace=backend"
+echo ""
+echo "[push] Run the following to push rebuilt DBs (squashes into one LFS commit):"
+echo "       scripts/push-data.sh \"fine-tuned scripture-minilm\""
