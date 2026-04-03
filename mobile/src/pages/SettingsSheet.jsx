@@ -13,7 +13,7 @@ import './SettingsSheet.css';
 
 const LANGUAGES = [
   { code: 'en', label: 'English (KJV)' },
-  { code: 'nrsvue', label: 'NRSVUE' },
+  { code: 'ylt', label: 'YLT' },
   { code: 'es', label: 'Español' },
   { code: 'tl', label: 'Tagalog' },
   { code: 'ceb', label: 'Cebuano' },

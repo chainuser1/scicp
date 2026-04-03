@@ -412,9 +412,9 @@ const QUICK_TOPICS = [
   'holy ghost', 'resurrection', 'obedience', 'trials', 'gratitude',
 ];
 
-const BIBLE_CITATIONS = { en: 'KJV', nrsvue: 'NRSVUE', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳', war: 'Samarenyo Bible' };
+const BIBLE_CITATIONS = { en: 'KJV', ylt: 'YLT', tl: 'Ang Biblia', ceb: 'Ang Biblia', ilo: 'RIPV', es: 'RVR', el: 'Greek Bible', ja: '口語訳', war: 'Samarenyo Bible' };
 const TRIPLE_CITATIONS = { 3: 'Book of Mormon', 4: 'D&C', 5: 'Pearl of Great Price' };
-const LANGUAGE_NAMES   = { en: 'English', nrsvue: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese', war: 'Waray' };
+const LANGUAGE_NAMES   = { en: 'English', ylt: 'English', tl: 'Tagalog', ceb: 'Cebuano', ilo: 'Ilocano', es: 'Spanish', el: 'Greek', ja: 'Japanese', war: 'Waray' };
 function getCitation(language, volumeId, secondaryLanguage) {
   const vid = Number(volumeId);
   if (secondaryLanguage) {
@@ -1459,7 +1459,7 @@ const Presenter = () => {
     adjacentAbortRef.current = controller;
     const params = new URLSearchParams({
       verse_id: source.verse_id, direction,
-      ...((['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(currentLanguage)) && { language: currentLanguage }),
+      ...((['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(currentLanguage)) && { language: currentLanguage }),
       ...(source.book_id        != null && { book_id:        source.book_id }),
       ...(source.chapter_number != null && { chapter_number: source.chapter_number }),
       ...(source.verse_number   != null && { verse_number:   source.verse_number }),
@@ -2468,7 +2468,7 @@ const Presenter = () => {
                     onChange={handleLanguageChange}
                   >
                     <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
+                    <option value="ylt">English w/ YLT Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -2490,7 +2490,7 @@ const Presenter = () => {
                     >
                       <option value="">Off</option>
                       <option value="en">English</option>
-                      <option value="nrsvue">English w/ NRSVUE Bible</option>
+                      <option value="ylt">English w/ YLT Bible</option>
                       <option value="tl">Tagalog</option>
                       <option value="ceb">Cebuano</option>
                       <option value="es">Español</option>
@@ -2766,7 +2766,7 @@ const Presenter = () => {
                     onChange={e => { handleLanguageChange(e); setMobileMenuOpen(false); }}
                   >
                     <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
+                    <option value="ylt">English w/ YLT Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -2776,7 +2776,7 @@ const Presenter = () => {
                     <option value="war">Waray</option>
                   </select>
                 </div>
-                {/* F8 — secondary language */}
+                {/* F8 — secondary language */}}
                 <div className="mobile-menu-row" style={{ marginTop: '0.35rem', gap: '0.4rem' }}>
                   <span className="mobile-menu-label" style={{ margin: 0, flexShrink: 0 }}>+Screen</span>
                   <select
@@ -2787,7 +2787,7 @@ const Presenter = () => {
                   >
                     <option value="">Off</option>
                     <option value="en">English</option>
-                    <option value="nrsvue">English w/ NRSVUE Bible</option>
+                    <option value="ylt">English w/ YLT Bible</option>
                     <option value="tl">Tagalog</option>
                     <option value="ceb">Cebuano</option>
                     <option value="es">Español</option>
@@ -3033,7 +3033,7 @@ const Presenter = () => {
                   onKeyUp={handleSearchKeyDown}
                   autoComplete="off"
                   autoCorrect="off"
-                  spellCheck={currentLanguage === 'en' || currentLanguage === 'nrsvue'}
+                  spellCheck={currentLanguage === 'en' || currentLanguage === 'ylt'}
                   autoFocus={drawerOpen && drawerTab === 'search'}
                   onBlur={() => setTimeout(() => setSuggestions([]), 150)}
                 />

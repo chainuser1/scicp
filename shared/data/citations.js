@@ -3,7 +3,7 @@
 // ── Version citation helpers ────────────────────────────────────────────────
 const BIBLE_CITATIONS = {
   en:     'KJV',
-  nrsvue: 'NRSVUE',
+  ylt:    'YLT',
   tl:     'Ang Biblia',
   ceb:    'Ang Biblia',
   ilo:    'RIPV',
@@ -21,7 +21,7 @@ const TRIPLE_CITATIONS = {
 
 const LANGUAGE_NAMES = {
   en:     'English',
-  nrsvue: 'English',
+  ylt:     'English',
   tl:     'Tagalog',
   ceb:    'Cebuano',
   ilo:    'Ilocano',
