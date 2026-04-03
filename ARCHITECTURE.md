@@ -76,7 +76,7 @@ The backend implements a 41-component mathematical search pipeline in `backend/i
 
 1. **Input parsing** — Scripture reference detection, abbreviation expansion, doctrine alias expansion (50+ topics)
 2. **FTS5 retrieval** — Full-text search with BM25 ranking (AND query, OR fallback)
-3. **Semantic scoring** — MiniLM-L6 embeddings with ZCA whitening, cosine similarity
+3. **Semantic scoring** — fine-tuned MiniLM-L6 embeddings (384D) with ZCA whitening, cosine similarity
 4. **Entity resolution** — Named entity recognition with polynomial feature scoring
 5. **Graph propagation** — kNN verse graph, spectral features, cross-reference boosting
 6. **Fusion** — Reciprocal Rank Fusion (RRF) combining FTS + semantic + graph signals
@@ -90,12 +90,27 @@ Multi-language search finds English verses first, then fetches translations by `
 | Database | Purpose |
 |----------|---------|
 | `lds-scriptures-sqlite.db` | English scriptures, themes table, FTS5 index |
+| `ylt-scriptures-sqlite.db` | Young's Literal Translation alignment source |
+| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible alignment source |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
 | `verse-embeddings.db` | 384D MiniLM embeddings (raw + whitened) |
-| `search-graph.db` | kNN graph, spectral features, training pairs |
+| `verse-graph.db` | kNN, spectral, cluster, and graph features |
+| `search-graph.db` | Bundled lightweight search graph for runtime/mobile |
 
 Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_embeddings_white`, `verse_knn`, `verse_spectral`
+
+## Post-Training Operations
+
+After fine-tuning `resources/models/scripture-minilm`, all embedding-derived artifacts must be rebuilt.
+
+Recommended single command:
+
+```bash
+scripts/post-train-rebuild.sh
+```
+
+This script installs the latest model zip and regenerates: embeddings, whitening, kNN, spectral, clusters, cluster labels, entity centroids, HNSW, and the search graph bundle.
 
 ## Session Model
 

@@ -55,12 +55,21 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 
 1. **Input parsing** — reference detection, abbreviation expansion, doctrine alias expansion (50+ topics)
 2. **FTS5 retrieval** — BM25 ranking, AND query with OR fallback
-3. **Semantic scoring** — MiniLM-L6 embeddings, ZCA whitening, cosine similarity
+3. **Semantic scoring** — fine-tuned MiniLM-L6 embeddings (384D), ZCA whitening, cosine similarity
 4. **Entity resolution** — named entity recognition with polynomial scoring
 5. **Graph propagation** — kNN verse graph, spectral features, cross-reference boosting
 6. **Fusion** — Reciprocal Rank Fusion (RRF)
 7. **Re-ranking** — MMR diversity, session context, learned weights (Adam optimizer)
 8. **Calibration** — isotonic regression, sigmoid tier gating
+
+
+### Latest Achievements (Apr 2026)
+
+- Training corpus expanded to about **460,979 pairs** (~461k)
+- Added **LDS ↔ Rotherham** same-verse translation pairs
+- Added **Strong's lexicon** semantic expansion pairs
+- Added Kaggle fine-tuning notebook and standardized post-training rebuild workflow
+- Added one-command rebuild script: `scripts/post-train-rebuild.sh`
 
 
 ---
@@ -169,10 +178,13 @@ SQLite via `better-sqlite3` (synchronous API).
 | Database | Purpose |
 |----------|---------|
 | `lds-scriptures-sqlite.db` | English scriptures, themes, FTS5 index |
+| `ylt-scriptures-sqlite.db` | Young's Literal Translation alignment source |
+| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible alignment source |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
 | `verse-embeddings.db` | 384D MiniLM embeddings (raw + whitened) |
-| `search-graph.db` | kNN graph, spectral features, training pairs |
+| `verse-graph.db` | kNN, spectral, clusters, and graph features |
+| `search-graph.db` | Bundled lightweight search graph for runtime/mobile |
 
 ---
 
