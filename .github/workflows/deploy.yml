@@ -24,7 +24,7 @@ jobs:
       packages: write
 
     steps:
-      - name: Checkout (no LFS — DBs come from previous image)
+      - name: Checkout (translation DBs are regular git binaries; large DBs via image or LFS)
         uses: actions/checkout@v5
 
       - name: Log in to GHCR
