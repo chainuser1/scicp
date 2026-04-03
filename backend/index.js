@@ -107,8 +107,8 @@ const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptur
 // Optional language databases (loaded when DB file exists; gracefully absent during scraping)
 let db_japanese = null;
 try { db_japanese = require('better-sqlite3')(path.join(DB_DIR, 'japanese-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
-let db_nrsvue = null;
-try { db_nrsvue   = require('better-sqlite3')(path.join(DB_DIR, 'nrsvue-scriptures-sqlite.db'),   DB_OPTS); } catch (_) {}
+let db_ylt = null;
+try { db_ylt      = require('better-sqlite3')(path.join(DB_DIR, 'ylt-scriptures-sqlite.db'),     DB_OPTS); } catch (_) {}
 let db_waray = null;
 try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'),    DB_OPTS); } catch (_) {}
 
@@ -196,7 +196,7 @@ const dba_spanish  = new BetterSqliteAdapter(db_spanish);
 const dba_greek    = new BetterSqliteAdapter(db_greek);
 const dba_ilocano  = new BetterSqliteAdapter(db_ilocano);
 let dba_japanese   = db_japanese ? new BetterSqliteAdapter(db_japanese) : null;
-let dba_nrsvue     = db_nrsvue   ? new BetterSqliteAdapter(db_nrsvue)   : null;
+let dba_ylt        = db_ylt      ? new BetterSqliteAdapter(db_ylt)      : null;
 let dba_waray      = db_waray    ? new BetterSqliteAdapter(db_waray)    : null;
 
 // ── Script search configuration toggles ──
@@ -231,7 +231,7 @@ function resolveDbAdapter(language) {
     case 'el':     return dba_greek;
     case 'ilo':    return dba_ilocano;
     case 'ja':     return dba_japanese || dba;
-    case 'nrsvue': return dba_nrsvue || dba;
+    case 'ylt':    return dba_ylt || dba;
     case 'war':    return dba_waray || dba;
     default:       return dba;
   }
@@ -317,7 +317,7 @@ const DOWNLOADABLE_DBS = new Set([
   'greek-scriptures-sqlite.db',
   'ilocano-scriptures-sqlite.db',
   'japanese-scriptures-sqlite.db',
-  'nrsvue-scriptures-sqlite.db',
+  'ylt-scriptures-sqlite.db',
   'waray-scriptures-sqlite.db',
   'topical-guide.db',
   'chapter-summaries-fts.db',
@@ -2922,9 +2922,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
   let pipelineMeta = null;
 
   if (lang !== 'en') {
-    // English versions (e.g. NRSVUE) run the full pipeline against LDS embeddings,
+    // English versions (e.g. YLT) run the full pipeline against LDS embeddings,
     // then swap the display text to the selected version afterward.
-    const ENGLISH_VERSIONS = new Set(['nrsvue']);
+    const ENGLISH_VERSIONS = new Set(['ylt']);
     if (ENGLISH_VERSIONS.has(lang)) {
       const full = await runSearchPipeline(query, 'en', contextVerseId, log, sessionId);
       results       = full.results || [];
@@ -4203,9 +4203,9 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
-  if (!language || !['en', 'tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(language.toLowerCase())) {
+  if (!language || !['en', 'tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(language.toLowerCase())) {
     reply.code(400);
-    return { error: 'language must be en, tl, ceb, es, el, ilo, ja, nrsvue or war' };
+    return { error: 'language must be en, tl, ceb, es, el, ilo, ja, ylt or war' };
   }
   const targetDb = language.toLowerCase() === 'en' ? dba : resolveDbAdapter(language);
   try {
@@ -4456,7 +4456,7 @@ fastify.get('/personalized-votd', async (request, reply) => {
   }
 });
 
-function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray }) {
+function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
@@ -5298,7 +5298,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // Determine target database with streamlined mapping
       let targetDb = dba;
-      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normalizedLanguage);
+      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normalizedLanguage);
       if (isTranslation) {
         targetDb = resolveDbAdapter(normalizedLanguage);
       }
@@ -5360,7 +5360,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
       // F8 — dual language display: fetch secondary language text
       const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
-      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'nrsvue', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
+      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
         const secDb = resolveDbAdapter(normSecLang);
         try {
           const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title');
@@ -5471,7 +5471,7 @@ function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagal
 
 // Only register handlers in production runtime
 if (require.main === module) {
-  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray });
+  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray });
 }
 
 // ── HTTP route: get entities for a verse ─────────────────────────────────────
@@ -5777,7 +5777,7 @@ const start = async () => {
           initializeFts(dba_greek,   'Greek', ftsOpts);
           initializeFts(dba_ilocano, 'Ilocano', ftsOpts);
           if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
-          if (dba_nrsvue)   initializeFts(dba_nrsvue,   'NRSVUE', ftsOpts);
+          if (dba_ylt)      initializeFts(dba_ylt,       'YLT', ftsOpts);
           if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
           try {
             dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get();
@@ -5815,7 +5815,7 @@ if (require.main === module) {
 // Entry point for Electron: registers socket handlers and starts the Fastify server.
 // Call this AFTER setting process.env.DB_DIR / FRONTEND_DIST_DIR if needed.
 async function startElectron() {
-  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_nrsvue, db_waray });
+  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray });
   return start();
 }
 

@@ -955,11 +955,11 @@ describe('Backend API Tests', () => {
         expect(Array.isArray(results)).toBe(true);
       });
 
-      test('NRSVUE search uses full pipeline', async () => {
-        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=nrsvue&pageSize=5' });
+      test('YLT search uses full pipeline', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=ylt&pageSize=5' });
         const { results } = JSON.parse(res.payload);
         expect(results.length).toBeGreaterThan(0);
-        // NRSVUE results should have tier metadata (full pipeline)
+        // YLT results should have tier metadata (full pipeline)
         expect(results[0]).toHaveProperty('_tier');
       });
     });
@@ -1247,7 +1247,7 @@ describe('Socket.IO session logic via registerSocketHandlers', () => {
       db_greek: null,
       db_ilocano: null,
       db_japanese: null,
-      db_nrsvue: null,
+      db_ylt: null,
       db_waray: null,
     });
     triggerConnection = (socket) => {
