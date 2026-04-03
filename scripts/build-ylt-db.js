@@ -223,14 +223,31 @@ async function main() {
     );
     CREATE TABLE configuration (revision INTEGER, schema_version TEXT);
     CREATE VIEW scriptures AS
-      SELECT v.id AS verse_id, v.scripture_text,
-        b.book_title || ' ' || c.chapter_number || ':' || v.verse_number AS verse_title,
-        b.book_title, c.chapter_number, v.verse_number,
-        b.id AS book_id, b.volume_id, vol.volume_title
-      FROM verses v
-      JOIN chapters c ON c.id = v.chapter_id
-      JOIN books b ON b.id = c.book_id
-      JOIN volumes vol ON vol.id = b.volume_id;
+      SELECT
+        vol.id  AS volume_id,
+        b.id    AS book_id,
+        c.id    AS chapter_id,
+        v.id    AS verse_id,
+        vol.volume_title,
+        b.book_title,
+        vol.volume_long_title,
+        b.book_long_title,
+        vol.volume_subtitle,
+        b.book_subtitle,
+        vol.volume_short_title,
+        b.book_short_title,
+        vol.volume_lds_url,
+        b.book_lds_url,
+        c.chapter_number,
+        v.verse_number,
+        v.scripture_text,
+        b.book_title       || ' ' || c.chapter_number || ':' || v.verse_number AS verse_title,
+        b.book_short_title || ' ' || c.chapter_number || ':' || v.verse_number AS verse_short_title
+      FROM volumes vol
+      INNER JOIN books    b  ON b.volume_id  = vol.id
+      INNER JOIN chapters c  ON c.book_id    = b.id
+      INNER JOIN verses   v  ON v.chapter_id = c.id
+      ORDER BY vol.id, b.id, c.id, v.id;
   `);
 
   out.exec('BEGIN');

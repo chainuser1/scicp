@@ -1,5 +1,16 @@
-# All database files tracked via Git LFS (no history kept — current version only)
-resources/db/*.db filter=lfs diff=lfs merge=lfs -text
+# Large non-rebuilable data files tracked via Git LFS.
+# Translation/scripture DBs are committed as regular binary objects (no LFS)
+# to avoid per-version storage costs; they are fully rebuildable from scripts.
+resources/db/verse-embeddings.db    filter=lfs diff=lfs merge=lfs -text
+resources/db/search-graph.db        filter=lfs diff=lfs merge=lfs -text
+resources/db/verse-summaries.db     filter=lfs diff=lfs merge=lfs -text
+resources/db/verse-graph.db         filter=lfs diff=lfs merge=lfs -text
+resources/db/verse-tags.db          filter=lfs diff=lfs merge=lfs -text
+resources/db/topical-guide.db       filter=lfs diff=lfs merge=lfs -text
+resources/db/verse-cross-refs.db    filter=lfs diff=lfs merge=lfs -text
+resources/db/triple-index.db        filter=lfs diff=lfs merge=lfs -text
+resources/db/chapter-summaries-fts.db filter=lfs diff=lfs merge=lfs -text
+resources/db/footnotes-lds-summaries.db filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/model.onnx filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/model.onnx.data filter=lfs diff=lfs merge=lfs -text
 resources/onnx/scripture-bge/onnx/model.onnx.data filter=lfs diff=lfs merge=lfs -text
