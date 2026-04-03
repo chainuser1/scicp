@@ -768,6 +768,8 @@ const Presenter = () => {
   const [setlistSaveName, setSetlistSaveName] = useState('');
   const [setlistLoadOpen, setSetlistLoadOpen] = useState(false);
   const [setlistsLoading, setSetlistsLoading] = useState(false);
+  // null = closed; holds the saved-setlist object awaiting confirmation
+  const [setlistLoadConfirm, setSetlistLoadConfirm] = useState(null);
 
   const [expandedTranslations, setExpandedTranslations] = useState(() => new Set());
   const [translationCache, setTranslationCache]         = useState({});
@@ -1637,6 +1639,11 @@ const Presenter = () => {
   const loadHistoryPageRef = useRef(null);
   loadHistoryPageRef.current = loadHistoryPage;
 
+  // Stable ref for fetchAdjacent — consumed by the keyboard shortcut and auto-advance
+  // effects so they always call the latest closure without listing every dependency.
+  const fetchAdjacentRef = useRef(null);
+  fetchAdjacentRef.current = fetchAdjacent;
+
   const loadEntityPage = async (page) => {
     const es = entitySearch;
     if (!es) return;
@@ -2012,10 +2019,9 @@ const Presenter = () => {
     }
   };
   const loadSetlist = (saved) => {
-    if (!window.confirm(`Replace current setlist with "${saved.name}"?`)) return;
-    setSetlist(saved.items);
+    // Use a non-blocking modal instead of window.confirm (which freezes socket events)
+    setSetlistLoadConfirm(saved);
     setSetlistLoadOpen(false);
-    showToast(`Loaded "${saved.name}"`);
   };
   const deleteSavedSetlist = async (id) => {
     await fetch(`${API_URL}/setlists/${id}`, { method: 'DELETE' });
@@ -2089,12 +2095,12 @@ const Presenter = () => {
           if (e.key === ' ' && liveVerse?.segments?.length > 1) {
             navigateSegment('next');
           } else {
-            fetchAdjacent('next');
+            fetchAdjacentRef.current('next');
           }
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          fetchAdjacent('prev');
+          fetchAdjacentRef.current('prev');
           break;
         case 'l':
         case 'L':
@@ -2130,10 +2136,9 @@ const Presenter = () => {
     const hasNext = liveVerse.segments && liveVerse.currentSegment < liveVerse.segments.length - 1;
     if (!hasNext) return;
     autoAdvanceTimer.current = setTimeout(() => {
-      fetchAdjacent('next', false);
+      fetchAdjacentRef.current('next', false);
     }, dwell);
     return () => clearTimeout(autoAdvanceTimer.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoAdvance, liveVerse, autoAdvanceSec]);
 
   // Auto-suggest layout based on text length
@@ -2182,6 +2187,56 @@ const Presenter = () => {
         <div className="presenter-takeover-alert presenter-evicted-alert" role="alert" aria-live="assertive">
           ⛔ You have been removed as presenter — the session is now controlled by another device.
           <button className="presenter-takeover-dismiss" onClick={() => setEvictedAlert(false)}>✕</button>
+        </div>
+      )}
+
+      {/* Setlist load confirmation — non-blocking replacement for window.confirm */}
+      {setlistLoadConfirm && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.65)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setSetlistLoadConfirm(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            style={{
+              background: '#1e1e1e', border: '1px solid #444', borderRadius: '0.75rem',
+              padding: '1.75rem 2rem', maxWidth: '22rem', width: '90%', textAlign: 'center',
+              color: '#f0f0f0', boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '1.6rem', marginBottom: '0.5rem' }}>📝</div>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '0.5rem' }}>Load setlist?</div>
+            <div style={{ fontSize: '0.85rem', color: '#aaa', marginBottom: '1.25rem', lineHeight: 1.4 }}>
+              Replace the current setlist with “{setlistLoadConfirm.name}”? Unsaved changes will be lost.
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                className="theme-btn"
+                style={{ minWidth: '7rem', background: '#c9a84c', borderColor: '#c9a84c', color: '#1a1a24' }}
+                autoFocus
+                onClick={() => {
+                  setSetlist(setlistLoadConfirm.items);
+                  showToast(`Loaded “${setlistLoadConfirm.name}”`);
+                  setSetlistLoadConfirm(null);
+                }}
+              >
+                Load
+              </button>
+              <button
+                className="theme-btn"
+                style={{ minWidth: '7rem' }}
+                onClick={() => setSetlistLoadConfirm(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2562,7 +2617,21 @@ const Presenter = () => {
                 <div className="popover-label">Custom URL</div>
                 <div className="popover-row">
                   <input type="text" className="popover-input" placeholder="https://…" value={bgUrlInput} onChange={e => setBgUrlInput(e.target.value)} />
-                  <button className="popover-apply" onClick={() => { if (!bgUrlInput) return; handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')`, _bgLocked: true }); setBgUrlInput(''); setThemePopover(false); }}>Apply</button>
+                  <button className="popover-apply" onClick={() => {
+                    if (!bgUrlInput) return;
+                    let safeUrl;
+                    try {
+                      const p = new URL(bgUrlInput.trim());
+                      if (!['http:', 'https:'].includes(p.protocol)) throw new Error('bad-protocol');
+                      safeUrl = p.href;
+                    } catch {
+                      showToast('⚠ Invalid URL — use https://…');
+                      return;
+                    }
+                    handleThemeChange({ ...currentTheme, background_url: `url('${safeUrl}')`, _bgLocked: true });
+                    setBgUrlInput('');
+                    setThemePopover(false);
+                  }}>Apply</button>
                 </div>
               </div>
             )}
@@ -2794,7 +2863,16 @@ const Presenter = () => {
                   />
                   <button className="popover-apply" onClick={() => {
                     if (!bgUrlInput) return;
-                    handleThemeChange({ ...currentTheme, background_url: `url('${bgUrlInput}')`, _bgLocked: true });
+                    let safeUrl;
+                    try {
+                      const p = new URL(bgUrlInput.trim());
+                      if (!['http:', 'https:'].includes(p.protocol)) throw new Error('bad-protocol');
+                      safeUrl = p.href;
+                    } catch {
+                      showToast('⚠ Invalid URL — use https://…');
+                      return;
+                    }
+                    handleThemeChange({ ...currentTheme, background_url: `url('${safeUrl}')`, _bgLocked: true });
                     setBgUrlInput('');
                     setMobileMenuOpen(false);
                   }}>Apply</button>
@@ -3000,6 +3078,10 @@ const Presenter = () => {
                 }} />
                 <div className="results-list"
                   ref={resultsListRef}
+                  role="region"
+                  aria-label="Search results"
+                  aria-live="polite"
+                  aria-atomic="false"
                   onScroll={e => setResultsScrolled(e.currentTarget.scrollTop > 120)}>
                   {results.length > 0
                     ? <SearchResults

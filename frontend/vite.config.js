@@ -7,10 +7,11 @@ export default defineConfig({
   plugins: [
     react(),
     legacy({
+      // React 19 has no generator usage; regenerator polyfill is dead weight.
       targets: ['chrome >= 50', 'safari >= 12', 'firefox >= 60'],
-      additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
     }),
-    visualizer({ open: true, filename: 'bundle-stats.html' }),
+    // Bundle visualizer: run with ANALYZE=true npm run build to open stats
+    visualizer({ open: process.env.ANALYZE === 'true', filename: 'bundle-stats.html' }),
   ],
   test: {
     globals: true,

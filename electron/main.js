@@ -147,7 +147,17 @@ const { startElectron } = require('../backend/index.js');
 
 // ─── Poll until the Fastify server is accepting connections ───────────────────
 function waitForServer(cb) {
+  const TIMEOUT_MS = 30_000;
+  const POLL_MS    = 300;
+  const started    = Date.now();
   const attempt = () => {
+    if (Date.now() - started > TIMEOUT_MS) {
+      dialog.showErrorBox('Backend Timeout',
+        'The local server did not become ready within 30 seconds.\n\n'
+        + 'Check that database files exist in:\n' + process.env.DB_DIR);
+      app.quit();
+      return;
+    }
     http.get(`http://127.0.0.1:${process.env.PORT}/health`, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -156,9 +166,9 @@ function waitForServer(cb) {
           const json = JSON.parse(data);
           if (json.status === 'ok') return cb();
         } catch {}
-        setTimeout(attempt, 300);
+        setTimeout(attempt, POLL_MS);
       });
-    }).on('error', () => setTimeout(attempt, 300));
+    }).on('error', () => setTimeout(attempt, POLL_MS));
   };
   attempt();
 }
@@ -263,8 +273,15 @@ async function selectConnectionMode() {
     ipcMain.once('online-mode-connect', (_e, serverUrl) => {
       if (!urlWin.isDestroyed()) urlWin.close();
       const cleaned = String(serverUrl).replace(/\/+$/, '');
-      if (!/^https?:\/\/.+/.test(cleaned)) {
-        dialog.showErrorBox('Invalid URL', 'Please enter a valid HTTP or HTTPS URL.');
+      // Validate with the URL constructor — rejects bare strings, short hosts, etc.
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(cleaned);
+        if (!['http:', 'https:'].includes(parsedUrl.protocol) || parsedUrl.hostname.length < 3) {
+          throw new Error('invalid');
+        }
+      } catch {
+        dialog.showErrorBox('Invalid URL', 'Please enter a valid HTTP or HTTPS URL (e.g. https://your-server.com).');
         resolve({ mode: 'offline' });
         return;
       }
@@ -499,7 +516,7 @@ ipcMain.handle('get-app-version', () => app.getVersion());
 function setupAutoUpdater() {
   if (isDev || !autoUpdater) return;
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false; // download only after user explicitly confirms
   autoUpdater.autoInstallOnAppQuit = true;
 
   let _updateDownloadTimer = null;
@@ -546,7 +563,7 @@ function setupAutoUpdater() {
         autoUpdater.downloadUpdate();
       }
     });
-  });
+  }); // end update-available
 
   autoUpdater.on('update-not-available', () => {
     console.log('Auto-updater: app is up to date.');
@@ -591,7 +608,8 @@ function setupAutoUpdater() {
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
-let selectedMode = null;
+// Default to offline so macOS dock re-open / early activate events work safely.
+let selectedMode = { mode: 'offline' };
 
 app.whenReady().then(async () => {
   logLifecycle('App starting...');
@@ -616,7 +634,8 @@ app.whenReady().then(async () => {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self' http://localhost:* https://cap-teyyko.live; " +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+          // 'unsafe-eval' is only needed by React DevTools / Vite HMR in dev mode.
+          `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}; ` +
           "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
           "font-src 'self' https://fonts.gstatic.com; " +
           "img-src 'self' data: blob: https:; " +
@@ -639,6 +658,9 @@ app.on('window-all-closed', () => { logLifecycle('All windows closed, quitting.'
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    waitForServer(() => createWindows(selectedMode));
+    // selectedMode defaults to offline; will be overridden by selectConnectionMode
+    // once the server is ready. Guard against null in case activate fires before
+    // the mode dialog has been shown.
+    waitForServer(() => createWindows(selectedMode || { mode: 'offline' }));
   }
 });

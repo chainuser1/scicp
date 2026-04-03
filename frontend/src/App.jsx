@@ -1,9 +1,5 @@
 import React, {useState} from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom';
-
-// Platform detection — download page/card is web-only
-const isElectronApp  = !!window.electronAPI?.isElectron;
-const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
 import About from './pages/About';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
@@ -14,6 +10,10 @@ import ErrorBoundary from './components/ErrorBoundary';
 import SEO from './components/SEO';
 import { ToastProvider } from './components/Toast';
 import ConnectionStatus from './components/ConnectionStatus';
+
+// Platform detection — download page/card and ads are web-only
+const isElectronApp  = !!window.electronAPI?.isElectron;
+const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
 
 const Presenter = React.lazy(() => import('./pages/Presenter'));
 const Client = React.lazy(() => import('./pages/Client'));
@@ -128,7 +128,10 @@ function Home() {
       </main>
 
      
-     <div id="container-6da4a92b964c03d6c84f2de481fd6bb0"></div>
+     {/* Ad unit — web only; hidden in Electron & Capacitor to avoid blank DOM node */}
+     {!isElectronApp && !isCapacitorApp && (
+       <div id="container-6da4a92b964c03d6c84f2de481fd6bb0" />
+     )}
 
       {showHomeTourPrompt && (
         <aside className="home-tour-prompt" aria-live="polite">
