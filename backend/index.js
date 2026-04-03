@@ -2241,14 +2241,144 @@ class HNSWIndex {
     finalRes.sort((a, b) => a[0] - b[0]);
     return finalRes.slice(0, k).map(([dist, idx]) => ({ verse_id: this.nodes[idx].id, score: 1 - dist }));
   }
+
+  // ── Serialization ─────────────────────────────────────────────────────────
+  // Binary layout (little-endian):
+  //   Header (24 bytes):
+  //     Uint32  version      = 1
+  //     Uint32  dims
+  //     Uint32  M
+  //     Int32   entryPoint   (-1 if empty)
+  //     Int32   maxLevel
+  //     Uint32  nodeCount
+  //   Per node (variable):
+  //     Int32   id           (verse_id)
+  //     Uint8   levelCount   (number of levels this node participates in)
+  //     Per level:
+  //       Uint8  level
+  //       Uint8  neighborCount
+  //       Int32[neighborCount]  neighbor indices
+  //   Vecs section (after all nodes):
+  //     Float32[dims] per node, in node order
+  //
+  // Vecs are separated so the header+graph can be read without allocating
+  // all float data; and so the BLOB stays compact (~41k × 16 × 4 bytes ≈ 2.6 MB).
+  serialize() {
+    const N = this.nodes.length;
+    // Pass 1: compute total size for neighbor lists
+    let neighborBytes = 0;
+    for (const node of this.nodes) {
+      for (const [, nbrs] of node.neighbors) {
+        neighborBytes += 2 + nbrs.length * 4; // level(1) + count(1) + ids(4 each)
+      }
+      neighborBytes += 1; // levelCount byte
+    }
+    const headerBytes  = 24;
+    const nodeIdBytes  = N * 4;            // Int32 id per node
+    const vecBytes     = N * this.dims * 4; // Float32 vecs
+
+    const totalBytes = headerBytes + nodeIdBytes + neighborBytes + vecBytes;
+    const buf = Buffer.allocUnsafe(totalBytes);
+    let off = 0;
+
+    // Header
+    buf.writeUInt32LE(1,              off); off += 4; // version
+    buf.writeUInt32LE(this.dims,      off); off += 4;
+    buf.writeUInt32LE(this.M,         off); off += 4;
+    buf.writeInt32LE(this.entryPoint, off); off += 4;
+    buf.writeInt32LE(this.maxLevel,   off); off += 4;
+    buf.writeUInt32LE(N,              off); off += 4;
+
+    // Nodes: id + neighbor lists
+    for (const node of this.nodes) {
+      buf.writeInt32LE(node.id, off); off += 4;
+      const levels = [...node.neighbors.entries()];
+      buf.writeUInt8(levels.length, off); off += 1;
+      for (const [lvl, nbrs] of levels) {
+        buf.writeUInt8(lvl,          off); off += 1;
+        buf.writeUInt8(nbrs.length,  off); off += 1;
+        for (const nid of nbrs) { buf.writeInt32LE(nid, off); off += 4; }
+      }
+    }
+
+    // Vecs (Float32, node order)
+    for (const node of this.nodes) {
+      for (let d = 0; d < this.dims; d++) {
+        buf.writeFloatLE(node.vec[d], off); off += 4;
+      }
+    }
+
+    return buf;
+  }
+
+  static deserialize(buf) {
+    let off = 0;
+    const version    = buf.readUInt32LE(off); off += 4;
+    if (version !== 1) throw new Error(`[HNSW] Unknown serialization version: ${version}`);
+    const dims       = buf.readUInt32LE(off); off += 4;
+    const M          = buf.readUInt32LE(off); off += 4;
+    const entryPoint = buf.readInt32LE(off);  off += 4;
+    const maxLevel   = buf.readInt32LE(off);  off += 4;
+    const N          = buf.readUInt32LE(off); off += 4;
+
+    const idx = new HNSWIndex(dims, M);
+    idx.entryPoint = entryPoint;
+    idx.maxLevel   = maxLevel;
+
+    // Read ids + neighbor lists (vecs come later)
+    const ids      = new Int32Array(N);
+    const allNbrs  = new Array(N); // Array<Map<level, number[]>>
+    for (let i = 0; i < N; i++) {
+      ids[i] = buf.readInt32LE(off); off += 4;
+      const levelCount = buf.readUInt8(off); off += 1;
+      const nbrsMap = new Map();
+      for (let l = 0; l < levelCount; l++) {
+        const lvl   = buf.readUInt8(off); off += 1;
+        const cnt   = buf.readUInt8(off); off += 1;
+        const nList = [];
+        for (let n = 0; n < cnt; n++) { nList.push(buf.readInt32LE(off)); off += 4; }
+        nbrsMap.set(lvl, nList);
+      }
+      allNbrs[i] = nbrsMap;
+    }
+
+    // Read vecs and assemble nodes
+    for (let i = 0; i < N; i++) {
+      const vec = new Float32Array(dims);
+      for (let d = 0; d < dims; d++) { vec[d] = buf.readFloatLE(off); off += 4; }
+      idx.nodes.push({ id: ids[i], vec, neighbors: allNbrs[i] });
+    }
+
+    return idx;
+  }
 }
 
 function buildHNSWIndex() {
   if (!embeddingsReady || embeddingCache.size === 0) return;
+
+  // Fast path: load pre-baked HNSW blob from verse-embeddings.db
+  // Written by scripts/prebake-hnsw.js — eliminates ~3-8 s build at every startup.
+  if (db_embed) {
+    try {
+      const row = db_embed.prepare("SELECT data FROM hnsw_index WHERE key = 'hnsw_v1'").get();
+      if (row?.data) {
+        hnswIndex = HNSWIndex.deserialize(row.data);
+        fastify.log.info(`[HNSW] Loaded pre-baked index (${hnswIndex.nodes.length} nodes) from DB.`);
+        return;
+      }
+    } catch (err) {
+      fastify.log.warn('[HNSW] Could not load pre-baked index, rebuilding:', err.message);
+    }
+  }
+
+  // Slow path: build from scratch (first run or after embeddings change)
+  fastify.log.info('[HNSW] Building index from scratch…');
+  const t0 = Date.now();
   hnswIndex = new HNSWIndex(EMBED_DIM, 16, 200);
   for (const [verse_id, vec] of embeddingCache) {
     hnswIndex.insert(verse_id, vec);
   }
+  fastify.log.info(`[HNSW] Built in ${Date.now() - t0} ms (${hnswIndex.nodes.length} nodes). Run scripts/prebake-hnsw.js to cache this.`);
 }
 
 // ── #3 Concept expansion via MiniLM: find nearest pre-embedded concepts ──
