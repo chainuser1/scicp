@@ -31,24 +31,13 @@ export default function ConnectionStatus() {
   if (online && socketConnected && queueLength === 0) return null;
 
   let message;
-  let statusClass = '';
-
-  if (!online) {
-    message = '📡 Offline — some features may be unavailable';
-    statusClass = 'offline';
-  } else if (!socketConnected && queueLength > 0) {
-    message = `🔄 Reconnecting… (${queueLength} pending action${queueLength > 1 ? 's' : ''})`;
-    statusClass = 'reconnecting';
-  } else if (!socketConnected) {
-    message = '🔄 Reconnecting to server…';
-    statusClass = 'reconnecting';
-  } else if (queueLength > 0) {
-    message = `⏳ Syncing ${queueLength} pending action${queueLength > 1 ? 's' : ''}…`;
-    statusClass = 'syncing';
-  }
+  if (!online) message = '📡 You are offline — some features may be unavailable';
+  else if (!socketConnected && queueLength > 0) message = `🔄 Reconnecting… (${queueLength} pending action${queueLength > 1 ? 's' : ''})`;
+  else if (!socketConnected) message = '🔄 Reconnecting to server…';
+  else if (queueLength > 0) message = `⏳ Syncing ${queueLength} pending action${queueLength > 1 ? 's' : ''}…`;
 
   return (
-    <div className={`connection-banner ${statusClass}`} role="alert" aria-live="assertive">
+    <div className="connection-banner" role="alert" aria-live="assertive">
       {message}
     </div>
   );

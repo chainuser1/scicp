@@ -2776,7 +2776,7 @@ const Presenter = () => {
                     <option value="war">Waray</option>
                   </select>
                 </div>
-                {/* F8 — secondary language */}}
+                {/* F8 — secondary language */}
                 <div className="mobile-menu-row" style={{ marginTop: '0.35rem', gap: '0.4rem' }}>
                   <span className="mobile-menu-label" style={{ margin: 0, flexShrink: 0 }}>+Screen</span>
                   <select

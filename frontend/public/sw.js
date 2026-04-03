@@ -8,10 +8,7 @@
 // if the network drops — no extra SW work required for that use-case.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Bump this version string whenever you deploy breaking frontend changes.
-// Vite hashes JS/CSS filenames, so stale asset risk is low — but the SPA
-// shell (index.html) and precached routes must be invalidated on each release.
-const CACHE_NAME = 'siv-v3.1';
+const CACHE_NAME = 'siv-v3';
 
 // Resources to pre-cache on install
 const PRECACHE_URLS = [
