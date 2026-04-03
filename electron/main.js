@@ -142,8 +142,9 @@ function findAvailablePort(start, max) {
   });
 }
 
-// ─── Start embedded backend ───────────────────────────────────────────────────
-const { startElectron } = require('../backend/index.js');
+// ─── Embedded backend (required lazily inside whenReady so the splash ────────
+// window can appear before the heavy module-level initialisation runs) ─────
+let startElectron;
 
 // ─── Poll until the Fastify server is accepting connections ───────────────────
 function waitForServer(cb) {
@@ -611,14 +612,39 @@ function setupAutoUpdater() {
 // Default to offline so macOS dock re-open / early activate events work safely.
 let selectedMode = { mode: 'offline' };
 
+// Splash window — created immediately so users see something while the backend loads.
+function createSplashWindow() {
+  const splash = new BrowserWindow({
+    width: 360, height: 260,
+    frame: false,
+    alwaysOnTop: true,
+    transparent: false,
+    resizable: false,
+    skipTaskbar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true },
+  });
+  splash.loadFile(path.join(__dirname, 'loading.html'));
+  splash.once('ready-to-show', () => splash.show());
+  return splash;
+}
+
 app.whenReady().then(async () => {
   logLifecycle('App starting...');
+
+  // Show loading screen immediately — before anything slow runs.
+  const splash = createSplashWindow();
+
+  // Lazy-require the backend here so the splash is visible during
+  // the synchronous module-level DB-open work in backend/index.js.
+  ({ startElectron } = require('../backend/index.js'));
+
   const port = await findAvailablePort(3000, 3010);
   process.env.PORT = String(port);
   try {
     await startElectron();
   } catch (err) {
     console.error('Backend failed to start:', err);
+    if (splash && !splash.isDestroyed()) splash.close();
     dialog.showErrorBox('Backend Failed to Start',
       `The local server could not start.\n\n${err.message}\n\nCheck that database files exist in:\n${process.env.DB_DIR}`);
     app.quit();
@@ -649,6 +675,7 @@ app.whenReady().then(async () => {
 
   waitForServer(async () => {
     selectedMode = await selectConnectionMode();
+    if (splash && !splash.isDestroyed()) splash.close();
     createWindows(selectedMode);
     setupAutoUpdater();
   });

@@ -3396,14 +3396,25 @@ function buildEntityCache() {
   }
 }
 
-// Build verse meta + concept cache synchronously before any requests are served
-buildVerseMetaCache();
-buildTopicalGuideCache();
-buildEntityCache();
-initIdfLookup();
-initPprLookup();
-initRwrLookup();
-initClusterLabels();
+// ── Deferred cache initialisation ──────────────────────────────────────────
+// These functions are intentionally NOT called synchronously at module-load
+// time. They are heavy (loading 40k+ rows, parsing JSON, filling Maps) and
+// would delay the process start by 5-15 s on slower disks.
+// They are called via setImmediate AFTER fastify.listen() so that:
+//   1. The /health endpoint responds in ~100 ms (used by Electron waitForServer)
+//   2. The Electron window appears immediately with full FTS search working
+//   3. Enhanced features (semantic, entity, topical) warm up in the background
+// All feature flags (topicalGuideReady, entitiesReady, embeddingsReady …)
+// default to false, so every code path already has a graceful fallback.
+function initializeCaches() {
+  buildVerseMetaCache();
+  buildTopicalGuideCache();
+  buildEntityCache();
+  initIdfLookup();
+  initPprLookup();
+  initRwrLookup();
+  initClusterLabels();
+}
 
 // Finds a topic by name/slug match, returns all verses in that topic cluster
 // ranked by how many topics they share with the query topic.
@@ -5381,6 +5392,12 @@ const start = async () => {
     const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
     await fastify.listen({ port, host: '0.0.0.0' })
     fastify.log.info(`Server running on ${port}`)
+    // Warm up search caches in background — deferred so /health responds immediately.
+    // FTS search is available at once; entity/topical/semantic features enable as
+    // caches finish loading (usually within a few seconds on Electron).
+    setImmediate(() => {
+      try { initializeCaches(); } catch (err) { fastify.log.error(err, '[Caches] initialization failed'); }
+    });
     // Initialize FTS in background so health checks can pass immediately.
     // Skip in production/Electron — DBs are pre-built with FTS tables.
     if (!SKIP_RECOMPUTE) {
