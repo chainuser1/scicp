@@ -43,7 +43,7 @@ jobs:
           # Only extract the large LFS-tracked analysis DBs from the GHCR image.
           # These are not in regular git checkout (stored in Git LFS, not as
           # binary objects). Falls back to git lfs pull when no image exists.
-          LFS_DBS="verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
+          LFS_DBS="concept-embeddings.db verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
                    topical-guide.db verse-cross-refs.db triple-index.db \
                    chapter-summaries-fts.db footnotes-lds-summaries.db"
           if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then

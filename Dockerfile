@@ -11,9 +11,10 @@ RUN npm ci --include=dev
 COPY . .
 
 # Sanity check: ensure DBs are real SQLite files, not LFS pointers.
-# (Deploy workflow extracts DBs from previous GHCR image or falls back to LFS.)
+# (Deploy workflow extracts analysis DBs from previous GHCR image or falls back to LFS.)
 RUN for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
-              tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do \
+              tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db \
+              concept-embeddings.db; do \
       head -c 6 "resources/db/$db" | grep -q 'SQLite' \
         || (echo "ERROR: $db is an LFS pointer — deploy workflow did not resolve it." && exit 1); \
     done

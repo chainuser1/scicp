@@ -31,6 +31,7 @@ done
 
 # ── 1. Detect changed LFS-tracked DBs ────────────────────────────────────────
 LFS_PATTERNS=(
+  "resources/db/concept-embeddings.db"
   "resources/db/verse-embeddings.db"
   "resources/db/verse-graph.db"
   "resources/db/verse-tags.db"

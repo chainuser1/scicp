@@ -33,7 +33,7 @@ jobs:
         run: |
           # Translation DBs are regular git binaries — from checkout above.
           # Only extract large LFS-tracked analysis DBs from the GHCR image.
-          LFS_DBS="verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
+          LFS_DBS="concept-embeddings.db verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
                    topical-guide.db verse-cross-refs.db triple-index.db \
                    chapter-summaries-fts.db footnotes-lds-summaries.db"
           if docker pull ghcr.io/${{ github.repository }}:latest 2>/dev/null; then
