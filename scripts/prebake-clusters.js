@@ -9,8 +9,17 @@ const path = require('path');
 const EMB_PATH = path.join(__dirname, '..', 'resources', 'db', 'verse-embeddings.db');
 const GRAPH_PATH = path.join(__dirname, '..', 'resources', 'db', 'verse-graph.db');
 const NUM_CLUSTERS = 500;
-const DIM = 384;
 const MAX_ITER = 30;
+
+// DIM detected at runtime from BLOB size — never hardcoded.
+function detectDim(db) {
+  const row = db.prepare('SELECT embedding FROM verse_embeddings LIMIT 1').get();
+  if (!row) throw new Error('[prebake-clusters] No rows in verse_embeddings — run rebake-embeddings.py first');
+  const dim = row.embedding.byteLength / 4;
+  if (!Number.isInteger(dim) || dim < 64 || dim > 4096)
+    throw new Error(`[prebake-clusters] Unexpected embedding byte length ${row.embedding.byteLength} (dim=${dim})`);
+  return dim;
+}
 
 const embDb = new Database(EMB_PATH, { readonly: true });
 const db = new Database(GRAPH_PATH);
@@ -29,6 +38,9 @@ db.exec(`
 
 // Load all embeddings
 console.log('Loading embeddings...');
+const DIM = detectDim(embDb);
+console.log(`[prebake-clusters] Detected embedding dim: ${DIM}`);
+
 const allRows = embDb.prepare('SELECT verse_id, embedding FROM verse_embeddings ORDER BY verse_id').all();
 const N = allRows.length;
 const ids = new Int32Array(N);
@@ -37,11 +49,11 @@ const vecs = new Float32Array(N * DIM);
 for (let i = 0; i < N; i++) {
   ids[i] = allRows[i].verse_id;
   const buf = allRows[i].embedding;
-  const f32 = new Float32Array(buf.buffer, buf.byteOffset, DIM);
+  const f32 = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
   vecs.set(f32, i * DIM);
 }
 allRows.length = 0;
-console.log(`  ${N} embeddings loaded`);
+console.log(`  ${N} embeddings loaded (${DIM}-dim)`);
 
 // K-means++ initialization
 console.log(`Initializing ${NUM_CLUSTERS} centroids (k-means++)...`);

@@ -24,8 +24,6 @@ const MAIN_PATH = path.join(DB_DIR, 'lds-scriptures-sqlite.db');
 const EMB_PATH  = path.join(DB_DIR, 'verse-embeddings.db');
 const GRAPH_PATH= path.join(DB_DIR, 'verse-graph.db');
 
-const DIM = 384;
-
 // Minimum IDF threshold — below this a term is too common to be a label
 // (covers: the, and, of, unto, lord, shall, he, be, god, covenant, said, king…)
 const MIN_IDF = 4.5;
@@ -58,6 +56,20 @@ const embDb   = new Database(EMB_PATH,  { readonly: true });
 const graphDb = new Database(GRAPH_PATH);
 graphDb.pragma('journal_mode = WAL');
 graphDb.pragma('cache_size = -131072');
+
+// DIM detected at runtime — centroids written to cluster_labels must match
+// the verse embedding dimension exactly or nearest-cluster lookup will be wrong.
+function detectDim(db) {
+  const row = db.prepare('SELECT embedding FROM verse_embeddings LIMIT 1').get();
+  if (!row) throw new Error('[prebake-cluster-labels] No rows in verse_embeddings');
+  const dim = row.embedding.byteLength / 4;
+  if (!Number.isInteger(dim) || dim < 64 || dim > 4096)
+    throw new Error(`[prebake-cluster-labels] Unexpected BLOB size ${row.embedding.byteLength} (dim=${dim})`);
+  return dim;
+}
+
+const DIM = detectDim(embDb);
+console.log(`[prebake-cluster-labels] Detected embedding dim: ${DIM}`);
 
 // ── Load IDF table ──────────────────────────────────────────────────────────
 console.log('Loading IDF table…');
@@ -101,7 +113,7 @@ for (const row of mainDb.prepare(`
 console.log('Loading embeddings…');
 const embMap = new Map();
 for (const row of embDb.prepare('SELECT verse_id, embedding FROM verse_embeddings').all()) {
-  embMap.set(row.verse_id, new Float32Array(row.embedding.buffer, row.embedding.byteOffset, DIM));
+  embMap.set(row.verse_id, new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4));
 }
 console.log(`  ${embMap.size} embeddings loaded`);
 
@@ -134,7 +146,7 @@ graphDb.exec(`
     label_terms      TEXT NOT NULL,   -- JSON array of top display terms
     rep_verse_id     INTEGER NOT NULL, -- verse closest to centroid
     member_count     INTEGER NOT NULL,
-    centroid         BLOB NOT NULL    -- Float32Array(384) — for nearest-cluster query
+    centroid         BLOB NOT NULL    -- Float32Array(dim) — for nearest-cluster query
   );
   CREATE INDEX IF NOT EXISTS idx_cl_cluster ON cluster_labels(cluster_id);
 `);
