@@ -3,7 +3,7 @@
  * Export training pairs for multilingual scripture fine-tuning.
  *
  * Pair sources (by training signal strength):
- *   1. Translation pairs   — same verse across LDS ↔ NRSVUE ↔ Tagalog ↔ ... (paraphrase)
+ *   1. Translation pairs   — same verse across LDS ↔ modern-English translations (paraphrase)
  *   2. Topical guide        — topic name ↔ verse text (concept grounding)
  *   3. Triple Combination Index — topic name ↔ verse text (broader concept coverage)
  *   4. Cross-references     — theologically linked verses
@@ -30,6 +30,7 @@ const OUT     = path.join(ROOT, 'resources/training-pairs.json');
 // ── Load all language DBs ────────────────────────────────────────────────────
 const LANG_DBS = {
   lds:     'lds-scriptures-sqlite.db',
+  ylt:     'ylt-scriptures-sqlite.db',
   nrsvue:  'nrsvue-scriptures-sqlite.db',
   // Only English sources — non-English translations risk contaminating
   // the embedding space with bad translations and split capacity across
@@ -69,7 +70,7 @@ for (const [lang, map] of versesByLang) {
     
   }
 }
-console.log(`\n1. Translation pairs (LDS↔NRSVUE): ${translationCount.toLocaleString()}`);
+console.log(`\n1. Translation pairs (LDS↔modern English): ${translationCount.toLocaleString()}`);
 
 // (Cross-translation pairs removed — English-only training)
 
@@ -239,7 +240,7 @@ console.log(`Total pairs: ${pairs.length.toLocaleString()}`);
 console.log(`File: ${OUT} (${sizeMB} MB)`);
 console.log(`════════════════════════════════════════`);
 console.log(`\nBreakdown:`);
-console.log(`  Translation (LDS↔NRSVUE): ${translationCount.toLocaleString()}`);
+console.log(`  Translation (LDS↔modern English): ${translationCount.toLocaleString()}`);
 console.log(`  Topical guide:            ${topicCount.toLocaleString()}`);
 console.log(`  Triple Index:             ${tripleTopicCount.toLocaleString()}`);
 console.log(`  Cross-references:         ${crossRefCount.toLocaleString()}`);

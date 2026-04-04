@@ -2,7 +2,7 @@
 
 // ── Database Adapter ────────────────────────────────────────────────────────
 // Normalizes the API between better-sqlite3 (Node.js / Electron) and sql.js
-// (WASM / mobile).  Every query function in scripture-engine.js calls
+// (WASM/browser runtimes).  Every query function in scripture-engine.js calls
 //   adapter.prepare(sql).all(...params)
 //   adapter.prepare(sql).get(...params)
 //   adapter.prepare(sql).run(...params)

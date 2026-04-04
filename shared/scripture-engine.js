@@ -2,7 +2,7 @@
 
 // ── Scripture Engine ────────────────────────────────────────────────────────
 // Pure query logic shared between the Node.js backend (better-sqlite3) and
-// the mobile app (sql.js WASM).  Every function that touches the database
+// WASM/browser runtimes (sql.js). Every function that touches the database
 // takes a `db` parameter — a db-adapter instance (BetterSqliteAdapter or
 // SqlJsAdapter) so the same code runs on both platforms.
 //
@@ -96,6 +96,63 @@ const buildFTSTermQuery = (terms, mode = 'and') => {
   return mode === 'or'
     ? wildcarded.join(' OR ')
     : wildcarded.join(' AND ');
+};
+
+const buildFTSNearQuery = (input, windowSize = 15) => {
+  if (!input) return '';
+  const terms = input
+    .toLowerCase()
+    .split(/\s+/)
+    .map((t, idx) => ({
+      idx,
+      term: t.replace(/["']/g, '').replace(/[^a-z0-9\-]/g, ''),
+    }))
+    .filter(({ term }) => term.length > 1);
+
+  if (terms.length < 4) return '';
+
+  const chosen = [...terms]
+    .sort((a, b) => b.term.length - a.term.length || a.idx - b.idx)
+    .slice(0, 4)
+    .sort((a, b) => a.idx - b.idx)
+    .map(({ term }) => term);
+
+  if (chosen.length < 4) return '';
+  return `NEAR(${chosen.join(' ')}, ${windowSize})`;
+};
+
+const LOW_INFORMATION_TERMS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'before', 'but', 'by', 'for', 'from',
+  'he', 'her', 'him', 'his', 'i', 'in', 'into', 'is', 'it', 'its', 'me', 'my',
+  'of', 'on', 'or', 'our', 'said', 'she', 'that', 'the', 'their', 'them', 'there',
+  'these', 'they', 'this', 'those', 'to', 'unto', 'upon', 'us', 'was', 'we', 'were',
+  'with', 'would', 'ye', 'you', 'your',
+]);
+
+const buildContentTermQuery = (input, mode = 'and') => {
+  if (!input) return '';
+  const tokens = input
+    .toLowerCase()
+    .split(/\s+/)
+    .map(t => t.replace(/["']/g, '').replace(/[^a-z0-9\-]/g, ''))
+    .filter(Boolean);
+
+  if (tokens.length < 3) return '';
+
+  const seen = new Set();
+  const contentTerms = [];
+  for (const token of tokens) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+    if (token.length <= 1) continue;
+    if (LOW_INFORMATION_TERMS.has(token)) continue;
+    contentTerms.push(token);
+  }
+
+  if (contentTerms.length < 2) return '';
+
+  contentTerms.sort((a, b) => b.length - a.length || a.localeCompare(b));
+  return buildFTSTermQuery(contentTerms.slice(0, 4), mode);
 };
 
 // No stopword filtering — scripture phrases like "my jesus", "thou art my son",
@@ -199,12 +256,39 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
         if (results.length > 0 || total > 0) return { results, total, matchType: 'and' };
       }
 
+      // Ordered proximity fallback for longer narrative queries.
+      // This keeps the highest-information terms in original order and asks FTS5
+      // for a loose NEAR match before falling all the way down to raw OR.
+      // Example: "ten thousand fallen him in midst" -> NEAR(ten thousand fallen midst, 15)
+      // which correctly surfaces Mormon 6 instead of generic Genesis OR matches.
+      const nearQ = buildFTSNearQuery(raw);
+      if (nearQ) {
+        const total = runFTSCount(nearQ, db);
+        const results = runFTSQuery(nearQ, null, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'near' };
+      }
+
+      // High-information fallback for long scripture-style queries.
+      // This strips connective words and retries using the distinctive terms only,
+      // which prevents raw OR fallback from surfacing generic Genesis noise for
+      // phrases like "and moreover i would exhort you".
+      const contentQ = buildContentTermQuery(raw);
+      if (contentQ) {
+        const total = runFTSCount(contentQ, db);
+        const results = runFTSQuery(contentQ, raw, pageSize, offset, db);
+        if (results.length > 0 || total > 0) return { results, total, matchType: 'content-and' };
+      }
+
       // OR match (any term)
-      const orQ = buildFTSMatchQuery(raw, { orFallback: true });
-      if (orQ) {
-        const total   = runFTSCount(orQ, db);
-        const results = runFTSQuery(orQ, raw, pageSize, offset, db);
-        if (results.length > 0 || total > 0) return { results, total, matchType: 'or' };
+      // Skip raw OR fallback for long sentence-like queries because it mostly
+      // returns generic connective-language noise instead of the intended verse.
+      if (raw.split(/\s+/).length < 5) {
+        const orQ = buildFTSMatchQuery(raw, { orFallback: true });
+        if (orQ) {
+          const total   = runFTSCount(orQ, db);
+          const results = runFTSQuery(orQ, raw, pageSize, offset, db);
+          if (results.length > 0 || total > 0) return { results, total, matchType: 'or' };
+        }
       }
 
       // Prefix wildcard (single word)

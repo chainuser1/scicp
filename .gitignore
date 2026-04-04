@@ -25,11 +25,6 @@ backend/logs/
 dist-electron/
 build-resources/
 
-# Mobile — generated/copied assets (not tracked in git)
-mobile/android/
-mobile/ios/
-mobile/dist/
-
 # Symlinks / npm workspace artifacts
 frontend@*
 scicp@*
@@ -53,7 +48,7 @@ resources/db/rotherham-raw.csv
 # Runtime user data (created by backend at startup)
 resources/db/user-data.db
 
-# Mobile prebake artifact (regenerate with: node scripts/prebake-search-graph.js)
+# Runtime prebake artifact (regenerate with: node scripts/prebake-search-graph.js)
 resources/db/search-graph.db
 
 # Electron pre-build dep staging

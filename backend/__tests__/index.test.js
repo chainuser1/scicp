@@ -1,6 +1,17 @@
-const { parseScriptureReference, searchScripture, segmentVerseText, segmentVerseTextDual, expandWithSynonyms, fastify, registerSocketHandlers } = require('../index');
+const {
+  parseScriptureReference,
+  searchScripture,
+  segmentVerseText,
+  segmentVerseTextDual,
+  computeAdaptiveResultCutoff,
+  normalizeKJVSpellings,
+  expandWithSynonyms,
+  fastify,
+  registerSocketHandlers,
+} = require('../index');
 const { getVerseOfTheDay } = require('../../shared/scripture-engine');
 const Database = require('better-sqlite3');
+const { replacements: kjvSpellingReplacements } = require('../../shared/data/kjv-spellings.json');
 
 describe('Backend API Tests', () => {
   describe('parseScriptureReference function', () => {
@@ -59,6 +70,60 @@ describe('Backend API Tests', () => {
     });
   });
 
+  describe('computeAdaptiveResultCutoff function', () => {
+    test('cuts weak tail when a strong semantic elbow appears', () => {
+      const results = [
+        { _specificity_score: 4.92, _tier: 2, similarity_score: 0.66 },
+        { _specificity_score: 4.81, _tier: 2, similarity_score: 0.63 },
+        { _specificity_score: 3.74, _tier: 3, similarity_score: 0.54 },
+        { _specificity_score: 1.82, _tier: 5, similarity_score: 0.14 },
+        { _specificity_score: 1.77, _tier: 5, similarity_score: 0.11 },
+        { _specificity_score: 1.71, _tier: 5, similarity_score: 0.10 },
+      ];
+
+      const cutoff = computeAdaptiveResultCutoff(results, 'situational', 0.72);
+      expect(cutoff).toBeTruthy();
+      expect(cutoff.keepCount).toBe(3);
+      expect(cutoff.gapZ).toBeGreaterThan(2);
+    });
+
+    test('keeps all results when the score curve is smooth', () => {
+      const results = [
+        { _specificity_score: 3.42, _tier: 3, similarity_score: 0.41 },
+        { _specificity_score: 3.31, _tier: 3, similarity_score: 0.39 },
+        { _specificity_score: 3.24, _tier: 3, similarity_score: 0.37 },
+        { _specificity_score: 3.17, _tier: 3, similarity_score: 0.36 },
+        { _specificity_score: 3.09, _tier: 3, similarity_score: 0.34 },
+        { _specificity_score: 3.01, _tier: 3, similarity_score: 0.33 },
+      ];
+
+      expect(computeAdaptiveResultCutoff(results, 'conceptual', 0.58)).toBeNull();
+    });
+  });
+
+  describe('normalizeKJVSpellings function', () => {
+    test.each(kjvSpellingReplacements.map(({ from, to }) => [from, to]))(
+      'normalizes %s -> %s as a whole word',
+      (from, to) => {
+        expect(normalizeKJVSpellings(`find ${from} here`)).toBe(`find ${to} here`);
+      }
+    );
+
+    test('normalizes case-insensitively', () => {
+      expect(normalizeKJVSpellings('Love Thy Neighbor')).toBe('Love Thy neighbour');
+      expect(normalizeKJVSpellings('THE SAVIOR HONORS LABOR')).toBe('THE saviour honours labour');
+    });
+
+    test('does not rewrite partial-word matches', () => {
+      expect(normalizeKJVSpellings('neighborly colorshift armoredcar')).toBe('neighborly colorshift armoredcar');
+    });
+
+    test('preserves explicit semantic and phrase prefixes while normalizing content', () => {
+      expect(normalizeKJVSpellings('~love thy neighbor')).toBe('~love thy neighbour');
+      expect(normalizeKJVSpellings('"love thy neighbor"')).toBe('"love thy neighbour"');
+    });
+  });
+
   describe('searchScripture function', () => {
     test('should return results for valid scripture reference', () => {
       // searchScripture returns { results, total } for paginated queries
@@ -90,6 +155,27 @@ describe('Backend API Tests', () => {
       expect(Array.isArray(results)).toBe(true);
       expect(results).toHaveLength(0);
       expect(total).toBe(0);
+    });
+
+    test('should recover Mormon battle verses for loose narrative wording', () => {
+      const { results, total } = searchScripture('ten thousand fallen him in midst');
+      expect(total).toBeGreaterThan(0);
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].verse_title).toMatch(/^Mormon 6:(10|13|14|15)$/);
+    });
+
+    test('should surface Revelation for lamb slain before foundation wording', () => {
+      const { results, total } = searchScripture('lamb slain before the foundation foundation');
+      expect(total).toBeGreaterThan(0);
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].verse_title).toBe('Revelation 13:8');
+    });
+
+    test('should recover Nephi father wording without generic said unto matches', () => {
+      const { results, total } = searchScripture('nephi said unto my father');
+      expect(total).toBeGreaterThan(0);
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].verse_title).toBe('1 Nephi 3:7');
     });
   });
 
@@ -522,6 +608,54 @@ describe('Backend API Tests', () => {
       const body = JSON.parse(res.payload);
       expect(Array.isArray(body.results)).toBe(true);
       expect(body.total).toBeGreaterThanOrEqual(0);
+    });
+
+    test('GET /search long narrative query avoids Genesis lexical noise', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=ten+thousand+fallen+him+in+midst' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).not.toMatch(/^Genesis 1:/);
+    });
+
+    test('GET /search paraphrased battle narrative leans semantic-first', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=their+generals+died+with+ten+thousand+each' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).toMatch(/^Mormon 6:(13|14|15)$/);
+    });
+
+    test('GET /search keeps Revelation phrase ahead of generic creation verses', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=lamb+slain+before+the+foundation+foundation' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).toBe('Revelation 13:8');
+    });
+
+    test('GET /search keeps Nephi family wording ahead of generic said unto verses', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=nephi+said+unto+my+father' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).toBe('1 Nephi 3:7');
+    });
+
+    test('GET /search avoids generic scaffolding dominance for exhort wording', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=and+moreover+i+would+exhort+you' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).not.toMatch(/^Genesis 1:/);
+    });
+
+    test('GET /search preserves Moses 1:39 for work and glory wording', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=for+behold+my+work+and+glory' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).toBe('Moses 1:39');
     });
 
     test('GET /search?q=love&language=en&page=0&pageSize=5 respects pagination', async () => {
@@ -975,11 +1109,11 @@ describe('Backend API Tests', () => {
         expect(Array.isArray(results)).toBe(true);
       });
 
-      test('NRSVUE search uses full pipeline', async () => {
-        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=nrsvue&pageSize=5' });
+      test('YLT search uses full pipeline', async () => {
+        const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&language=ylt&pageSize=5' });
         const { results } = JSON.parse(res.payload);
         expect(results.length).toBeGreaterThan(0);
-        // NRSVUE results should have tier metadata (full pipeline)
+        // YLT results should have tier metadata (full pipeline)
         expect(results[0]).toHaveProperty('_tier');
       });
     });

@@ -1,8 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
-const isElectronApp  = !!window.electronAPI?.isElectron;
-const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
+const isElectronApp = !!window.electronAPI?.isElectron;
 
 export default function Footer() {
   return (
@@ -23,7 +22,7 @@ export default function Footer() {
           <li><Link to="/client">Display</Link></li>
           <li><Link to="/reader">Reader</Link></li>
           <li><Link to="/about">About</Link></li>
-          {!isElectronApp && !isCapacitorApp && <li><Link to="/download">Downloads</Link></li>}
+          {!isElectronApp && <li><Link to="/download">Downloads</Link></li>}
           <li><Link to="/contact">Contact</Link></li>
           <li><Link to="/privacy">Privacy Policy</Link></li>
           <li><Link to="/terms">Terms of Service</Link></li>

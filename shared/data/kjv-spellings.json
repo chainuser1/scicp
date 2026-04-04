@@ -1,0 +1,27 @@
+{
+  "seedSource": {
+    "package": "american-british-english-translator",
+    "license": "MIT",
+    "notes": "Curated KJV-safe subset of American-to-British spelling differences for scripture search. Trimmed to low-risk replacements that improve KJV matching."
+  },
+  "replacements": [
+    { "from": "neighbors", "to": "neighbours" },
+    { "from": "neighbor", "to": "neighbour" },
+    { "from": "saviors", "to": "saviours" },
+    { "from": "savior", "to": "saviour" },
+    { "from": "honored", "to": "honoured" },
+    { "from": "honoring", "to": "honouring" },
+    { "from": "honors", "to": "honours" },
+    { "from": "honor", "to": "honour" },
+    { "from": "favored", "to": "favoured" },
+    { "from": "favors", "to": "favours" },
+    { "from": "favor", "to": "favour" },
+    { "from": "labored", "to": "laboured" },
+    { "from": "labors", "to": "labours" },
+    { "from": "labor", "to": "labour" },
+    { "from": "armors", "to": "armours" },
+    { "from": "armor", "to": "armour" },
+    { "from": "colors", "to": "colours" },
+    { "from": "color", "to": "colour" }
+  ]
+}
