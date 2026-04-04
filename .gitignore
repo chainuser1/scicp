@@ -53,3 +53,7 @@ resources/db/search-graph.db
 
 # Electron pre-build dep staging
 electron/backend-deps/
+
+# Generated analysis outputs
+artifacts/
+frontend/bundle-stats.html
