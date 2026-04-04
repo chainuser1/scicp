@@ -6,7 +6,7 @@ const {
   computeAdaptiveResultCutoff,
   computeRelevanceProbability,
   normalizeKJVSpellings,
-  expandWithSynonyms,
+  normalizeQueryTokens,
   fastify,
   registerSocketHandlers,
 } = require('../index');
@@ -721,6 +721,30 @@ describe('Backend API Tests', () => {
       expect(body.results[0].verse_title).toBe('Moses 1:39');
     });
 
+    test('GET /search dealing with grief does not collapse to Abigail speech lexical noise', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=dealing+with+grief' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.length).toBeGreaterThan(0);
+      expect(body.results[0].verse_title).not.toBe('1 Samuel 25:31');
+    });
+
+    test('GET /search faith top results avoid generic faithfulness lexical dominance', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=faith&pageSize=5' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      const topTitles = body.results.slice(0, 5).map(r => r.verse_title);
+      expect(topTitles).not.toContain('Psalms 36:5');
+    });
+
+    test('GET /search mercy top results avoid mercy-seat construction artifacts', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=mercy&pageSize=5' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      const topTitles = body.results.slice(0, 5).map(r => r.verse_title);
+      expect(topTitles).not.toContain('Exodus 37:9');
+    });
+
     test('GET /search?q=love&language=en&page=0&pageSize=5 respects pagination', async () => {
       const res = await fastify.inject({ method: 'GET', url: '/search?q=love&language=en&page=0&pageSize=5' });
       expect(res.statusCode).toBe(200);
@@ -850,20 +874,20 @@ describe('Backend API Tests', () => {
     });
   });
 
-  describe('expandWithSynonyms function', () => {
+  describe('normalizeQueryTokens function (no-synonym identity pass-through)', () => {
     test("'love' preserves the original query without handwritten expansion", () => {
-      const expanded = expandWithSynonyms('love');
+      const expanded = normalizeQueryTokens('love');
       expect(expanded).toEqual(['love']);
     });
 
     test('empty string returns array with empty string', () => {
-      const expanded = expandWithSynonyms('');
+      const expanded = normalizeQueryTokens('');
       expect(Array.isArray(expanded)).toBe(true);
       expect(expanded).toEqual(['']);
     });
 
     test('unknown word returns just the word itself', () => {
-      const expanded = expandWithSynonyms('xyzzyplugh');
+      const expanded = normalizeQueryTokens('xyzzyplugh');
       expect(expanded).toEqual(['xyzzyplugh']);
     });
   });
@@ -1445,36 +1469,36 @@ function makeMockSocket(querySession = '') {
   return socket;
 }
 
-describe('expandWithSynonyms', () => {
+describe('normalizeQueryTokens', () => {
   test('returns at least the original word', () => {
-    const result = expandWithSynonyms('grace');
+    const result = normalizeQueryTokens('grace');
     expect(Array.isArray(result)).toBe(true);
     expect(result).toEqual(['grace']);
   });
 
   test('does not inject handwritten synonyms for "god"', () => {
-    const result = expandWithSynonyms('god');
+    const result = normalizeQueryTokens('god');
     expect(result).toEqual(['god']);
   });
 
   test('does not inject handwritten synonyms for "faith"', () => {
-    const result = expandWithSynonyms('faith');
+    const result = normalizeQueryTokens('faith');
     expect(result).toEqual(['faith']);
   });
 
   test('preserves multi-word phrases verbatim', () => {
-    const result = expandWithSynonyms('holy ghost');
+    const result = normalizeQueryTokens('holy ghost');
     expect(result).toEqual(['holy ghost']);
   });
 
   test('handles unknown word gracefully', () => {
-    const result = expandWithSynonyms('xyzzy');
+    const result = normalizeQueryTokens('xyzzy');
     expect(Array.isArray(result)).toBe(true);
     expect(result).toContain('xyzzy');
   });
 
   test('returns a single normalized entry', () => {
-    const result = expandWithSynonyms('god');
+    const result = normalizeQueryTokens('god');
     expect(result).toHaveLength(1);
   });
 });
