@@ -1658,7 +1658,7 @@ function initIdfLookup() {
     pmiStmt = rawDb.prepare('SELECT assoc, pmi, cooccur FROM term_pmi WHERE term = ? ORDER BY pmi DESC LIMIT 5');
     fastify.log.info(`[PMI] Pre-baked table ready: ${pmiCount} associations`);
   } catch {
-    fastify.log.info('[PMI] Table not found, using synonym-only expansion');
+    fastify.log.info('[PMI] Table not found, skipping PMI expansion');
   }
 }
 
@@ -1768,52 +1768,63 @@ function queryTermWeights(query) {
   return weights;
 }
 
-const NUMERIC_ANCHOR_TERMS = new Set([
-  'a', 'an', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
-  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen',
-  'nineteen', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
-  'hundred', 'hundreds', 'thousand', 'thousands', 'million', 'millions', 'each', 'every',
-]);
-
-function isNumericAnchorTerm(term) {
-  return /^\d+$/.test(term) || NUMERIC_ANCHOR_TERMS.has(term);
-}
-
-function buildNumericAnchorPhrases(words, termWeights) {
+function buildSalientAnchorPhrases(words, termWeights) {
   const phrases = [];
   const seen = new Set();
+  const meanWeight = termWeights.size > 0 ? 1 / termWeights.size : 0;
+  const salientThreshold = Math.max(0.11, meanWeight * 1.15);
 
-  for (let i = 0; i < words.length; i++) {
-    if (!isNumericAnchorTerm(words[i])) continue;
-
-    let start = i;
-    let end = i;
-    while (start > 0 && isNumericAnchorTerm(words[start - 1])) start--;
-    while (end + 1 < words.length && isNumericAnchorTerm(words[end + 1])) end++;
-
-    const candidates = [];
-    if (end - start + 1 >= 2) candidates.push({ start, end });
-    if (end - start + 1 >= 2 && start > 0) candidates.push({ start: start - 1, end });
-    if (end - start + 1 >= 2 && end + 1 < words.length) candidates.push({ start, end: end + 1 });
-
-    for (const candidate of candidates) {
-      const slice = words.slice(candidate.start, candidate.end + 1);
+  for (let start = 0; start < words.length; start++) {
+    for (let len = 2; len <= 4 && start + len <= words.length; len++) {
+      const slice = words.slice(start, start + len);
       const phrase = slice.join(' ');
       if (seen.has(phrase)) continue;
       seen.add(phrase);
-      let score = 0.35;
-      for (const term of slice) score += termWeights.get(term) || 0;
-      score += Math.max(0, slice.length - 2) * 0.08;
-      phrases.push({ phrase, score, len: slice.length, start: candidate.start, numeric: true });
-    }
 
-    i = end;
+      let weightSum = 0;
+      let maxWeight = 0;
+      let hasDigits = false;
+      let salientTermCount = 0;
+      const salientWeights = [];
+      for (const term of slice) {
+        const weight = termWeights.get(term) || 0;
+        weightSum += weight;
+        if (weight > maxWeight) maxWeight = weight;
+        if (/\d/.test(term)) hasDigits = true;
+        if (weight >= salientThreshold) {
+          salientTermCount += 1;
+          salientWeights.push(weight);
+        }
+      }
+
+      const avgWeight = weightSum / Math.max(1, slice.length);
+      salientWeights.sort((a, b) => b - a);
+      const coreWeight = salientWeights.slice(0, 2).reduce((sum, weight) => sum + weight, 0);
+      const phraseScore = coreWeight + avgWeight * 0.35 + maxWeight * 0.25 + Math.max(0, len - 2) * 0.04;
+      // Keep only windows with concentrated query evidence; connective scaffolding
+      // rarely contains 2+ salient terms, while "ten thousand each" and
+      // "work and glory" do.
+      if (!hasDigits && salientTermCount < 2) continue;
+      if (weightSum < 0.22 && avgWeight < 0.12 && !hasDigits) continue;
+
+      phrases.push({
+        phrase,
+        score: phraseScore,
+        len,
+        start,
+        anchor: true,
+        structural: hasDigits,
+        salientTermCount,
+        avgWeight,
+        maxWeight,
+      });
+    }
   }
 
   return phrases;
 }
 
-function extractAnchorPhrases(query, termWeights, maxPhrases = 2) {
+function extractAnchorPhrases(query, termWeights, maxPhrases = 8) {
   const words = query
     .toLowerCase()
     .replace(/[^a-z0-9\-\s]/g, ' ')
@@ -1822,25 +1833,74 @@ function extractAnchorPhrases(query, termWeights, maxPhrases = 2) {
 
   if (words.length < 3) return [];
 
-  const scored = buildNumericAnchorPhrases(words, termWeights);
+  const scored = buildSalientAnchorPhrases(words, termWeights);
   if (scored.length === 0) return [];
 
   const chosen = [];
   const seen = new Set();
   scored.sort((a, b) => b.score - a.score || b.len - a.len || a.start - b.start);
+
+  const overlapRatio = (left, right) => {
+    const leftEnd = left.start + left.len - 1;
+    const rightEnd = right.start + right.len - 1;
+    const overlap = Math.max(0, Math.min(leftEnd, rightEnd) - Math.max(left.start, right.start) + 1);
+    if (overlap <= 0) return 0;
+    return overlap / Math.min(left.len, right.len);
+  };
+
   for (const item of scored) {
     if (seen.has(item.phrase)) continue;
+    const overlapsStrongly = chosen.some(existing => overlapRatio(existing, item) > 0.55);
+    if (overlapsStrongly && !item.structural) continue;
     seen.add(item.phrase);
     chosen.push(item);
     if (chosen.length >= maxPhrases) break;
   }
+
+  if (chosen.length < maxPhrases) {
+    for (const item of scored) {
+      if (seen.has(item.phrase)) continue;
+      seen.add(item.phrase);
+      chosen.push(item);
+      if (chosen.length >= maxPhrases) break;
+    }
+  }
   return chosen;
 }
 
-const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'prefix']);
+function buildFocusedAnchorQuery(candidate, termWeights) {
+  if (!candidate || !candidate.phrase) return '';
+  const tokens = String(candidate.phrase)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(t => t.length > 1)
+    .map((term, index) => ({ term, index, weight: termWeights.get(term) || 0 }))
+    .filter(({ term }, idx, arr) => arr.findIndex(item => item.term === term) === idx);
+  if (tokens.length < 2) return '';
+
+  const maxWeight = tokens.reduce((best, item) => Math.max(best, item.weight), 0);
+  const selected = tokens
+    .filter(item => item.weight >= maxWeight * 0.55)
+    .sort((a, b) => a.index - b.index)
+    .slice(0, 3);
+
+  if (selected.length < 2) {
+    return tokens
+      .sort((a, b) => b.weight - a.weight || a.index - b.index)
+      .slice(0, 2)
+      .sort((a, b) => a.index - b.index)
+      .map(item => item.term)
+      .join(' ');
+  }
+
+  return selected.map(item => item.term).join(' ');
+}
+
+const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and', 'prefix']);
 const PHRASE_MATCH_STRENGTH = {
   phrase: 1.0,
   near: 0.92,
+  and: 0.84,
   prefix: 0.6,
 };
 
@@ -1861,6 +1921,87 @@ function weightedLexicalCoverage(query, row, termWeights) {
     if (verseTerms.has(term)) matched += weight;
   }
   return total > 0 ? matched / total : 0;
+}
+
+function anchorWindowScore(text, anchorPhrases, termWeights) {
+  if (!text || !anchorPhrases || anchorPhrases.length === 0) return 0;
+  const textTerms = String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9\-\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 1);
+  if (textTerms.length === 0) return 0;
+
+  let best = 0;
+  for (const candidate of anchorPhrases) {
+    const phraseTerms = String(candidate.phrase || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(t => t.length > 1);
+    if (phraseTerms.length < 2) continue;
+
+    let first = -1;
+    let prev = -1;
+    let matched = 0;
+    for (const term of phraseTerms) {
+      const next = textTerms.indexOf(term, prev + 1);
+      if (next === -1) {
+        matched = 0;
+        break;
+      }
+      if (first === -1) first = next;
+      prev = next;
+      matched += 1;
+    }
+    if (matched !== phraseTerms.length || first === -1 || prev === -1) continue;
+
+    const span = Math.max(1, prev - first + 1);
+    const compactness = matched / span;
+    const weightSum = phraseTerms.reduce((sum, term) => sum + (termWeights.get(term) || 0), 0);
+    const salience = Math.min(1, (candidate.score || 0) + weightSum * 0.5);
+    const score = compactness * (0.55 + salience * 0.45);
+    if (score > best) best = score;
+  }
+
+  return best;
+}
+
+function querySequenceScore(query, text, termWeights) {
+  if (!query || !text) return 0;
+  const queryTerms = String(query)
+    .toLowerCase()
+    .replace(/[^a-z0-9\-\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 1);
+  const textTerms = String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9\-\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 1);
+  if (queryTerms.length < 3 || textTerms.length === 0) return 0;
+
+  let first = -1;
+  let prev = -1;
+  let matchedTerms = 0;
+  let matchedWeight = 0;
+  let totalWeight = 0;
+
+  for (const term of queryTerms) {
+    const weight = termWeights.get(term) || 0;
+    totalWeight += weight;
+    const next = textTerms.indexOf(term, prev + 1);
+    if (next === -1) continue;
+    if (first === -1) first = next;
+    prev = next;
+    matchedTerms += 1;
+    matchedWeight += weight;
+  }
+
+  if (matchedTerms < 2 || matchedWeight <= 0 || first === -1 || prev === -1) return 0;
+  const span = Math.max(1, prev - first + 1);
+  const compactness = matchedTerms / span;
+  const weightedCoverage = totalWeight > 0 ? matchedWeight / totalWeight : 0;
+  return compactness * weightedCoverage;
 }
 
 function lexicalSignalQuality(query, ftsRows, termWeights) {
@@ -2020,32 +2161,15 @@ function detectSignificantPhrases(query) {
   }).sort((a, b) => b.len - a.len);
 }
 
-const SCRIPTURE_SYNONYM_MAP = new Map([
-  ['love', ['charity', 'affection']],
-  ['god', ['lord', 'jehovah', 'deity']],
-  ['faith', ['believe', 'belief', 'trust']],
-  ['holy ghost', ['holy spirit', 'comforter']],
-]);
-
 function expandWithSynonyms(query) {
   if (query == null) return [''];
 
   const normalized = String(query).trim().toLowerCase();
   if (!normalized) return [''];
 
-  const expanded = new Set([normalized]);
-
-  if (SCRIPTURE_SYNONYM_MAP.has(normalized)) {
-    for (const synonym of SCRIPTURE_SYNONYM_MAP.get(normalized)) expanded.add(synonym);
-  }
-
-  for (const word of normalized.split(/\s+/)) {
-    const synonyms = SCRIPTURE_SYNONYM_MAP.get(word);
-    if (!synonyms) continue;
-    for (const synonym of synonyms) expanded.add(synonym);
-  }
-
-  return [...expanded];
+  // Bias-free compatibility helper: preserve API shape without injecting
+  // handwritten theological vocabulary into retrieval.
+  return [normalized];
 }
 
 // PMI-based query expansion: find statistically associated terms
@@ -2131,7 +2255,7 @@ function sigmoidConfidence(topBm25Score, resultCount) {
 //   (d) wordCount       — query length (structural, not vocabulary-dependent)
 //   (e) entity indexes  — pre-built geometric nearest-neighbour structures
 //
-// No word lists. No topic keywords. No hardcoded theological terms.
+// No topic keywords. No handwritten theological synonym steering.
 // ─────────────────────────────────────────────────────────────────────────────
 function classifyQueryIntent(query, confidence, qvec) {
   // ── Step 1: Entity detection (embedding-space nearest-neighbour lookup) ──
@@ -2788,7 +2912,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const anchorPhrases = queryWordCount >= 5
     ? extractAnchorPhrases(query, termWeights, 4)
     : [];
-  const numericAnchorTexts = anchorPhrases.filter(p => p.numeric).map(p => p.phrase.toLowerCase());
+  const anchorTexts = anchorPhrases.map(p => p.phrase.toLowerCase());
 
   // ── Detect significant phrases in query ──
   // For long queries (5+ words), skip sub-phrase decomposition — sub-bigrams create
@@ -2823,7 +2947,9 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     _source: 'fts',
     _bm25: r._bm25_rank || 0,
     _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights),
-    _numericAnchorMatch: numericAnchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
+    _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
+    _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights),
+    _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights),
   }));
 
   // BM25F: boost verses whose doctrine tags or speaker match the query
@@ -2852,6 +2978,18 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     }
   }
 
+  if (queryWordCount >= 5 && ftsRanked.length > 1) {
+    ftsRanked.sort((a, b) =>
+      (b._sequenceScore || 0) - (a._sequenceScore || 0)
+      ||
+      (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0)
+      ||
+      Number(Boolean(b._anchorPhraseMatch)) - Number(Boolean(a._anchorPhraseMatch))
+      || (b._lexicalCoverage || 0) - (a._lexicalCoverage || 0)
+      || (a._bm25 || 0) - (b._bm25 || 0)
+    );
+  }
+
   // ── Source A2: Exact phrase FTS — separate RRF lane for phrase matches ──
   const phraseCandidates = [...detectedPhrases, ...anchorPhrases]
     .filter(Boolean)
@@ -2863,27 +3001,38 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     for (const candidate of phraseCandidates) {
       const { phrase } = candidate;
       try {
-        const phraseQuery = '"' + phrase + '"';
-        const phraseResult = searchScripture(phraseQuery, 0, 30, dba, fastify.log);
-        if (!STRONG_PHRASE_MATCH_TYPES.has(phraseResult.matchType)) continue;
-        if (queryWordCount >= 5 && phraseResult.matchType !== 'phrase') {
-          if (!(candidate.numeric && (phraseResult.matchType === 'near' || phraseResult.matchType === 'and'))) continue;
-        }
-        for (const r of phraseResult.results) {
-          const coverage = weightedLexicalCoverage(query, r, termWeights);
-          if (queryWordCount >= 5 && coverage < 0.3) continue;
-          const matchStrength = PHRASE_MATCH_STRENGTH[phraseResult.matchType] || 0.5;
-          const phraseSignal = matchStrength + coverage * 0.6;
-          const existing = bestByVerse.get(r.verse_id);
-          if (!existing || phraseSignal > existing._phraseSignal) {
-            bestByVerse.set(r.verse_id, {
-              ...r,
-              _source: 'fts-phrase',
-              _bm25: r._bm25_rank || 0,
-              _anchorPhraseMatch: phraseResult.matchType === 'phrase' || phraseResult.matchType === 'near',
-              _phraseSignal: phraseSignal,
-              _phraseCoverage: coverage,
-            });
+        const phraseQueries = candidate.anchor
+          ? [...new Set(['"' + phrase + '"', phrase, buildFocusedAnchorQuery(candidate, termWeights)].filter(Boolean))]
+          : ['"' + phrase + '"'];
+        const phraseLimit = candidate.anchor ? 100 : 30;
+
+        for (const phraseQuery of phraseQueries) {
+          const phraseResult = searchScripture(phraseQuery, 0, phraseLimit, dba, fastify.log);
+          if (!STRONG_PHRASE_MATCH_TYPES.has(phraseResult.matchType)) continue;
+          if (queryWordCount >= 5 && phraseResult.matchType !== 'phrase') {
+            if (!(candidate.anchor && (phraseResult.matchType === 'near' || phraseResult.matchType === 'and'))) continue;
+          }
+          for (const r of phraseResult.results) {
+            const coverage = weightedLexicalCoverage(query, r, termWeights);
+            const minCoverage = phraseResult.matchType === 'and' ? 0.34 : 0.24;
+            if (queryWordCount >= 5 && coverage < minCoverage) continue;
+            const matchStrength = PHRASE_MATCH_STRENGTH[phraseResult.matchType] || 0.5;
+            const anchorStrength = candidate.anchor
+              ? Math.min(1, (candidate.score || 0) + (candidate.salientTermCount || 0) * 0.08)
+              : 0;
+            const phraseSignal = matchStrength + coverage * 0.45 + anchorStrength * 0.35;
+            const existing = bestByVerse.get(r.verse_id);
+            if (!existing || phraseSignal > existing._phraseSignal) {
+              bestByVerse.set(r.verse_id, {
+                ...r,
+                _source: 'fts-phrase',
+                _bm25: r._bm25_rank || 0,
+                _anchorPhraseMatch: phraseResult.matchType === 'phrase' || phraseResult.matchType === 'near',
+                _phraseSignal: phraseSignal,
+                _phraseCoverage: coverage,
+                _anchorStrength: anchorStrength,
+              });
+            }
           }
         }
       } catch {}
@@ -2896,7 +3045,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     );
   }
 
-  // Also search with expanded synonyms + PMI terms
+  // Also search with corpus-derived PMI expansions when available
   if (pmiExpandedQuery && pmiExpandedQuery !== query.toLowerCase()) {
     const expResult = searchScripture(pmiExpandedQuery, 0, 30, dba, fastify.log);
     const seen = new Set(ftsRanked.map(r => r.verse_id));
@@ -3069,7 +3218,9 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
 
   const ftsMetaByVerse = new Map(ftsRanked.map(row => [row.verse_id, {
     _lexicalCoverage: row._lexicalCoverage,
-    _numericAnchorMatch: row._numericAnchorMatch,
+    _anchorPhraseMatch: row._anchorPhraseMatch,
+    _anchorWindowScore: row._anchorWindowScore,
+    _sequenceScore: row._sequenceScore,
   }]));
 
   // Build final sorted list
@@ -3362,7 +3513,6 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Steps 5-6: Multi-source RRF fusion
     // Pass 1: run with global weights to get confidence + preliminary intent
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
-    const synonymTermsAdded = [];
     let fusionResult = multiSourceFusion(query.trim(), query.trim(), 200);
 
     // Step 7: Sigmoid confidence gate → concept expansion
@@ -3731,19 +3881,18 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         const specSim = r._spectralSim || 0;
         let tier, tierScore;
 
-        if (phraseIdsSet.has(r.verse_id) || r._anchorPhraseMatch) {
+        if (phraseIdsSet.has(r.verse_id) || r._anchorPhraseMatch || (queryWordCount >= 5 && (r._anchorWindowScore || 0) >= 0.72)) {
           // Tier 2: exact/AND phrase match — cosine tiebreaker
           tier = 2;
           tierScore = Math.min(
-            Math.max(simScore > 0 ? simScore : 0, r._phraseCoverage || 0, rrfNorm),
-            0.99
-          );
-        } else if (queryWordCount >= 5 && r._numericAnchorMatch && (r._lexicalCoverage || 0) >= 0.32) {
-          // Strong numeric anchors such as "ten thousand" should survive fusion;
-          // otherwise semantically broad war verses can overtake the intended hit.
-          tier = 2;
-          tierScore = Math.min(
-            Math.max(simScore > 0 ? simScore : 0, r._lexicalCoverage || 0, rrfNorm),
+            Math.max(
+              simScore > 0 ? simScore : 0,
+              (r._phraseCoverage || r._lexicalCoverage || 0) * 0.6
+                + (r._anchorStrength || 0) * 0.2
+                + (r._phraseSignal || 0) * 0.1
+                + (r._anchorWindowScore || 0) * 0.1,
+              rrfNorm
+            ),
             0.99
           );
         } else if (qvec && simScore > 0) {
@@ -3774,7 +3923,14 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         } else {
           // Tier 5: keyword/mixed coverage
           tier = 5;
-          tierScore = rrfNorm;
+          if (queryWordCount >= 5) {
+            const lexicalNudge = Math.max(0, (r._lexicalCoverage || 0) - 0.28) * 0.08;
+            const anchorNudge = (r._anchorWindowScore || 0) * 0.07;
+            const sequenceNudge = (r._sequenceScore || 0) * 0.12;
+            tierScore = Math.min(rrfNorm + lexicalNudge + anchorNudge + sequenceNudge, 0.99);
+          } else {
+            tierScore = rrfNorm;
+          }
         }
 
         // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
@@ -3794,7 +3950,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Clean internal fields before caching — keep _source and _tier for display
-    const allExpansions = [...new Set([...synonymTermsAdded, ...pmiTermsAdded, ...conceptTermsUsed])]
+    const allExpansions = [...new Set([...pmiTermsAdded, ...conceptTermsUsed])]
       .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
     const facets = qvec ? nearestClusters(qvec, 4) : [];
     pipelineMeta = {

@@ -788,11 +788,9 @@ describe('Backend API Tests', () => {
   });
 
   describe('expandWithSynonyms function', () => {
-    test("'love' expands to include charity/affection-related terms", () => {
+    test("'love' preserves the original query without handwritten expansion", () => {
       const expanded = expandWithSynonyms('love');
-      expect(expanded).toContain('love');
-      expect(expanded.length).toBeGreaterThan(1);
-      expect(expanded).toEqual(expect.arrayContaining(['charity']));
+      expect(expanded).toEqual(['love']);
     });
 
     test('empty string returns array with empty string', () => {
@@ -1388,28 +1386,22 @@ describe('expandWithSynonyms', () => {
   test('returns at least the original word', () => {
     const result = expandWithSynonyms('grace');
     expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
-    expect(result).toContain('grace');
+    expect(result).toEqual(['grace']);
   });
 
-  test('expands known synonym "god"', () => {
+  test('does not inject handwritten synonyms for "god"', () => {
     const result = expandWithSynonyms('god');
-    expect(result).toContain('god');
-    // 'god' maps to lord, jehovah, etc.
-    expect(result.length).toBeGreaterThan(1);
+    expect(result).toEqual(['god']);
   });
 
-  test('expands known synonym "faith"', () => {
+  test('does not inject handwritten synonyms for "faith"', () => {
     const result = expandWithSynonyms('faith');
-    expect(result).toContain('faith');
-    expect(result).toContain('believe');
+    expect(result).toEqual(['faith']);
   });
 
-  test('handles multi-word phrase "holy ghost" — expands its synonyms', () => {
+  test('preserves multi-word phrases verbatim', () => {
     const result = expandWithSynonyms('holy ghost');
-    // The phrase is split into individual words; synonyms for "holy ghost" are added
-    expect(result).toContain('holy spirit');
-    expect(result).toContain('comforter');
+    expect(result).toEqual(['holy ghost']);
   });
 
   test('handles unknown word gracefully', () => {
@@ -1418,10 +1410,9 @@ describe('expandWithSynonyms', () => {
     expect(result).toContain('xyzzy');
   });
 
-  test('de-duplicates synonyms', () => {
+  test('returns a single normalized entry', () => {
     const result = expandWithSynonyms('god');
-    const unique = new Set(result);
-    expect(unique.size).toBe(result.length);
+    expect(result).toHaveLength(1);
   });
 });
 

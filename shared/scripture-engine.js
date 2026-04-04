@@ -121,15 +121,54 @@ const buildFTSNearQuery = (input, windowSize = 15) => {
   return `NEAR(${chosen.join(' ')}, ${windowSize})`;
 };
 
-const LOW_INFORMATION_TERMS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'before', 'but', 'by', 'for', 'from',
-  'he', 'her', 'him', 'his', 'i', 'in', 'into', 'is', 'it', 'its', 'me', 'my',
-  'of', 'on', 'or', 'our', 'said', 'she', 'that', 'the', 'their', 'them', 'there',
-  'these', 'they', 'this', 'those', 'to', 'unto', 'upon', 'us', 'was', 'we', 'were',
-  'with', 'would', 'ye', 'you', 'your',
-]);
+const CORPUS_DOC_COUNT_CACHE = new WeakMap();
+const CORPUS_TERM_FREQ_CACHE = new WeakMap();
 
-const buildContentTermQuery = (input, mode = 'and') => {
+const getCorpusDocCount = (db) => {
+  if (!db || typeof db.prepare !== 'function') return 0;
+  if (CORPUS_DOC_COUNT_CACHE.has(db)) return CORPUS_DOC_COUNT_CACHE.get(db);
+  let total = 0;
+  try {
+    total = db.prepare('SELECT COUNT(*) AS total FROM scriptures').get()?.total ?? 0;
+  } catch (_err) {
+    total = 0;
+  }
+  CORPUS_DOC_COUNT_CACHE.set(db, total);
+  return total;
+};
+
+const getCorpusTermFrequency = (term, db) => {
+  if (!db || typeof db.prepare !== 'function' || !term) return null;
+  let cache = CORPUS_TERM_FREQ_CACHE.get(db);
+  if (!cache) {
+    cache = new Map();
+    CORPUS_TERM_FREQ_CACHE.set(db, cache);
+  }
+  if (cache.has(term)) return cache.get(term);
+
+  let frequency = null;
+  try {
+    frequency = db.prepare('SELECT doc FROM scriptures_fts_vocab WHERE term = ? LIMIT 1').get(term)?.doc ?? null;
+  } catch (_err) {
+    frequency = null;
+  }
+
+  cache.set(term, frequency);
+  return frequency;
+};
+
+const scoreCorpusTerm = (term, db) => {
+  const totalDocs = getCorpusDocCount(db);
+  const frequency = getCorpusTermFrequency(term, db);
+  const idf = frequency == null || totalDocs <= 0
+    ? 0
+    : Math.log((totalDocs + 1) / (frequency + 1));
+  const lengthBoost = Math.min(term.length, 12) * 0.035;
+  const digitBoost = /\d/.test(term) ? 0.25 : 0;
+  return idf + lengthBoost + digitBoost;
+};
+
+const buildContentTermQuery = (input, mode = 'and', db) => {
   if (!input) return '';
   const tokens = input
     .toLowerCase()
@@ -145,14 +184,18 @@ const buildContentTermQuery = (input, mode = 'and') => {
     if (seen.has(token)) continue;
     seen.add(token);
     if (token.length <= 1) continue;
-    if (LOW_INFORMATION_TERMS.has(token)) continue;
-    contentTerms.push(token);
+    contentTerms.push({ token, score: scoreCorpusTerm(token, db) });
   }
 
   if (contentTerms.length < 2) return '';
 
-  contentTerms.sort((a, b) => b.length - a.length || a.localeCompare(b));
-  return buildFTSTermQuery(contentTerms.slice(0, 4), mode);
+  contentTerms.sort((a, b) => b.score - a.score || b.token.length - a.token.length || a.token.localeCompare(b.token));
+  const selected = contentTerms
+    .slice(0, 4)
+    .map(({ token }) => token);
+
+  if (selected.length < 2) return '';
+  return buildFTSTermQuery(selected, mode);
 };
 
 // No stopword filtering — scripture phrases like "my jesus", "thou art my son",
@@ -272,7 +315,7 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
       // This strips connective words and retries using the distinctive terms only,
       // which prevents raw OR fallback from surfacing generic Genesis noise for
       // phrases like "and moreover i would exhort you".
-      const contentQ = buildContentTermQuery(raw);
+      const contentQ = buildContentTermQuery(raw, 'and', db);
       if (contentQ) {
         const total = runFTSCount(contentQ, db);
         const results = runFTSQuery(contentQ, raw, pageSize, offset, db);
