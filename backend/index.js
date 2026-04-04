@@ -2034,12 +2034,63 @@ function interquartileRange(values) {
   return q3 - q1;
 }
 
-function resultMeaningWeight(row) {
+function sigmoid(value) {
+  return 1 / (1 + Math.exp(-value));
+}
+
+function computeRelevanceProbability(row, intentType = null, confidence = 0) {
+  if (!row) return 0;
+
+  const specificityScore = row._specificity_score || 0;
+  const tier = row._tier ?? 5;
+  const semantic = Math.max(0, row.similarity_score || 0);
+  const lexical = Math.max(0, row._lexicalCoverage || 0);
+  const anchor = Math.max(0, row._anchorWindowScore || 0);
+  const sequence = Math.max(0, row._sequenceScore || 0);
+  const phraseCoverage = Math.max(0, row._phraseCoverage || 0);
+  const sourceCount = Math.max(0, row._sourceCount || 0);
+  const sourceBonus = Math.min(sourceCount, 4) * 0.12;
+  const tierSignal = Math.max(0, 5 - tier);
+  const phraseBoost = row._anchorPhraseMatch ? 0.28 : 0;
+  const topicalBoost = String(row._source || '').includes('topical') ? 0.08 : 0;
+  const confidenceBoost = Math.max(0, Math.min(1, confidence)) * 0.65;
+  const lexicalDominanceBoost = lexical >= 0.72 ? (lexical - 0.72) * 1.9 : 0;
+  const sequenceBoost = sequence >= 0.28 ? (sequence - 0.28) * 1.1 : 0;
+  const specificityFloorBoost = specificityScore >= 1.55 ? (specificityScore - 1.55) * 0.9 : 0;
+
+  let intentBias = 0;
+  if (intentType === 'reference' || intentType === 'phrase') intentBias += 0.18;
+  if (intentType === 'conceptual' || intentType === 'situational' || intentType === 'mixed') {
+    intentBias += 0.1;
+  }
+
+  const logit =
+    -4.7
+    + specificityScore * 1.18
+    + tierSignal * 0.38
+    + semantic * 2.05
+    + lexical * 2.0
+    + anchor * 1.0
+    + sequence * 1.15
+    + phraseCoverage * 0.55
+    + sourceBonus
+    + phraseBoost
+    + topicalBoost
+    + confidenceBoost
+    + lexicalDominanceBoost
+    + sequenceBoost
+    + specificityFloorBoost
+    + intentBias;
+
+  return +sigmoid(logit).toFixed(4);
+}
+
+function resultMeaningWeight(row, intentType = null, confidence = 0) {
+  if (row && typeof row._relevance_probability === 'number') return row._relevance_probability;
+  const relevanceProbability = computeRelevanceProbability(row, intentType, confidence);
   const score = row?._specificity_score || 0;
-  const sim = Math.max(0, row?.similarity_score || 0);
   const tierSignal = 1 / (1 + Math.exp(-3.2 * (score - 3.0)));
-  const semanticSignal = 1 / (1 + Math.exp(-12 * (sim - 0.28)));
-  return 0.7 * tierSignal + 0.3 * semanticSignal;
+  return 0.82 * relevanceProbability + 0.18 * tierSignal;
 }
 
 function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0) {
@@ -2075,8 +2126,8 @@ function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0)
     const gapZ = (gap - medianGap) / gapSigma;
     const head = capped.slice(0, keepCount);
     const tail = capped.slice(keepCount, Math.min(capped.length, keepCount + 5));
-    const headMeaning = head.reduce((sum, row) => sum + resultMeaningWeight(row), 0) / head.length;
-    const tailMeaning = tail.reduce((sum, row) => sum + resultMeaningWeight(row), 0) / tail.length;
+    const headMeaning = head.reduce((sum, row) => sum + resultMeaningWeight(row, intentType, confidence), 0) / head.length;
+    const tailMeaning = tail.reduce((sum, row) => sum + resultMeaningWeight(row, intentType, confidence), 0) / tail.length;
     const tailMass = Math.max(0, 1 - cumulativeMass);
     const semanticMargin = headMeaning - tailMeaning;
     const confidenceFactor = 0.8 + Math.min(0.2, Math.max(0, confidence) * 0.2);
@@ -3939,9 +3990,14 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         if (calibrationCurves.size > 0) {
           specificityScore = calibrateScore(tier, specificityScore);
         }
-        return { ...r, _specificity_score: specificityScore, _tier: tier };
+        const nextRow = { ...r, _specificity_score: specificityScore, _tier: tier };
+        nextRow._relevance_probability = computeRelevanceProbability(nextRow, intentClass.type, confidence);
+        return nextRow;
       });
-      results.sort((a, b) => (b._specificity_score || 0) - (a._specificity_score || 0));
+      results.sort((a, b) =>
+        (b._specificity_score || 0) - (a._specificity_score || 0)
+        || (b._relevance_probability || 0) - (a._relevance_probability || 0)
+      );
     }
 
     const adaptiveCutoff = computeAdaptiveResultCutoff(results, intentClass.type, confidence);
@@ -3959,6 +4015,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       subtype:    intentClass.subtype,
       entityMatch: intentClass.entityMatch,
       confidence: +confidence.toFixed(3),
+      probabilityModel: 'logistic-v1',
       expansions: allExpansions,
       facets,
       qpprActive:      !!(qpprScores && qpprScores.size > 0),
@@ -6381,6 +6438,7 @@ module.exports = {
   segmentVerseText,
   segmentVerseTextDual,
   computeAdaptiveResultCutoff,
+  computeRelevanceProbability,
   normalizeKJVSpellings,
   expandWithSynonyms,
   fastify,

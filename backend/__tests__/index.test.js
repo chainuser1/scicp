@@ -4,6 +4,7 @@ const {
   segmentVerseText,
   segmentVerseTextDual,
   computeAdaptiveResultCutoff,
+  computeRelevanceProbability,
   normalizeKJVSpellings,
   expandWithSynonyms,
   fastify,
@@ -98,6 +99,62 @@ describe('Backend API Tests', () => {
       ];
 
       expect(computeAdaptiveResultCutoff(results, 'conceptual', 0.58)).toBeNull();
+    });
+  });
+
+  describe('computeRelevanceProbability function', () => {
+    test('assigns higher relevance probability to stronger rows', () => {
+      const head = computeRelevanceProbability({
+        _specificity_score: 4.88,
+        _tier: 2,
+        similarity_score: 0.66,
+        _lexicalCoverage: 0.74,
+        _anchorWindowScore: 0.68,
+        _sequenceScore: 0.58,
+        _phraseCoverage: 0.8,
+        _sourceCount: 3,
+        _anchorPhraseMatch: true,
+      }, 'situational', 0.72);
+
+      const tail = computeRelevanceProbability({
+        _specificity_score: 1.76,
+        _tier: 5,
+        similarity_score: 0.12,
+        _lexicalCoverage: 0.18,
+        _anchorWindowScore: 0.07,
+        _sequenceScore: 0.04,
+        _phraseCoverage: 0,
+        _sourceCount: 1,
+      }, 'situational', 0.72);
+
+      expect(head).toBeGreaterThan(0.82);
+      expect(tail).toBeLessThan(0.3);
+      expect(head).toBeGreaterThan(tail);
+    });
+
+    test('treats strong dominant lexical hits as genuinely relevant even in tier five', () => {
+      const probability = computeRelevanceProbability({
+        _specificity_score: 1.64,
+        _tier: 5,
+        similarity_score: 0,
+        _lexicalCoverage: 0.8,
+        _anchorWindowScore: 0,
+        _sequenceScore: 0.53,
+        _source: 'fts',
+      }, 'keyword', 0.87);
+
+      expect(probability).toBeGreaterThan(0.5);
+    });
+
+    test('returns bounded probabilities', () => {
+      const probability = computeRelevanceProbability({
+        _specificity_score: 3.25,
+        _tier: 3,
+        similarity_score: 0.38,
+      }, 'conceptual', 0.5);
+
+      expect(probability).toBeGreaterThanOrEqual(0);
+      expect(probability).toBeLessThanOrEqual(1);
     });
   });
 
@@ -593,6 +650,12 @@ describe('Backend API Tests', () => {
       expect(body).toHaveProperty('page');
       expect(body).toHaveProperty('pageSize');
       expect(Array.isArray(body.results)).toBe(true);
+      if (body.results.length > 0) {
+        expect(body.results[0]).toHaveProperty('_relevance_probability');
+        expect(body.results[0]._relevance_probability).toBeGreaterThanOrEqual(0);
+        expect(body.results[0]._relevance_probability).toBeLessThanOrEqual(1);
+      }
+      expect(body.meta).toHaveProperty('probabilityModel', 'logistic-v1');
     });
 
     test('GET /search without q returns 400', async () => {
