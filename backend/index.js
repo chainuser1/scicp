@@ -1321,6 +1321,7 @@ const EMBED_BATCH_SIZE   = 50;
 let embeddingsReady     = false;
 let embeddingPipe       = null;  // transformer pipeline (loaded in dev; null in production)
 const embeddingCache    = new Map(); // verse_id → Float32Array(384)
+let searchWarmupPromise = null;
 
 // ZCA whitening transform: v_white = W · (v - μ), then L2-normalize
 // Loaded from embedding_whitening table (prebaked by scripts/prebake-whitening.js)
@@ -1897,6 +1898,7 @@ function buildFocusedAnchorQuery(candidate, termWeights) {
 }
 
 const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and', 'prefix']);
+const SHORT_QUERY_PHRASE_MATCH_TYPES = new Set(['phrase', 'near']);
 const PHRASE_MATCH_STRENGTH = {
   phrase: 1.0,
   near: 0.92,
@@ -2212,14 +2214,15 @@ function detectSignificantPhrases(query) {
   }).sort((a, b) => b.len - a.len);
 }
 
-function expandWithSynonyms(query) {
+// Bias-free query normalisation — identity pass-through.
+// This function deliberately does NOT expand or substitute vocabulary.
+// Keyword/synonym steering is done exclusively by the pre-baked PMI and
+// concept-embedding tables so that no handwritten theological lexicon ever
+// touches the search path.
+function normalizeQueryTokens(query) {
   if (query == null) return [''];
-
   const normalized = String(query).trim().toLowerCase();
   if (!normalized) return [''];
-
-  // Bias-free compatibility helper: preserve API shape without injecting
-  // handwritten theological vocabulary into retrieval.
   return [normalized];
 }
 
@@ -2309,9 +2312,13 @@ function sigmoidConfidence(topBm25Score, resultCount) {
 // No topic keywords. No handwritten theological synonym steering.
 // ─────────────────────────────────────────────────────────────────────────────
 function classifyQueryIntent(query, confidence, qvec) {
+  const words = query.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  const wordCount = words.length;
+
   // ── Step 1: Entity detection (embedding-space nearest-neighbour lookup) ──
-  if (entitiesReady) {
-    const words = query.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  // Long phrase-fragment queries should not be hijacked by incidental noun matches
+  // such as "foundation" or "glory" appearing in person/place indexes.
+  if (entitiesReady && wordCount <= 2) {
     for (const w of words) {
       if (entityPersonIndex.has(w))
         return { type: 'entity', subtype: 'person', entityMatch: w, display: 'Person' };
@@ -2334,7 +2341,6 @@ function classifyQueryIntent(query, confidence, qvec) {
     const secondSim      = topClusters[1]?.similarity ?? 0;
     // clusterGap: large → query points clearly at one concept; small → ambiguous boundary
     const clusterGap     = topClusterSim - secondSim;
-    const wordCount      = query.trim().split(/\s+/).filter(t => t.length > 1).length;
 
     // Strong BM25 confidence → corpus text matches well → keyword routing
     if (confidence >= 0.70)
@@ -2361,6 +2367,20 @@ function classifyQueryIntent(query, confidence, qvec) {
   if (confidence >= 0.60) return { type: 'keyword',    subtype: 'bm25',      entityMatch: null, display: 'Keyword'    };
   if (confidence >= 0.30) return { type: 'mixed',      subtype: 'hybrid',    entityMatch: null, display: 'Expanded'   };
   return                         { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic'   };
+}
+
+function refineIntentWithTopicSignals(intentClass, queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch) {
+  if (!intentClass) return intentClass;
+
+  if (hasExactTopicMatch && queryWordCount <= 2 && (intentClass.type === 'keyword' || intentClass.type === 'mixed')) {
+    return { type: 'conceptual', subtype: 'topical-guide-exact', entityMatch: null, display: 'Semantic' };
+  }
+
+  if (topicGuideHitCount > 0 && queryWordCount <= 3 && lexicalQuality < 0.6 && (intentClass.type === 'keyword' || intentClass.type === 'mixed')) {
+    return { type: 'situational', subtype: 'topical-guide-probe', entityMatch: null, display: 'Situational' };
+  }
+
+  return intentClass;
 }
 
 // ── Reciprocal Rank Fusion (Algebra): merge ranked lists without weight tuning ──
@@ -2959,6 +2979,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     FROM scriptures WHERE verse_id = ?
   `);
   const termWeights = queryTermWeights(query);
+  const normalizedQueryText = normalizeSearchText(query);
   const queryWordCount = query.split(/\s+/).filter(Boolean).length;
   const anchorPhrases = queryWordCount >= 5
     ? extractAnchorPhrases(query, termWeights, 4)
@@ -2973,6 +2994,10 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     if (!raw || raw.length === 0) return raw;
     const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
     if (words.length >= 5) {
+      const fullPhrase = words.join(' ');
+      return raw.filter(p => p.phrase === fullPhrase);
+    }
+    if (words.length >= 3) {
       const fullPhrase = words.join(' ');
       return raw.filter(p => p.phrase === fullPhrase);
     }
@@ -2992,11 +3017,19 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   }
 
   // ── Source A: Scripture FTS (BM25) — primary keyword source ──
+  // Only flag a direct substring match when the query has 2+ meaningful words.
+  // Single-word queries (e.g. "mercy") would otherwise mark every FTS hit as a
+  // direct match, pumping the entire result set into tier-2 and letting BM25 pick
+  // the winner there instead of the topical/semantic signals.
+  const directMatchWords = normalizedQueryText.split(/\s+/).filter(Boolean);
+  const directMatchEligible = directMatchWords.length >= 2;
+
   const ftsResult = searchScripture(query, 0, 50, dba, fastify.log);
   const ftsRanked = ftsResult.results.map(r => ({
     ...r,
     _source: 'fts',
     _bm25: r._bm25_rank || 0,
+    _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText),
     _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights),
     _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
     _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights),
@@ -3029,8 +3062,10 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     }
   }
 
-  if (queryWordCount >= 5 && ftsRanked.length > 1) {
+  if (queryWordCount >= 3 && ftsRanked.length > 1) {
     ftsRanked.sort((a, b) =>
+      Number(Boolean(b._directQueryMatch)) - Number(Boolean(a._directQueryMatch))
+      ||
       (b._sequenceScore || 0) - (a._sequenceScore || 0)
       ||
       (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0)
@@ -3108,9 +3143,59 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     }
   }
 
+  // ── Identify matched topic slugs for topical retrieval and PPR boost ──
+  // Phrase-aware: try full query and bigrams first, then fall back to single words.
+  let queryTopicSlugs = [];
+  let hasExactTopicMatch = false;
+  if (topicalGuideReady) {
+    const normQuery = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').trim();
+    const normWords = normQuery.split(/\s+/).filter(t => t.length > 1);
+    const querySlugified = normQuery.replace(/\s+/g, '-');
+
+    for (const [slug, name] of topicNameMap) {
+      const slugNorm = slug.replace(/-/g, ' ');
+      if (slugNorm === normQuery || name.toLowerCase() === normQuery || slug === querySlugified) {
+        queryTopicSlugs.push(slug);
+        hasExactTopicMatch = true;
+      }
+    }
+
+    if (normWords.length >= 2 && normWords.length <= 4) {
+      for (let i = 0; i < normWords.length - 1; i++) {
+        const bigram = normWords[i] + ' ' + normWords[i + 1];
+        const bigramSlug = normWords[i] + '-' + normWords[i + 1];
+        for (const [slug, name] of topicNameMap) {
+          if (queryTopicSlugs.includes(slug)) continue;
+          const slugNorm = slug.replace(/-/g, ' ');
+          if (slugNorm.includes(bigram) || name.toLowerCase().includes(bigram) || slug.includes(bigramSlug)) {
+            queryTopicSlugs.push(slug);
+          }
+        }
+        if (queryTopicSlugs.length >= 10) break;
+      }
+    }
+
+    if (queryTopicSlugs.length === 0 && normWords.length <= 3) {
+      for (const [slug, name] of topicNameMap) {
+        const slugNorm = slug.replace(/-/g, ' ');
+        for (const w of normWords) {
+          if (slugNorm.includes(w) || name.toLowerCase().includes(w)) {
+            queryTopicSlugs.push(slug);
+            break;
+          }
+        }
+        if (queryTopicSlugs.length >= 10) break;
+      }
+    }
+
+    queryTopicSlugs = [...new Set(queryTopicSlugs)].slice(0, 10);
+  }
+
   // ── Source B: Chapter summaries FTS — finds chapters thematically about the topic ──
   const summaryRanked = [];
-  if (db_chsummary) {
+  const shortTopicalQuery = queryWordCount <= 3 && queryTopicSlugs.length > 0;
+  const longStructuredQuery = queryWordCount >= 5 || anchorPhrases.length > 0 || detectedPhrases.length > 0;
+  if (db_chsummary && !shortTopicalQuery && !longStructuredQuery) {
     try {
       const cleanQ = query.replace(/[^a-zA-Z0-9\-\s]/g, ' ').trim();
       const terms = cleanQ.split(/\s+/).filter(t => t.length > 1).map(t => `${t}*`).join(' OR ');
@@ -3138,13 +3223,36 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
 
   // ── Source C: Topical Guide — curated theological connections ──
   const tgRanked = [];
-  if (topicalGuideReady) {
-    const tg = topicSearch(query.trim(), 0, 30);
-    if (tg && tg.results) {
-      for (const r of tg.results) {
-        tgRanked.push({ ...r, _source: 'topical-guide' });
+  if (topicalGuideReady && queryTopicSlugs.length > 0) {
+    const bestByVerse = new Map();
+    const probeLimit = hasExactTopicMatch ? 3 : Math.min(3, queryTopicSlugs.length);
+    for (let slugIndex = 0; slugIndex < probeLimit; slugIndex++) {
+      const topicSlug = queryTopicSlugs[slugIndex];
+      const tg = topicSearch(topicSlug, 0, hasExactTopicMatch ? 15 : 10);
+      if (!tg?.results?.length) continue;
+      for (let rank = 0; rank < tg.results.length; rank++) {
+        const row = tg.results[rank];
+        const topicSignal = 1
+          + (hasExactTopicMatch && slugIndex === 0 ? 0.35 : 0)
+          + Math.max(0, 0.18 - slugIndex * 0.04)
+          - rank * 0.015;
+        const existing = bestByVerse.get(row.verse_id);
+        if (!existing || topicSignal > existing._topicSignal) {
+          bestByVerse.set(row.verse_id, {
+            ...row,
+            _source: 'topical-guide',
+            _topicSignal: +topicSignal.toFixed(4),
+            _matchedTopicSlug: topicSlug,
+          });
+        }
       }
     }
+    tgRanked.push(
+      ...[...bestByVerse.values()].sort((a, b) =>
+        (b._topicSignal || 0) - (a._topicSignal || 0)
+        || String(a.verse_title || '').localeCompare(String(b.verse_title || ''))
+      )
+    );
   }
 
   // ── Source D: Entity index — people and places ──
@@ -3182,53 +3290,6 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     }
   }
 
-  // ── Identify matched topic slugs for PPR boost ──
-  // Phrase-aware: try full query and bigrams first, then fall back to single words
-  const queryTopicSlugs = [];
-  if (topicalGuideReady) {
-    const normQuery = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').trim();
-    const normWords = normQuery.split(/\s+/).filter(t => t.length > 1);
-
-    // Phase 1: full query phrase match (e.g., "plan of salvation" → "plan-of-salvation")
-    const querySlugified = normQuery.replace(/\s+/g, '-');
-    for (const [slug, name] of topicNameMap) {
-      const slugNorm = slug.replace(/-/g, ' ');
-      if (slugNorm === normQuery || name.toLowerCase() === normQuery || slug === querySlugified) {
-        queryTopicSlugs.push(slug);
-      }
-    }
-
-    // Phase 2: bigram phrase match (e.g., "second coming" in a longer query)
-    if (normWords.length >= 2) {
-      for (let i = 0; i < normWords.length - 1; i++) {
-        const bigram = normWords[i] + ' ' + normWords[i + 1];
-        const bigramSlug = normWords[i] + '-' + normWords[i + 1];
-        for (const [slug, name] of topicNameMap) {
-          if (queryTopicSlugs.includes(slug)) continue;
-          const slugNorm = slug.replace(/-/g, ' ');
-          if (slugNorm.includes(bigram) || name.toLowerCase().includes(bigram) || slug.includes(bigramSlug)) {
-            queryTopicSlugs.push(slug);
-          }
-        }
-        if (queryTopicSlugs.length >= 10) break;
-      }
-    }
-
-    // Phase 3: single word fallback (only if no phrase matches found)
-    if (queryTopicSlugs.length === 0) {
-      for (const [slug, name] of topicNameMap) {
-        const slugNorm = slug.replace(/-/g, ' ');
-        for (const w of normWords) {
-          if (slugNorm.includes(w) || name.toLowerCase().includes(w)) {
-            queryTopicSlugs.push(slug);
-            break;
-          }
-        }
-        if (queryTopicSlugs.length >= 10) break;
-      }
-    }
-  }
-
   // ── RRF: merge all sources — list weights driven by per-intent learned weights ──
   // If an intent type is provided, use its learned weight vector; fall back to global.
   // W = [bm25, semantic, pagerank, cross_ref, cluster, dwell]
@@ -3237,10 +3298,14 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const W = (intentType && intentWeights.has(intentType))
     ? intentWeights.get(intentType)
     : learnedWeights;
+  const exactTopicalQuery = queryWordCount <= 2 && hasExactTopicMatch;
+  const phraseWeight = exactTopicalQuery ? W[0] * 0.6 : W[0] * 3;
+  const summaryWeight = shortTopicalQuery ? W[3] * 0.15 : W[3];
+  const topicalWeight = exactTopicalQuery ? W[3] * 3.5 : (shortTopicalQuery ? W[3] * 2.2 : W[3]);
   const rrfScores = reciprocalRankFusion(
     [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked, xrefRanked],
     queryTopicSlugs,
-    [W[0], W[0] * 3, W[3], W[3], W[2], W[3] * 5]
+    [W[0], phraseWeight, summaryWeight, topicalWeight, W[2], W[3] * 5]
   );
 
   // ── Chapter aggregation: boost chapters with many verse hits ──
@@ -3268,6 +3333,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   }
 
   const ftsMetaByVerse = new Map(ftsRanked.map(row => [row.verse_id, {
+    _directQueryMatch: row._directQueryMatch,
     _lexicalCoverage: row._lexicalCoverage,
     _anchorPhraseMatch: row._anchorPhraseMatch,
     _anchorWindowScore: row._anchorWindowScore,
@@ -3291,6 +3357,8 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     diagnostics: {
       lexicalSignalQuality: lexicalSignalQuality(query, ftsRanked, termWeights),
       topFtsCount: ftsRanked.length,
+      hasExactTopicMatch,
+      topicGuideHitCount: tgRanked.length,
     },
   };
 }
@@ -3411,6 +3479,27 @@ function normalizeKJVSpellings(q) {
   return s;
 }
 
+function normalizeSearchText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Word-boundary aware substring check.
+// Plain String.includes() allows "heaven" to match inside "heavens", which causes
+// plural-form verses to get the same _directQueryMatch signal as the exact-match verse.
+// This helper requires the matched fragment to end at a word boundary (space or end-of-string).
+function normalizedTextIncludes(haystack, needle) {
+  if (!needle || !haystack) return false;
+  const idx = haystack.indexOf(needle);
+  if (idx === -1) return false;
+  const afterIdx = idx + needle.length;
+  // Boundary: must be end of string or followed by a non-alphanumeric character
+  return afterIdx >= haystack.length || !/[a-z0-9]/.test(haystack[afterIdx]);
+}
+
 async function runSearchPipeline(query, language, contextVerseId, log, sessionId = null) {
   const lang = String(language || 'en').toLowerCase().trim();
   // Normalize American→KJV spellings so FTS matches DB text
@@ -3487,6 +3576,10 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       return { results: phraseResult.results, total: phraseResult.total, meta: phraseMeta, fromCache: false, cacheKey };
     }
 
+    if (!embeddingsReady || !topicalGuideReady || !entitiesReady) {
+      await ensureSearchWarmup({ waitForEmbeddings: true });
+    }
+
     // Step 3: Explicit semantic mode — ~query → embedding-only (power-user shortcut)
     if (isSemantic) {
       const semQuery = query.trim().slice(1).trim();
@@ -3522,11 +3615,37 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Users don't need quotes — the system checks automatically.
     const autoPhraseResult = phraseSearch(query.trim(), 0, 50, dba, log);
     const autoPhraseWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
+    const autoPhraseCoverageFloor = autoPhraseWordCount >= 5 ? 0.42 : 0.68;
+    const normalizedQueryText = normalizeSearchText(query.trim());
     const phraseHitEligible = autoPhraseWordCount >= 5
       ? autoPhraseResult.matchType === 'phrase'
-      : STRONG_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
+      : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
     const phraseHits = phraseHitEligible
-      ? autoPhraseResult.results.map(r => ({ ...r, _source: 'fts-phrase', _phraseMatch: true }))
+      ? autoPhraseResult.results
+        .map(r => {
+          const phraseCoverage = weightedLexicalCoverage(query.trim(), r, queryTermWeights(query.trim()));
+          const normalizedVerseText = normalizeSearchText(r.scripture_text || '');
+          const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText);
+          const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, queryTermWeights(query.trim()));
+          return {
+            ...r,
+            _source: 'fts-phrase',
+            _phraseMatch: true,
+            _phraseCoverage: phraseCoverage,
+            _directPhraseMatch: directPhraseMatch,
+            // Mirror to _directQueryMatch so the tier-2 scorer awards the 0.92 bonus
+            // to phrase hits that are literal substrings of the verse text.
+            _directQueryMatch: directPhraseMatch,
+            _sequenceScore: sequenceScore,
+          };
+        })
+        .filter(r => {
+          if ((r._phraseCoverage || 0) < autoPhraseCoverageFloor) return false;
+          if (autoPhraseWordCount <= 4) {
+            return Boolean(r._directPhraseMatch);
+          }
+          return true;
+        })
       : [];
     const phraseIdsSet = new Set(phraseHits.map(r => r.verse_id));
 
@@ -3574,13 +3693,16 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     const queryWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
     const isShortQuery = queryWordCount <= 2;
     const shouldPreferSemantic = qvec && queryWordCount >= 5 && lexicalQuality < 0.45;
+    const hasExactTopicMatch = !!fusionResult.diagnostics?.hasExactTopicMatch;
+    const topicGuideHitCount = fusionResult.diagnostics?.topicGuideHitCount || 0;
 
     let prelimIntent = null;
 
     // Pass 2: re-run fusion with per-intent weights if embeddings are ready (supervised refinement)
     // Intent can only be classified once we have qvec; skip re-fusion for reference/short queries
-    if (qvec && queryWordCount >= 2) {
+    if (qvec && (queryWordCount >= 2 || hasExactTopicMatch)) {
       prelimIntent = classifyQueryIntent(query.trim(), confidence, qvec);
+      prelimIntent = refineIntentWithTopicSignals(prelimIntent, queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch);
       if (shouldPreferSemantic && prelimIntent.type === 'keyword') {
         prelimIntent = { type: 'conceptual', subtype: 'long-query-low-lexical', entityMatch: null, display: 'Semantic' };
       } else if (shouldPreferSemantic && prelimIntent.type === 'mixed') {
@@ -3643,10 +3765,19 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     results = fusionResult.results;
     total   = fusionResult.total;
 
-    // Merge phraseHits into candidates (deduplicated)
+    // Merge phraseHits into candidates (deduplicated).
+    // Preserve the RRF score from fusion for any verse that was already ranked there —
+    // phraseHit rows carry no _rrfScore, so without this Genesis 1:1 loses its
+    // phrase-lane boost and "created the heaven" ranks below plural "heavens" verses.
     if (phraseHits.length > 0) {
+      const rrfScoreByVerse = new Map(
+        results.filter(r => phraseIdsSet.has(r.verse_id)).map(r => [r.verse_id, r._rrfScore || 0])
+      );
       results = results.filter(r => !phraseIdsSet.has(r.verse_id));
-      results = [...phraseHits, ...results];
+      results = [
+        ...phraseHits.map(r => ({ ...r, _rrfScore: rrfScoreByVerse.get(r.verse_id) || 0 })),
+        ...results,
+      ];
     }
 
     // Step 4d: Proactive semantic injection for multi-word queries
@@ -3659,11 +3790,17 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Longer phrases get stronger semantic injection; short queries stay keyword-dominant.
     if (qvec && queryWordCount >= 2 && embeddingsReady && embeddingPipe) {
       const semInjectWeight = Math.min(0.95, 0.40 + (queryWordCount - 1) * 0.08);
+      const semInjectFloor = queryWordCount >= 5 ? 0.22 : 0.16;
+      const strongLexicalHead = results.slice(0, 5).some(r =>
+        (r._sequenceScore || 0) >= 0.35 || (r._lexicalCoverage || 0) >= 0.48 || Boolean(r._anchorPhraseMatch)
+      );
       try {
         const semProbe = await semanticSearch(query.trim(), 0, 50, new Set(), qvec);
         if (semProbe && semProbe.results.length > 0) {
           const existingIds = new Set(results.map(r => r.verse_id));
           for (const sr of semProbe.results) {
+            if ((sr.similarity_score || 0) < semInjectFloor) continue;
+            if (queryWordCount >= 5 && strongLexicalHead && (sr.similarity_score || 0) < 0.28) continue;
             if (!existingIds.has(sr.verse_id)) {
               results.push({
                 ...sr,
@@ -3764,7 +3901,13 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // λ adapts from entropy — nudged by per-intent semantic weight:
     // high semantic weight → lower λ (more diversity), low → higher λ (relevance focus)
     if (results.length > 1 && qvec) {
-      const _preIntentClass = classifyQueryIntent(query.trim(), confidence, qvec);
+      const _preIntentClass = refineIntentWithTopicSignals(
+        classifyQueryIntent(query.trim(), confidence, qvec),
+        queryWordCount,
+        lexicalQuality,
+        topicGuideHitCount,
+        hasExactTopicMatch
+      );
       const _iW = getIntentWeights(_preIntentClass.type);
       // Semantic weight normalized [0.1, 1.4] → λ bias ∈ [+0.08, -0.08]
       const _semNorm  = Math.min(1.0, Math.max(0.0, (_iW[1] - 0.1) / 1.3));
@@ -3898,7 +4041,13 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     const SEM_THRESHOLD_BASE = 0.28; // raw: separates signal (>0.35) from background noise (~0.22)
     const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
 
-    const intentClass = classifyQueryIntent(query.trim(), confidence, qvec);
+    const intentClass = refineIntentWithTopicSignals(
+      classifyQueryIntent(query.trim(), confidence, qvec),
+      queryWordCount,
+      lexicalQuality,
+      topicGuideHitCount,
+      hasExactTopicMatch
+    );
 
     // Per-intent semantic threshold adjustment:
     // Higher semantic weight (intentWeights[1]) → lower threshold (softer semantic gate)
@@ -3932,12 +4081,18 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         const specSim = r._spectralSim || 0;
         let tier, tierScore;
 
-        if (phraseIdsSet.has(r.verse_id) || r._anchorPhraseMatch || (queryWordCount >= 5 && (r._anchorWindowScore || 0) >= 0.72)) {
+        const hasMeaningfulPhraseEvidence = phraseIdsSet.has(r.verse_id)
+          || Boolean(r._directQueryMatch)
+          || r._anchorPhraseMatch
+          || (queryWordCount >= 5 && (r._sequenceScore || 0) >= 0.52 && (r._lexicalCoverage || 0) >= 0.4)
+          || (queryWordCount >= 5 && (r._anchorWindowScore || 0) >= 0.72);
+        if (hasMeaningfulPhraseEvidence) {
           // Tier 2: exact/AND phrase match — cosine tiebreaker
           tier = 2;
           tierScore = Math.min(
             Math.max(
               simScore > 0 ? simScore : 0,
+              (r._directQueryMatch ? 0.92 : 0),
               (r._phraseCoverage || r._lexicalCoverage || 0) * 0.6
                 + (r._anchorStrength || 0) * 0.2
                 + (r._phraseSignal || 0) * 0.1
@@ -4280,6 +4435,27 @@ async function initEmbeddings() {
   }
 }
 
+function ensureSearchWarmup({ waitForEmbeddings = false } = {}) {
+  if (!searchWarmupPromise) {
+    searchWarmupPromise = (async () => {
+      try {
+        initializeCaches();
+      } catch (err) {
+        fastify.log.error(err, '[Caches] initialization failed');
+      }
+
+      try {
+        await initEmbeddings();
+      } catch (err) {
+        fastify.log.error(err, '[Embeddings] initialization failed');
+      }
+    })();
+  }
+
+  if (!waitForEmbeddings) searchWarmupPromise.catch(() => {});
+  return searchWarmupPromise;
+}
+
 const entityPersonIndex = new Map(); // normalized-name → Set<verse_id>
 const entityPlaceIndex  = new Map(); // normalized-name → Set<verse_id>
 const verseEntityCache  = new Map(); // verse_id → { people: string[], places: string[] }
@@ -4394,13 +4570,14 @@ function initializeCaches() {
 // ranked by how many topics they share with the query topic.
 function topicSearch(query, page = 0, pageSize = 10) {
   if (!topicalGuideReady || !db_tg) return { results: [], total: 0 };
-  const lower = query.toLowerCase().trim();
+  const lower = String(query || '').toLowerCase().trim();
+  if (!lower) return { results: [], total: 0 };
   // Match topic slug or name (exact first, then prefix, then substring)
   const allTopics = [...topicNameMap.entries()]; // [slug, name]
   let matched =
-    allTopics.find(([s, n]) => s === lower || n.toLowerCase() === lower) ??
-    allTopics.find(([s, n]) => s.startsWith(lower) || n.toLowerCase().startsWith(lower)) ??
-    allTopics.find(([s, n]) => s.includes(lower) || n.toLowerCase().includes(lower));
+    allTopics.find(([s, n]) => s === lower || String(n || '').toLowerCase() === lower) ??
+    allTopics.find(([s, n]) => s.startsWith(lower) || String(n || '').toLowerCase().startsWith(lower)) ??
+    allTopics.find(([s, n]) => s.includes(lower) || String(n || '').toLowerCase().includes(lower));
   if (!matched) return null; // signal: no TG match, fall through to FTS
 
   const [topicSlug, topicName] = matched;
@@ -4437,6 +4614,10 @@ fastify.get('/topic-search', async (request, reply) => {
   const pageSize = Math.min(20, Math.max(1, parseInt(request.query.pageSize ?? 10, 10) || 10));
 
   if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
+
+  if (!topicalGuideReady || !embeddingsReady || !entitiesReady) {
+    await ensureSearchWarmup({ waitForEmbeddings: true });
+  }
 
   const lang = language.toLowerCase();
   const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : null;
@@ -6370,7 +6551,7 @@ const start = async () => {
     // FTS search is available at once; entity/topical/semantic features enable as
     // caches finish loading (usually within a few seconds on Electron).
     setImmediate(() => {
-      try { initializeCaches(); } catch (err) { fastify.log.error(err, '[Caches] initialization failed'); }
+      ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed'));
     });
     // Initialize FTS in background so health checks can pass immediately.
     // Skip in production/Electron — DBs are pre-built with FTS tables.
@@ -6402,17 +6583,16 @@ const start = async () => {
     } else {
       fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.');
     }
-    setImmediate(() => {
-      try {
-        initEmbeddings();
-      } catch (err) {
-        fastify.log.error(err, '[Embeddings] initialization failed');
-      }
-    });
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)
   }
+}
+
+if (require.main !== module) {
+  setImmediate(() => {
+    ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed'));
+  });
 }
 
 
@@ -6440,7 +6620,7 @@ module.exports = {
   computeAdaptiveResultCutoff,
   computeRelevanceProbability,
   normalizeKJVSpellings,
-  expandWithSynonyms,
+  normalizeQueryTokens,
   fastify,
   registerSocketHandlers,
   startElectron,

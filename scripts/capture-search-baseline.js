@@ -7,24 +7,21 @@ const { fastify } = require('../backend');
 
 const OUTPUT_DIR = path.join(__dirname, '..', 'artifacts', 'search-baselines');
 const DB_PATH = path.join(__dirname, '..', 'resources', 'db', 'lds-scriptures-sqlite.db');
+const BENCHMARK_PATH = path.join(__dirname, '..', 'resources', 'search-benchmark.json');
 const DEFAULT_SEED = Number(process.env.SEARCH_BASELINE_SEED || 20260404);
 const DEFAULT_SAMPLE_COUNT = Number(process.env.SEARCH_BASELINE_RANDOM_COUNT || 24);
 const DEFAULT_PAGE_SIZE = Number(process.env.SEARCH_BASELINE_PAGE_SIZE || 10);
 
-const CURATED_QUERIES = [
-  { id: 'exact-john-316', label: 'Exact reference', query: 'John 3:16', expectedVerseTitle: 'John 3:16' },
-  { id: 'exact-1-ne-37', label: 'Book of Mormon reference', query: '1 Ne 3:7', expectedVerseTitle: '1 Nephi 3:7' },
-  { id: 'exact-dc-76', label: 'Doctrine and Covenants reference', query: 'D&C 76', expectedVerseTitle: 'Doctrine and Covenants 76:1' },
-  { id: 'semantic-battle', label: 'Paraphrased battle narrative', query: 'their generals died with ten thousand each', expectedVerseTitle: 'Mormon 6:14' },
-  { id: 'semantic-nephi', label: 'Nephi family wording', query: 'nephi said unto my father', expectedVerseTitle: '1 Nephi 3:7' },
-  { id: 'semantic-work-glory', label: 'Moses 1:39 wording', query: 'for behold my work and glory', expectedVerseTitle: 'Moses 1:39' },
-  { id: 'situational-grief', label: 'Situational grief', query: 'dealing with grief' },
-  { id: 'situational-temptation', label: 'Situational temptation', query: 'overcoming temptation' },
-  { id: 'conceptual-faith', label: 'Conceptual faith', query: 'faith' },
-  { id: 'conceptual-mercy', label: 'Conceptual mercy', query: 'mercy' },
-  { id: 'phrase-revelation', label: 'Revelation phrase', query: 'lamb slain before the foundation foundation', expectedVerseTitle: 'Revelation 13:8' },
-  { id: 'phrase-exhort', label: 'Exhort wording', query: 'and moreover i would exhort you' },
-];
+const BENCHMARK = JSON.parse(fs.readFileSync(BENCHMARK_PATH, 'utf8'));
+const CURATED_QUERIES = BENCHMARK.queries.map((queryDef) => ({
+  id: queryDef.id,
+  label: queryDef.label,
+  query: queryDef.query,
+  expectedVerseTitle: Array.isArray(queryDef.expectedVerseTitles) ? queryDef.expectedVerseTitles[0] || null : null,
+  expectedVerseTitles: Array.isArray(queryDef.expectedVerseTitles) ? queryDef.expectedVerseTitles : [],
+  category: queryDef.category || null,
+  targetRankThreshold: queryDef.targetRankThreshold ?? null,
+}));
 
 const STOPWORDS = new Set([
   'the', 'and', 'for', 'that', 'with', 'from', 'unto', 'into', 'upon', 'have', 'were', 'they', 'them', 'their',
@@ -148,14 +145,20 @@ async function captureQuerySnapshot(queryDef, pageSize) {
     : [];
 
   const expectedRank = queryDef.expectedVerseTitle
-    ? topResults.findIndex((result) => result.verse_title === queryDef.expectedVerseTitle) + 1 || null
+    ? topResults.findIndex((result) => {
+      const accepted = queryDef.expectedVerseTitles?.length ? queryDef.expectedVerseTitles : [queryDef.expectedVerseTitle];
+      return accepted.includes(result.verse_title);
+    }) + 1 || null
     : null;
 
   return {
     id: queryDef.id,
     label: queryDef.label,
+    category: queryDef.category || null,
     query: queryDef.query,
     expectedVerseTitle: queryDef.expectedVerseTitle || null,
+    expectedVerseTitles: queryDef.expectedVerseTitles || null,
+    targetRankThreshold: queryDef.targetRankThreshold ?? null,
     sourceVerseId: queryDef.sourceVerseId || null,
     statusCode: response.statusCode,
     total: body.total ?? 0,
@@ -205,6 +208,10 @@ async function main() {
   console.log(`Saved search baseline to ${latestPath}`);
   console.log(`Archived search baseline to ${archivePath}`);
   console.log(`Captured ${snapshots.length} queries (${randomQueries.length} seeded-random + ${CURATED_QUERIES.length} curated).`);
+
+  // Force-exit: embedding pipeline warm-up and HNSW timers keep the event loop
+  // alive after fastify.close(). All file I/O is complete at this point.
+  process.exit(0);
 }
 
 main().catch(async (error) => {
@@ -214,5 +221,5 @@ main().catch(async (error) => {
     // ignore close errors on failure cleanup
   }
   console.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 });
