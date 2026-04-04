@@ -78,6 +78,16 @@ The backend implements a 41-component mathematical search pipeline in `backend/i
 
 ### Query Flow: 8 Sequential Steps
 
+### Bias-Free Retrieval Rules
+
+The current search stack avoids handwritten topical steering inside retrieval and ranking.
+
+- No manual theological synonym injection in the live search pipeline. Query expansion is limited to corpus-derived statistics such as PMI and embedding-space concept neighbors.
+- Long-query fallback no longer depends on a static low-information word list. Distinctive terms are selected from corpus frequency and learned term-weight tables.
+- Long-query recovery uses mathematical structure signals instead of keyword vocabularies: weighted lexical coverage, salient anchor windows, and ordered sequence compactness.
+- Phrase promotion for long queries is restricted to rows that preserve statistically salient anchor structure. Generic scriptural scaffolding should not outrank denser lexical evidence.
+- Normalization-only resources are still allowed where they preserve user intent rather than steer retrieval, such as scripture reference abbreviations and KJV spelling normalization.
+
 **Step 1: Input Normalization**
 - KJV spelling variants (neighbor↔neighbour, savior↔saviour, honor↔honour, etc.) — 18 regex rules applied at query parse
 - Scripture reference parsing (e.g., "John 3:16", "D&C 76:22")
