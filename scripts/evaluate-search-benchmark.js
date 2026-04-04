@@ -34,6 +34,28 @@ function findExpectedRank(snapshot, acceptedTitles) {
   return index >= 0 ? index + 1 : null;
 }
 
+// NDCG@k for a single-positive query: DCG / IDCG where IDCG = 1/log2(2) = 1.
+// Queries without positive expectations are excluded from the NDCG average.
+function dcgAtK(rank, k) {
+  if (rank === null || rank > k) return 0;
+  return 1 / Math.log2(rank + 1);
+}
+
+// Score-rank monotonicity: fraction of consecutive result pairs where
+// specificity_score[i] >= specificity_score[i+1]. A perfectly calibrated
+// ranking scores 1.0. Returns null when fewer than 2 scored results exist.
+function computeScoreMonotonicity(topResults) {
+  const scores = (topResults || [])
+    .map((r) => r.specificity_score)
+    .filter((s) => s !== null && s !== undefined);
+  if (scores.length < 2) return null;
+  let monotone = 0;
+  for (let i = 1; i < scores.length; i++) {
+    if (scores[i - 1] >= scores[i]) monotone++;
+  }
+  return monotone / (scores.length - 1);
+}
+
 function computeMetrics(judgedRows) {
   const total = judgedRows.length;
   const top1Hits = judgedRows.filter((row) => row.expectedRank === 1).length;
@@ -41,12 +63,33 @@ function computeMetrics(judgedRows) {
   const thresholdPasses = judgedRows.filter((row) => row.passedThreshold).length;
   const reciprocalRankSum = judgedRows.reduce((sum, row) => sum + (row.expectedRank ? 1 / row.expectedRank : 0), 0);
 
+  // NDCG averaged only over queries that have positive expectations
+  const rowsWithPositive = judgedRows.filter((row) => row.expectedVerseTitles.length > 0);
+  const ndcg5 = rowsWithPositive.length
+    ? rowsWithPositive.reduce((s, row) => s + dcgAtK(row.expectedRank, 5), 0) / rowsWithPositive.length
+    : null;
+  const ndcg10 = rowsWithPositive.length
+    ? rowsWithPositive.reduce((s, row) => s + dcgAtK(row.expectedRank, 10), 0) / rowsWithPositive.length
+    : null;
+
+  // Score monotonicity averaged over queries that have ≥ 2 scored results
+  const monotoneValues = judgedRows
+    .map((row) => row.scoreMonotonicity)
+    .filter((v) => v !== null && v !== undefined);
+  const avgMonotonicity = monotoneValues.length
+    ? monotoneValues.reduce((s, v) => s + v, 0) / monotoneValues.length
+    : null;
+
   return {
     total,
     top1Accuracy: percentage(top1Hits, total),
     top3Accuracy: percentage(top3Hits, total),
     thresholdPassRate: percentage(thresholdPasses, total),
     mrr: total ? reciprocalRankSum / total : 0,
+    ndcg5,
+    ndcg10,
+    avgMonotonicity,
+    positiveQueryCount: rowsWithPositive.length,
   };
 }
 
@@ -57,6 +100,12 @@ function printSummary(label, metrics) {
   console.log(`  top3 accuracy: ${formatPercent(metrics.top3Accuracy)}`);
   console.log(`  threshold pass rate: ${formatPercent(metrics.thresholdPassRate)}`);
   console.log(`  MRR: ${metrics.mrr.toFixed(3)}`);
+  if (metrics.ndcg5 !== null && metrics.ndcg5 !== undefined) {
+    console.log(`  NDCG@5: ${metrics.ndcg5.toFixed(3)}  NDCG@10: ${metrics.ndcg10.toFixed(3)}  (n=${metrics.positiveQueryCount} positive queries)`);
+  }
+  if (metrics.avgMonotonicity !== null && metrics.avgMonotonicity !== undefined) {
+    console.log(`  score monotonicity: ${formatPercent(metrics.avgMonotonicity * 100)}  (calibration proxy)`);
+  }
 }
 
 function normalizeTitles(list) {
@@ -97,6 +146,7 @@ function main() {
     const top1Check = evaluateForbiddenConstraint(snapshot, forbiddenTop1, 1);
     const top5Check = evaluateForbiddenConstraint(snapshot, forbiddenTop5, 5);
     const passedThreshold = positivePass && top1Check.passed && top5Check.passed;
+    const scoreMonotonicity = snapshot ? computeScoreMonotonicity(snapshot.topResults) : null;
     return {
       id: queryDef.id,
       label: queryDef.label,
@@ -111,6 +161,7 @@ function main() {
       forbiddenTop1Offender: top1Check.offendingTitle,
       forbiddenTop5Offender: top5Check.offendingTitle,
       top1: snapshot?.topResults?.[0]?.verse_title || null,
+      scoreMonotonicity,
     };
   });
 
