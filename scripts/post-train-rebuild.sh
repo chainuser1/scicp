@@ -56,8 +56,11 @@ unzip -o "$ZIP_PATH" -d resources/models/scripture-minilm >/dev/null
 echo "[step] rebaking embeddings"
 python3 scripts/rebake-embeddings.py
 
-echo "[step] rebuilding whitening"
-node scripts/prebake-whitening.js
+echo "[step] rebuilding concept index"
+node scripts/build-concept-index.js
+
+echo "[step] rebuilding SVD"
+node scripts/prebake-svd.js
 
 echo "[step] rebuilding kNN graph"
 node scripts/prebake-knn.js

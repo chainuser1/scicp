@@ -12,8 +12,7 @@ import { ToastProvider } from './components/Toast';
 import ConnectionStatus from './components/ConnectionStatus';
 
 // Platform detection — download page/card and ads are web-only
-const isElectronApp  = !!window.electronAPI?.isElectron;
-const isCapacitorApp = !!(window.Capacitor?.isNativePlatform?.() || window.Capacitor?.platform);
+const isElectronApp = !!window.electronAPI?.isElectron;
 
 const Presenter = React.lazy(() => import('./pages/Presenter'));
 const Client = React.lazy(() => import('./pages/Client'));
@@ -75,7 +74,7 @@ function Home() {
           '@type': 'SoftwareApplication',
           name: 'Scriptures in View',
           applicationCategory: 'ReligiousApp',
-          operatingSystem: 'Windows, macOS, Linux, Android, Web',
+          operatingSystem: 'Windows, macOS, Linux, Web',
           offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
           description: 'Free real-time scripture presentation tool for worship services with intelligent search, multi-language support, and offline desktop apps.',
           url: 'https://cap-teyyko.live/',
@@ -112,11 +111,11 @@ function Home() {
             <span className="home-card-label">Display</span>
             <span className="home-card-desc">Show scriptures on the<br />screen for everyone</span>
           </Link>
-          {!isElectronApp && !isCapacitorApp && (
+          {!isElectronApp && (
           <Link to="/download" className="home-card">
             <span className="home-card-icon">⬇️</span>
             <span className="home-card-label">Offline Downloads</span>
-            <span className="home-card-desc">Get desktop and mobile apps<br />for offline church use</span>
+            <span className="home-card-desc">Get desktop apps<br />for offline church use</span>
           </Link>
           )}
           <Link to="/reader" className="home-card home-card--reader">
@@ -128,8 +127,8 @@ function Home() {
       </main>
 
      
-     {/* Ad unit — web only; hidden in Electron & Capacitor to avoid blank DOM node */}
-     {!isElectronApp && !isCapacitorApp && (
+     {/* Ad unit — web only; hidden in Electron to avoid blank DOM node */}
+     {!isElectronApp && (
        <div id="container-6da4a92b964c03d6c84f2de481fd6bb0" />
      )}
 
@@ -183,7 +182,7 @@ function App() {
               <Route path="/contact" element={<Contact />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
-              <Route path="/download" element={isElectronApp || isCapacitorApp ? <Navigate to="/" replace /> : <Download />} />
+              <Route path="/download" element={isElectronApp ? <Navigate to="/" replace /> : <Download />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </React.Suspense>

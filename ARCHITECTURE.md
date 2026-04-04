@@ -10,10 +10,8 @@ Sacred Scripture Projector (scicp) is a real-time scripture presentation engine.
 │  (React SPA) │                 │   (Fastify 5 +   │                │  (React SPA) │
 └─────────────┘                  │    Socket.IO 4)   │                └─────────────┘
                                  └───────┬──────────┘
-┌─────────────┐    REST + WS             │
-│   Mobile    │ ◄────────────►           │
-│ (Capacitor) │                  ┌───────┴──────────┐
-└─────────────┘                  │   SQLite DBs      │
+                                 ┌───────┴──────────┐
+                                 │   SQLite DBs      │
                                  │  (better-sqlite3) │
 ┌─────────────┐                  └──────────────────┘
 │   Desktop   │    Embedded
@@ -28,7 +26,6 @@ Sacred Scripture Projector (scicp) is a real-time scripture presentation engine.
 | Web (Presenter + Client + Reader) | `frontend/` | React 19, Vite 7 | No |
 | Backend API + WebSocket | `backend/` | Node.js 20, Fastify 5, Socket.IO 4 | — |
 | Desktop (Electron) | `electron/` | Electron 35, embedded backend | ✅ Full |
-| Mobile (Capacitor) | `mobile/` | Capacitor 7, Vite, React | No (caches chapters) |
 | Shared Logic | `shared/` | CommonJS, used by all platforms | — |
 
 ## Search Engine Version History
@@ -74,34 +71,6 @@ Personal scripture study. Features: continuous prose chapter reading, 5 visual t
 
 ### Client (TV Display)
 Passive display that receives verses from the Presenter. Auto-formats text, supports themes, shows highlighted text. Creates sessions via QR code or manual code.
-
-## Mobile Architecture
-
-The mobile app uses a 4-tab root navigation:
-
-| Tab | Component | Purpose |
-|-----|-----------|---------|
-| Home | `HomePage.jsx` | Landing page with mode cards (Present / Read) |
-| Read | `ReaderApp.jsx` | Personal study: browse, read, bookmarks, reading stats |
-| Present | Presenter flow | QR scan → session → search → stage → go live |
-| More | `MorePage.jsx` | About, Contact, Privacy, Terms, settings |
-
-### Reader Sub-Navigation
-Within the Read tab, ReaderApp manages internal screens:
-- **ReaderHome** — search bar, topic chips, book grid, continue reading
-- **ReaderBrowse** — search results, chapter/verse browse
-- **ChapterReader** — immersive reading with highlights, long-press menu
-- **ReaderBookmarks** — search, categories, grouped by book
-- **ReadingTab** — history, stats, spaced review
-
-### Key Hooks (mobile)
-- `useSocket` — Socket.IO connection, reconnection, offline queue
-- `useSearch` — debounced search with result management
-- `useHighlights` — 4-color verse highlighting (localStorage)
-- `useReaderBookmarks` — bookmarks with metadata, categories
-- `useReaderPrefs` — theme, font size, line height, font family, language
-- `useReadingAnalytics` — IntersectionObserver-based dwell tracking
-- `useNotes` — private verse notes (localStorage)
 
 ## Search Pipeline (v2.0 – Apr 2026)
 
@@ -200,7 +169,7 @@ All search conducted in English first (fastest, most accurate). After retrieving
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
 | `verse-embeddings.db` | **Raw** 384D MiniLM-L6 embeddings (L2-normalized, no ZCA whitening), HNSW index (v1, built from raw) |
 | `verse-graph.db` | kNN similarity graph, spectral embeddings (50D), cluster labels, cross-ref edges |
-| `search-graph.db` | Lightweight runtime copy (async-bundled for mobile/electron) |
+| `search-graph.db` | Lightweight runtime copy for packaged/runtime support |
 
 Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_embeddings_white`, `verse_knn`, `verse_spectral`
 
@@ -240,14 +209,12 @@ This script installs the latest model zip and regenerates: embeddings, whitening
 | Suite | Framework | Tests | Location |
 |-------|-----------|-------|----------|
 | Backend | Jest 29 | 119 | `backend/__tests__/index.test.js` |
-| Mobile | Vitest | 73 | `mobile/src/__tests__/` |
-| Frontend | ESLint | lint only | `frontend/eslint.config.js` |
+| Frontend | Vitest + ESLint | UI tests + lint | `frontend/src/__tests__/`, `frontend/eslint.config.js` |
 
 ## Deployment
 
 - **Production:** Docker image → Railway (health check at `/health`)
 - **Desktop:** Electron Builder via GitHub Actions → Windows/macOS/Linux installers
-- **Mobile:** Capacitor build → Android APK
 - **CI:** `npm run check:prod` — build + test + lint
 
 See `README.md` for build commands.

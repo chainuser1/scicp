@@ -22,8 +22,8 @@ npm install  # from project root
 | `prebake-cluster-labels.js` | Generate representative labels per cluster | `verse-embeddings.db` + `verse-graph.db` | `verse-graph.db` | ✅ Active |
 | `prebake-entity-centroids.js` | Build entity centroid embeddings | `verse-embeddings.db` + `verse-tags.db` | `verse-tags.db` | ✅ Active |
 | `prebake-hnsw.js` | Build ANN index from raw embeddings (v2.0+) | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
-| `prebake-search-graph.js` | Bundle graph/search tables for runtime/mobile | `verse-graph.db` + other DBs | `search-graph.db` | ✅ Active |
-| `export-training-pairs.js` | Export training data for fine-tuning/evaluation | `verse-graph.db` + other DBs | stdout/file | ✅ Active |
+| `prebake-search-graph.js` | Bundle graph/search tables for runtime packaging | `verse-graph.db` + other DBs | `search-graph.db` | ✅ Active |
+| `export-training-pairs.js` | Export training data for fine-tuning/evaluation, including modern-English translation pairs (YLT + NRSVUE) | `verse-graph.db` + other DBs | stdout/file | ✅ Active |
 | `calibrate-rrf-k.js` | Calibrate RRF k parameter | training pairs | stdout | ✅ Active |
 | `post-train-rebuild.sh` | One-command post-training rebuild pipeline | model zip + project DBs | refreshed semantic artifacts | ✅ Active |
 
@@ -44,6 +44,11 @@ For post-training updates (after a new `scripture-minilm.zip`), run:
 scripts/post-train-rebuild.sh
 # or pass a custom zip path:
 scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip
+
+This wrapper currently refreshes the fine-tuned model, concept index, verse embeddings,
+SVD, kNN graph, spectral features, clusters, cluster labels, entity centroids, HNSW, and
+the packaged search graph bundle. Whitening is intentionally skipped because it remains
+disabled in search v2.0.
 ```
 
 ## Notes
@@ -51,4 +56,4 @@ scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip
 - All scripts use `better-sqlite3` and run synchronously
 - Large DB files are tracked with Git LFS
 - Scripts are idempotent — safe to re-run (they DROP and recreate tables)
-- Latest training corpus is approximately 460,979 pairs (~461k)
+- Latest training corpus includes restored modern-English pairs from YLT and NRSVUE

@@ -35,31 +35,11 @@ const PLATFORM_META = [
     note: 'Debian, Ubuntu, Kali, Mint · Fully offline',
     guide: ['Download the .deb package.', 'Install: sudo dpkg -i scriptures*.deb', 'Open from your applications menu.'],
   },
-  {
-    label: 'Android',
-    platform: 'android',
-    category: 'mobile',
-    icon: '📱',
-    note: 'Phones and tablets · Coming soon',
-    guide: ['Android version is currently in development.', 'Check back for updates on availability.'],
-    comingSoon: true,
-  },
-  {
-    label: 'iOS',
-    platform: 'ios',
-    category: 'mobile',
-    icon: '🍏',
-    note: 'iPhone and iPad · Coming soon',
-    guide: ['iOS version is currently in development.', 'Check back for updates on availability.'],
-    comingSoon: true,
-  },
 ];
 
 /** Detect the visitor's OS to pre-select the best platform. */
 function detectPlatform() {
   const ua = navigator.userAgent.toLowerCase();
-  if (/android/.test(ua)) return 'android';
-  if (/iphone|ipad|ipod/.test(ua)) return null;
   if (/win/.test(ua)) return 'windows';
   if (/mac/.test(ua)) return 'mac';
   if (/linux/.test(ua)) return 'linux-deb';
@@ -75,8 +55,6 @@ export default function Download() {
   );
 
   const detectedPlatform = useMemo(() => detectPlatform(), []);
-  const detectedCategory = detectedPlatform === 'android' ? 'mobile' : detectedPlatform ? 'desktop' : 'desktop';
-  const [activeTab, setActiveTab] = useState(detectedCategory);
 
   useEffect(() => {
     let active = true;
@@ -94,7 +72,6 @@ export default function Download() {
         const assets = Array.isArray(data?.assets) ? data.assets : [];
         const find = (matcher) => assets.find(a => matcher(String(a.name || '').toLowerCase()))?.browser_download_url || null;
         const found = {
-          android: find(n => n.endsWith('.apk')),
           windows: find(n => n.endsWith('.exe')),
           mac: find(n => n.endsWith('.dmg')),
           'linux-appimage': find(n => n.endsWith('.appimage')),
@@ -163,15 +140,10 @@ export default function Download() {
     return () => { active = false; };
   }, []);
 
-  const groupedDownloads = useMemo(
-    () => ({
-      desktop: downloadLinks.filter(item => item.category === 'desktop'),
-      mobile: downloadLinks.filter(item => item.category === 'mobile'),
-    }),
+  const visiblePlatforms = useMemo(
+    () => downloadLinks.filter(item => item.category === 'desktop'),
     [downloadLinks]
   );
-
-  const visiblePlatforms = activeTab === 'desktop' ? groupedDownloads.desktop : groupedDownloads.mobile;
 
   const handleDownload = (item) => {
     if (item.comingSoon || !item.url) return;
@@ -187,14 +159,14 @@ export default function Download() {
     <div className="dl-page">
       <SEO
         title="Download"
-        description="Download Scriptures in View for Windows, Mac, Linux, and Android. Desktop apps work fully offline. Free scripture presentation for church and home."
+        description="Download Scriptures in View for Windows, Mac, and Linux. Desktop apps work fully offline. Free scripture presentation for church and home."
         path="/download"
         jsonLd={{
           '@context': 'https://schema.org',
           '@type': 'SoftwareApplication',
           name: 'Scriptures in View',
           applicationCategory: 'ReligiousApp',
-          operatingSystem: 'Windows, macOS, Linux, Android',
+          operatingSystem: 'Windows, macOS, Linux',
           offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
           description: 'Free offline scripture presentation app for worship services.',
           url: 'https://cap-teyyko.live/download',
@@ -248,40 +220,13 @@ export default function Download() {
               )}
             </div>
 
-            {/* Platform tabs */}
-            <div className="dl-tabs" role="tablist" aria-label="Choose platform type">
-              <button
-                role="tab"
-                aria-selected={activeTab === 'desktop'}
-                className={`dl-tab${activeTab === 'desktop' ? ' dl-tab--active' : ''}`}
-                onClick={() => setActiveTab('desktop')}
-              >
-                <span aria-hidden="true">🖥</span> Desktop
-              </button>
-              <button
-                role="tab"
-                aria-selected={activeTab === 'mobile'}
-                className={`dl-tab${activeTab === 'mobile' ? ' dl-tab--active' : ''}`}
-                onClick={() => setActiveTab('mobile')}
-              >
-                <span aria-hidden="true">📱</span> Mobile
-              </button>
-            </div>
-
-            {activeTab === 'desktop' && (
-              <p className="dl-capability-note">
-                Desktop apps bundle all scripture databases locally and work completely offline —
-                no internet connection needed after installation.
-              </p>
-            )}
-            {activeTab === 'mobile' && (
-              <p className="dl-capability-note">
-                Mobile apps for both Android and iOS are coming soon.
-              </p>
-            )}
+            <p className="dl-capability-note">
+              Desktop apps bundle all scripture databases locally and work completely offline —
+              no internet connection needed after installation.
+            </p>
 
             {/* Cards */}
-            <div className={`dl-grid dl-grid--${activeTab}`}>
+            <div className="dl-grid dl-grid--desktop">
               {visiblePlatforms.map(item => (
                 <div
                   key={item.platform}
@@ -298,12 +243,6 @@ export default function Download() {
                   {item.category === 'desktop' && (
                     <span className="dl-offline-badge">✓ Works without internet</span>
                   )}
-                  {item.platform === 'android' && (
-                    <span className="dl-online-badge">⚡ Requires server connection</span>
-                  )}
-                  {item.comingSoon && (
-                    <span className="dl-coming-badge">Coming Soon</span>
-                  )}
                   <div className="dl-card-rule" aria-hidden="true" />
                   <p className="dl-steps-label">How to get started</p>
                   <ol className="dl-steps" aria-label={`Installation steps for ${item.label}`}>
@@ -318,13 +257,13 @@ export default function Download() {
                     <button
                       type="button"
                       className="dl-btn"
-                      disabled={!accepted || !item.url || item.comingSoon}
-                      aria-disabled={!accepted || !item.url || item.comingSoon}
+                      disabled={!accepted || !item.url}
+                      aria-disabled={!accepted || !item.url}
                       onClick={() => handleDownload(item)}
                     >
-                      {item.comingSoon ? 'Coming Soon' : `Download for ${item.label}`}
+                      {`Download for ${item.label}`}
                     </button>
-                    {releaseTag && !item.comingSoon && (
+                    {releaseTag && (
                       <span className="dl-source">Latest · {releaseTag}</span>
                     )}
                   </div>

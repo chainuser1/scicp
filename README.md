@@ -10,7 +10,7 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 - **Intelligent search** — FTS5 full-text retrieval, semantic embeddings, and graph propagation
 - **Multi-language support** — English, Tagalog, Cebuano
 - **Reader mode** for personal study with highlights, bookmarks, and analytics
-- **Cross-platform** — Web, Desktop (Electron), and Mobile (Android)
+- **Cross-platform** — Web and Desktop (Electron)
 
 ---
 
@@ -21,7 +21,6 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 | Web | `frontend/` | React 19, Vite 7 | No |
 | Backend | `backend/` | Node.js 20, Fastify 5, Socket.IO 4 | — |
 | Desktop | `electron/` | Electron 35, embedded backend | ✅ Full |
-| Mobile | `mobile/` | Capacitor 7, Vite, React | No |
 | Shared | `shared/` | CommonJS utilities | — |
 
 ---
@@ -114,8 +113,6 @@ npm install
 npm run dev --workspace=backend
 npm run dev --workspace=frontend
 
-# Mobile dev
-cd mobile && npx vite dev
 ```
 
 ### Build
@@ -123,14 +120,13 @@ cd mobile && npx vite dev
 ```bash
 npm run build                        # Build frontend
 npm run build --workspace=frontend   # Frontend only
-cd mobile && npx vite build          # Mobile
 ```
 
 ### Test
 
 ```bash
-npm test --workspace=backend         # Backend: 119 tests (Jest)
-cd mobile && npx vitest run          # Mobile: 73 tests (Vitest)
+npm test --workspace=backend         # Backend tests (Jest)
+npm test --workspace=frontend        # Frontend tests (Vitest)
 npm run lint --workspace=frontend    # Frontend lint (ESLint)
 npm run check:prod                   # Full CI: build + test + lint
 ```
@@ -154,20 +150,6 @@ scicp/
 │   │   └── components/       # Footer, ScriptureReader
 │   ├── vite.config.js
 │   └── eslint.config.js
-├── mobile/
-│   ├── src/
-│   │   ├── App.jsx           # 4-tab root navigation (Home, Read, Present, More)
-│   │   ├── pages/
-│   │   │   ├── reader/       # ReaderApp, ChapterReader, ReaderHome, ReaderBrowse, etc.
-│   │   │   ├── info/         # AboutPage, ContactPage, PrivacyPage, TermsPage
-│   │   │   ├── HomePage.jsx  # Landing page with mode cards
-│   │   │   ├── Preview.jsx   # Presenter staging/preview
-│   │   │   └── MorePage.jsx  # Settings hub
-│   │   ├── hooks/            # useSocket, useSearch, useHighlights, useReaderBookmarks, etc.
-│   │   ├── components/       # StatusHeader, RootTabBar, QrScanner, reader/
-│   │   └── styles/           # reader.css, info.css
-│   ├── __tests__/            # 73 tests across 15 files
-│   └── vite.config.js
 ├── electron/                 # Electron main process
 ├── shared/                   # Common utilities
 ├── resources/db/             # SQLite databases
@@ -191,7 +173,7 @@ SQLite via `better-sqlite3` (synchronous API).
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
 | `verse-embeddings.db` | 384D MiniLM embeddings (raw + whitened) |
 | `verse-graph.db` | kNN, spectral, clusters, and graph features |
-| `search-graph.db` | Bundled lightweight search graph for runtime/mobile |
+| `search-graph.db` | Bundled lightweight search graph for runtime support |
 
 ---
 
@@ -222,7 +204,6 @@ SQLite via `better-sqlite3` (synchronous API).
 - **Docker:** `docker build .` → serves on port 8080
 - **Railway:** Auto-deploy via `railway.toml`, health check at `/health`
 - **Desktop:** Electron Builder → Windows/macOS/Linux installers
-- **Mobile:** Capacitor → Android APK
 
 ---
 

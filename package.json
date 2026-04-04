@@ -16,8 +16,7 @@
     "test:backend": "npm test --workspace=backend",
     "test:frontend": "npm test --workspace=frontend",
     "test:shared": "npm test --workspace=shared",
-    "test:mobile": "cd mobile && npx vitest run",
-    "test": "npm run test:backend && npm run test:shared && npm run test:frontend && npm run test:mobile",
+    "test": "npm run test:backend && npm run test:shared && npm run test:frontend",
     "lint:frontend": "npm run lint --workspace=frontend",
     "check:prod": "npm run build && npm run test && npm run lint:frontend",
     "electron:install": "npm install --prefix electron",
@@ -25,12 +24,7 @@
     "electron:build": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder",
     "electron:build:win": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder --win",
     "electron:build:mac": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder --mac",
-    "electron:build:linux": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux; rm -rf $HOME/electron-tmp-build",
-    "mobile:dev": "cd mobile && npm run dev",
-    "mobile:build": "cd mobile && npm run build",
-    "mobile:build:tv": "cd mobile && VITE_APP_MODE=tv npm run build",
-    "mobile:android": "cd mobile && npm run build && npx cap sync android",
-    "mobile:android:tv": "cd mobile && VITE_APP_MODE=tv npm run build && npx cap sync android"
+    "electron:build:linux": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux; rm -rf $HOME/electron-tmp-build"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

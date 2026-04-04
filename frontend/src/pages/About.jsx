@@ -67,7 +67,6 @@ function About() {
             <ul className="features-list">
               <li><strong>Web</strong> — Any modern browser at scripturesinview.com</li>
               <li><strong>Windows, Mac, Linux</strong> — Desktop apps with full offline support</li>
-              <li><strong>Android</strong> — Mobile app for on-the-go presenting and study</li>
             </ul>
           </section>
 
@@ -88,7 +87,7 @@ function About() {
             </div>
             <div className="faq-item">
               <h3>Where can it be used?</h3>
-              <p>It can be used on web, desktop, and Android, including offline use for church and home settings.</p>
+              <p>It can be used on the web and on desktop, including offline use for church and home settings.</p>
             </div>
             <div className="faq-item">
               <h3>What scriptures are available?</h3>
@@ -104,7 +103,7 @@ function About() {
             </div>
             <div className="faq-item">
               <h3>Can I use it without internet?</h3>
-              <p>The desktop app (Windows, Mac, Linux) works fully offline. The web and mobile versions require an internet connection for search and real-time features.</p>
+              <p>The desktop app (Windows, Mac, Linux) works fully offline. The web version requires an internet connection for search and real-time features.</p>
             </div>
             <div className="faq-item">
               <h3>How does the search work?</h3>
