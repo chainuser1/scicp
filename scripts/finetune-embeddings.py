@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Fine-tune all-MiniLM-L6-v2 on scripture using topical guide pairs.
+Legacy training script for all-MiniLM-L6-v2 using topical guide pairs.
+
+This file is retained for historical/reference use. The current recommended
+training flow for production search models is the configurable Kaggle notebook
+in scripts/finetune-kaggle.ipynb.
 
 Training signal:
   Each row in topical_guide (topic_name, verse_text) is a positive pair.

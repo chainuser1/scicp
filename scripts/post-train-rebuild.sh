@@ -78,7 +78,7 @@ echo "[step] rebuilding entity centroids"
 node scripts/prebake-entity-centroids.js
 
 echo "[step] rebuilding HNSW"
-node scripts/prebake-hnsw.js
+node scripts/prebake-hnsw.js --raw
 
 echo "[step] rebuilding search graph bundle"
 node scripts/prebake-search-graph.js

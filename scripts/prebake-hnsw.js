@@ -3,13 +3,14 @@
 //
 // One-time (or after embedding updates) script that:
 //  1. Reads all verse vectors from verse-embeddings.db
-//  2. Builds an HNSWIndex (384-dim, M=16, ef=200) — same params as runtime
+//  2. Builds an HNSWIndex using the current raw embedding dimension
 //  3. Serialises the graph to a compact binary BLOB
 //  4. Stores it in the `hnsw_index` table so the server can load it in ~50 ms instead of ~5 s
 //
 // Usage:
 //   node scripts/prebake-hnsw.js
 //   node scripts/prebake-hnsw.js --key hnsw_v2   # store under a custom key
+//   node scripts/prebake-hnsw.js --white         # force deprecated whitened source table
 
 'use strict';
 
@@ -18,7 +19,11 @@ const path = require('path');
 
 const EMB_PATH = path.join(__dirname, '..', 'resources', 'db', 'verse-embeddings.db');
 
-const EMBED_DIM = 384;
+// EMBED_DIM is intentionally NOT hardcoded here.
+// It is detected at runtime from the actual BLOB size of the first row
+// in the source embedding table (see detectDim() below).
+// This makes the script safe across model changes (384-dim MiniLM,
+// 768-dim BGE-base/mpnet, 1024-dim BGE-large) with no manual edits.
 const HNSW_M = 16;
 const HNSW_EF = 200;
 const DEFAULT_KEY = 'hnsw_v1';
@@ -29,9 +34,15 @@ const DEFAULT_KEY = 'hnsw_v1';
 const args = process.argv.slice(2);
 let storeKey = DEFAULT_KEY;
 let forceRaw = false;
+let forceWhite = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--key' && args[i + 1]) storeKey = args[++i];
   if (args[i] === '--raw') forceRaw = true;
+  if (args[i] === '--white') forceWhite = true;
+}
+
+if (forceRaw && forceWhite) {
+  throw new Error('[prebake-hnsw] Use only one of --raw or --white');
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +246,21 @@ class HNSWIndex {
 }
 
 // ---------------------------------------------------------------------------
+// Detect embedding dimension from the first BLOB in the source table.
+// Float32 = 4 bytes per value, so dim = byteLength / 4.
+// This is the single source of truth — no hardcoded dimension anywhere.
+// ---------------------------------------------------------------------------
+function detectDim(db, sourceTable) {
+  const row = db.prepare(`SELECT embedding FROM ${sourceTable} LIMIT 1`).get();
+  if (!row) throw new Error(`[prebake-hnsw] No rows found in ${sourceTable} — cannot detect dimension`);
+  const dim = row.embedding.byteLength / 4;
+  if (!Number.isInteger(dim) || dim < 64 || dim > 4096) {
+    throw new Error(`[prebake-hnsw] Unexpected embedding byte length ${row.embedding.byteLength} — got dim=${dim}`);
+  }
+  return dim;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 function main() {
@@ -255,16 +281,21 @@ function main() {
   console.log('[prebake-hnsw] Loading embeddings…');
   const t0 = Date.now();
 
-  // Try whitened embeddings first; fall back to raw
-  // Use --raw flag to force raw embeddings (e.g., when whitening is disabled in backend)
+  // Raw embeddings are the default source for search v2.0+.
+  // --white exists only for explicit debugging of deprecated whitening artifacts.
   const tables = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('verse_embeddings_white','verse_embeddings')"
   ).all().map(r => r.name);
 
-  const sourceTable = (forceRaw || !tables.includes('verse_embeddings_white'))
-    ? 'verse_embeddings'
-    : 'verse_embeddings_white';
-  console.log('[prebake-hnsw] Embedding source table:', sourceTable, forceRaw ? '(forced raw)' : '');
+  const sourceTable = (forceWhite && tables.includes('verse_embeddings_white'))
+    ? 'verse_embeddings_white'
+    : 'verse_embeddings';
+  const sourceMode = forceWhite ? '(forced white)' : (forceRaw ? '(forced raw)' : '(default raw)');
+  console.log('[prebake-hnsw] Embedding source table:', sourceTable, sourceMode);
+
+  // Detect dim from actual BLOB — safe across MiniLM (384), BGE-base/mpnet (768), BGE-large (1024)
+  const EMBED_DIM = detectDim(db, sourceTable);
+  console.log(`[prebake-hnsw] Detected embedding dim: ${EMBED_DIM}`);
 
   const rows = db.prepare(`SELECT verse_id, embedding FROM ${sourceTable}`).all();
   console.log(`[prebake-hnsw] Loaded ${rows.length} embeddings in ${Date.now() - t0} ms`);

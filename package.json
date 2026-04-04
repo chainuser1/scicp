@@ -13,6 +13,7 @@
     "dev": "npm run dev --workspace=backend  && npm run dev --workspace=frontend",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "start": "npm start --workspace=backend",
+    "capture:search-baseline": "node scripts/capture-search-baseline.js",
     "test:backend": "npm test --workspace=backend",
     "test:frontend": "npm test --workspace=frontend",
     "test:shared": "npm test --workspace=shared",

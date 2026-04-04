@@ -8,7 +8,8 @@
  * Math:  c_e = normalise( (1/|V_e|) Σ_{v ∈ V_e} emb(v) )
  *
  * Output: ai_entity_centroids table in verse-tags.db
- *   entity_id TEXT PK, centroid BLOB (384 × Float32 = 1536 bytes), verse_count INT
+ *   entity_id TEXT PK, centroid BLOB (dim × Float32), verse_count INT
+ *   (dim is detected at runtime from verse_embeddings BLOB size)
  */
 
 const Database = require('better-sqlite3');
@@ -16,21 +17,34 @@ const path = require('path');
 
 const TAGS_PATH = path.join(__dirname, '..', 'resources', 'db', 'verse-tags.db');
 const EMB_PATH  = path.join(__dirname, '..', 'resources', 'db', 'verse-embeddings.db');
-const DIM = 384;
 
 const tagsDb = new Database(TAGS_PATH);
 const embDb  = new Database(EMB_PATH, { readonly: true });
 
 tagsDb.pragma('journal_mode = WAL');
 
+// DIM detected at runtime — entity centroids must match verse embedding dim
+// or cosine similarity lookups at query time will be silently wrong.
+function detectDim(db) {
+  const row = db.prepare('SELECT embedding FROM verse_embeddings LIMIT 1').get();
+  if (!row) throw new Error('[prebake-entity-centroids] No rows in verse_embeddings');
+  const dim = row.embedding.byteLength / 4;
+  if (!Number.isInteger(dim) || dim < 64 || dim > 4096)
+    throw new Error(`[prebake-entity-centroids] Unexpected BLOB size ${row.embedding.byteLength} (dim=${dim})`);
+  return dim;
+}
+
 // ── Load all verse embeddings into memory ──
 console.log('Loading verse embeddings...');
+const DIM = detectDim(embDb);
+console.log(`[prebake-entity-centroids] Detected embedding dim: ${DIM}`);
+
 const embRows = embDb.prepare('SELECT verse_id, embedding FROM verse_embeddings').all();
 const embMap = new Map();
 for (const r of embRows) {
   embMap.set(r.verse_id, new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
 }
-console.log(`  ${embMap.size} verse embeddings loaded`);
+console.log(`  ${embMap.size} verse embeddings loaded (${DIM}-dim)`);
 
 // ── Load entity → verse mappings ──
 console.log('Loading entity-verse mappings...');

@@ -109,7 +109,7 @@ If no early return, automatically run phrase + semantic + keyword in parallel:
   - Assigns Tier 2 (phrase match) or Tier 3 (keyword match)
 
 - **Semantic Retrieval**
-  - Query embedded via fine-tuned MiniLM-L6 (384D, L2-normalized, NO whitening)
+  - Query embedded via the active fine-tuned sentence encoder (dimension depends on the current model, e.g. 768D for BGE-base)
   - HNSW approximate nearest neighbors (200 candidates, ef=150)
   - Filters score ≤ 0 (anti-correlated / irrelevant)
   - Assigns Tier 3–4 based on cosine similarity thresholds
@@ -163,9 +163,9 @@ All search conducted in English first (fastest, most accurate). After retrieving
 
 ### Embedding Model
 
-- **Base**: MiniLM-L6-v2 (sentence-transformers, 384D, ~22M params)
-- **Fine-tuning**: 460,979 training pairs (LDS scriptures + Strong's semantic + Rotherham alignment)
-- **Storage**: Raw embeddings (L2-normalized, NO ZCA whitening; 75 MB for 41,995 verses)
+- **Base**: Configurable sentence encoder; current rebuilds may use models such as BGE-base-en-v1.5 (768D)
+- **Fine-tuning**: retrieval-pair fine-tuning for scripture semantic search
+- **Storage**: Raw embeddings (L2-normalized, NO ZCA whitening; dimensionality depends on the active model)
 - **Index**: HNSW (hierarchical navigable small world, M=16, ef=200; ~600K edges, built from raw)
 
 ## Database Schema
@@ -177,11 +177,11 @@ All search conducted in English first (fastest, most accurate). After retrieving
 | `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible (alignment pairs) |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
-| `verse-embeddings.db` | **Raw** 384D MiniLM-L6 embeddings (L2-normalized, no ZCA whitening), HNSW index (v1, built from raw) |
+| `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA whitening), plus HNSW index built from raw |
 | `verse-graph.db` | kNN similarity graph, spectral embeddings (50D), cluster labels, cross-ref edges |
 | `search-graph.db` | Lightweight runtime copy for packaged/runtime support |
 
-Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_embeddings_white`, `verse_knn`, `verse_spectral`
+Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_knn`, `verse_spectral`
 
 ## Post-Training Operations
 
@@ -193,7 +193,7 @@ Recommended single command:
 scripts/post-train-rebuild.sh
 ```
 
-This script installs the latest model zip and regenerates: embeddings, whitening, kNN, spectral, clusters, cluster labels, entity centroids, HNSW, and the search graph bundle.
+This script installs the latest model zip and regenerates: embeddings, concept index, kNN, spectral, clusters, cluster labels, entity centroids, HNSW, and the search graph bundle. Whitening is intentionally excluded.
 
 ## Session Model
 

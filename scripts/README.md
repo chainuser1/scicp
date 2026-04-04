@@ -49,6 +49,10 @@ This wrapper currently refreshes the fine-tuned model, concept index, verse embe
 SVD, kNN graph, spectral features, clusters, cluster labels, entity centroids, HNSW, and
 the packaged search graph bundle. Whitening is intentionally skipped because it remains
 disabled in search v2.0.
+
+HNSW is built from the raw `verse_embeddings` table by default. If a stale
+`verse_embeddings_white` table still exists from older pipelines, it is ignored unless
+`--white` is passed explicitly for debugging.
 ```
 
 ## Notes

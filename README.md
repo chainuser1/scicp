@@ -54,7 +54,7 @@ Comprehensive 41-component mathematical pipeline optimized for scriptural semant
 
 1. **Input normalization** — KJV spelling variants (neighbor↔neighbour, color↔colour, etc.), reference detection, abbreviation expansion, doctrine alias expansion (50+ theological topics)
 2. **Multi-source retrieval** — FTS5 (BM25 ranking, AND/OR queries), phrase detection, scripture reference parsing
-3. **Semantic scoring (v2.0)** — fine-tuned MiniLM-L6 embeddings (384D raw, L2-normalized), HNSW approximate nearest neighbors, cosine similarity with proactive injection for multi-word queries
+3. **Semantic scoring (v2.0)** — fine-tuned sentence embeddings (current rebuilds may use 768D models such as BGE-base), raw L2-normalized vectors, HNSW approximate nearest neighbors, cosine similarity with proactive injection for multi-word queries
 4. **Entity resolution** — named entity recognition with polynomial feature scoring (people, places, themes)
 5. **Graph propagation** — kNN verse similarity graph, spectral features, cross-reference boosting, topical guide integration
 6. **Fusion** — Reciprocal Rank Fusion (RRF) combining FTS + semantic + graph signals with learned weights
@@ -171,7 +171,7 @@ SQLite via `better-sqlite3` (synchronous API).
 | `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible alignment source |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
-| `verse-embeddings.db` | 384D MiniLM embeddings (raw + whitened) |
+| `verse-embeddings.db` | Raw sentence embeddings plus HNSW index (embedding dimensionality depends on the active model) |
 | `verse-graph.db` | kNN, spectral, clusters, and graph features |
 | `search-graph.db` | Bundled lightweight search graph for runtime support |
 
