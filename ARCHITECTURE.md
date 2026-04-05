@@ -25,10 +25,36 @@ Sacred Scripture Projector (scicp) is a real-time scripture presentation engine.
 |----------|-----------|---------|---------|
 | Web (Presenter + Client + Reader) | `frontend/` | React 19, Vite 7 | No |
 | Backend API + WebSocket | `backend/` | Node.js 20, Fastify 5, Socket.IO 4 | — |
-| Desktop (Electron) | `electron/` | Electron 35, embedded backend | ✅ Full |
+| Desktop (Electron) | `electron/` | Electron 41, embedded backend | ✅ Full |
 | Shared Logic | `shared/` | CommonJS, used by all platforms | — |
 
-## Search Engine Version History
+## Electron Architecture
+
+```
+electron/
+├── main.js        # App lifecycle, splash, tray, IPC handlers, auto-updater
+├── preload.js     # contextBridge → window.electronAPI (getDisplays, openModeSwitcher, etc.)
+├── loading.html   # Splash screen; receives live status via ipcRenderer
+└── backend-deps/  # Transitive backend runtime deps (sync’d by scripts/sync-electron-deps.js)
+```
+
+**Startup sequence:**
+1. `createSplashWindow()` — splash shown immediately
+2. `setSplashStatus(‘Opening databases…’)` → `require(‘../backend/index.js’)` (synchronous DB open)
+3. `setSplashStatus(‘Starting local server…’)` → `startElectron()` (Fastify listen)
+4. `setSplashStatus(‘Loading search index…’)` → `waitForServer()`
+5. `setSplashStatus(‘Ready!’)` → 400 ms pause → `selectConnectionMode()` dialog
+6. `createWindows(mode)` + `setupTray()` + `setupAutoUpdater()`
+
+**Mode system:**
+- `selectConnectionMode()` — offline/online dialog at startup
+- `setupTray()` — system-tray icon; `buildTrayMenu()` shows current mode; “Switch Mode…” re-opens dialog at any time
+- `open-mode-switcher` IPC — renderer can trigger dialog without relaunch
+- `mode-changed` IPC event — tray-triggered switch notifies renderer to save state then call `switchConnectionMode`
+
+**ABI isolation:** `electron/main.js` patches `Module._resolveFilename` at startup to route `better-sqlite3` to the Electron-ABI build in `electron/node_modules/`. Never `npm install better-sqlite3` inside `electron/` directly — use `npm run electron:install`.
+
+
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
@@ -188,9 +214,19 @@ All search conducted in English first (fastest, most accurate). After retrieving
 | `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible (alignment pairs) |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
-| `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA whitening), plus HNSW index built from raw |
+| `spanish-scriptures-sqlite.db` | Spanish translations |
+| `greek-scriptures-sqlite.db` | Greek translations |
+| `ilocano-scriptures-sqlite.db` | Ilocano translations |
+| `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA whitening), plus HNSW index |
 | `verse-graph.db` | kNN similarity graph, spectral embeddings (50D), cluster labels, cross-ref edges |
 | `search-graph.db` | Lightweight runtime copy for packaged/runtime support |
+| `verse-tags.db` | Entity tags and topic annotations |
+| `verse-summaries.db` | AI-generated verse summaries |
+| `topical-guide.db` | LDS topical guide (3,512 topics, 21,991 verse links) |
+| `verse-cross-refs.db` | Cross-reference pairs |
+| `chapter-summaries-fts.db` | FTS5 index over chapter summaries |
+| `concept-embeddings.db` | Concept-level embeddings for PMI/co-occurrence index |
+| `triple-index.db` | Prebake intermediate (not opened at runtime) |
 
 Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_knn`, `verse_spectral`
 
@@ -252,13 +288,15 @@ Interpretation:
 
 | Suite | Framework | Tests | Location |
 |-------|-----------|-------|----------|
-| Backend | Jest 29 | 119 | `backend/__tests__/index.test.js` |
+| Backend | Jest 29 | 159 | `backend/__tests__/index.test.js` |
+| Shared | Jest 29 | — | `shared/__tests__/` |
 | Frontend | Vitest + ESLint | UI tests + lint | `frontend/src/__tests__/`, `frontend/eslint.config.js` |
 
 ## Deployment
 
 - **Production:** Docker image → Railway (health check at `/health`)
-- **Desktop:** Electron Builder via GitHub Actions → Windows/macOS/Linux installers
+- **Desktop:** Electron Builder via GitHub Actions → AppImage, deb, NSIS, DMG
+- **Analysis DBs:** `deploy.yml` is the sole LFS ingestion point (detects `data:` commit prefix); CI and Electron builds consume from GHCR. Always push rebuilds via `scripts/push-data.sh`.
 - **CI:** `npm run check:prod` — build + test + lint
 
 See `README.md` for build commands.

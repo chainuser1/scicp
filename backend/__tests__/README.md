@@ -1,37 +1,32 @@
 # Backend Tests
 
-This directory contains comprehensive tests for the backend API located in `../index.js`.
+This directory contains comprehensive tests for the backend API in `../index.js`.
 
 ## Test Coverage
 
-The tests cover the following functionality:
+**159 tests** covering:
 
 ### Core Functions
-- `parseScriptureReference`: Tests for parsing scripture references in various formats
-- `searchScripture`: Tests for searching scripture text by reference or phrase
-- `segmentVerseText`: Tests for splitting verses into readable segments
-- `registerSocketHandlers`: Tests for socket connection handlers
+- `searchScripture` — full pipeline including FTS, semantic, graph, and fusion stages
+- `registerSocketHandlers` — socket connection and event handlers
+
+> `parseScriptureReference` and `segmentVerseText` have moved to `shared/scripture-engine.js` and are tested in `shared/__tests__/`.
 
 ### API Endpoints
-- GET `/`: Health check endpoint
-- GET `/themes`: Retrieve all themes
-- POST `/themes`: Create a new theme
-- PUT `/themes/:id`: Update an existing theme
-- DELETE `/themes/:id`: Delete a theme
+- `GET /health` — health check
+- `GET /themes` — retrieve all themes
+- `POST /themes` — create a new theme
+- `PUT /themes/:id` — update an existing theme
+- `DELETE /themes/:id` — delete a theme
+- `GET /search` — scripture search endpoint
+- `GET /verse/of-the-day` — daily verse
+- Translation and cross-reference endpoints
 
 ### Testing Approach
 
-The tests use Jest as the test runner and include both unit tests for individual functions and integration tests for API endpoints. For API testing, we create a Fastify test server that replicates the routing and database logic from the main application.
+Jest 29 with both unit and integration tests. Integration tests use a Fastify test server with real SQLite databases. The backend uses `if (require.main === module)` to guard `start()` so Jest can `require('../index')` without binding a port.
 
 ## Running Tests
-
-To run the tests, use the npm script:
-
-```bash
-npm test
-```
-
-Or specifically for the backend:
 
 ```bash
 npm test --workspace=backend
@@ -39,8 +34,8 @@ npm test --workspace=backend
 
 ## Test Structure
 
-Each major function or feature has its own test suite with multiple test cases covering:
-- Normal operation scenarios
+Each feature has its own `describe` block covering:
+- Normal operation
 - Edge cases and error conditions
-- Invalid inputs and error handling
-- Database operations
+- Invalid inputs
+- Database operation correctness

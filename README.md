@@ -8,7 +8,7 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 
 - **Real-time projection** of scripture verses via WebSocket
 - **Intelligent search** — FTS5 full-text retrieval, semantic embeddings, and graph propagation
-- **Multi-language support** — English, Tagalog, Cebuano
+- **Multi-language support** — English, Tagalog, Cebuano, Spanish, Greek, Ilocano, Japanese, Waray, YLT
 - **Reader mode** for personal study with highlights, bookmarks, and analytics
 - **Cross-platform** — Web and Desktop (Electron)
 
@@ -20,7 +20,7 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 |----------|-----------|------------|---------|
 | Web | `frontend/` | React 19, Vite 7 | No |
 | Backend | `backend/` | Node.js 20, Fastify 5, Socket.IO 4 | — |
-| Desktop | `electron/` | Electron 35, embedded backend | ✅ Full |
+| Desktop | `electron/` | Electron 41, embedded backend | ✅ Full |
 | Shared | `shared/` | CommonJS utilities | — |
 
 ---
@@ -36,6 +36,8 @@ A free, real-time scripture presentation tool for worship services, seminary, fa
 - Real-time theme customization (background, font, colors)
 - Session system with PIN protection and QR code connection
 - Highlight text on-screen for emphasis
+- **Desktop:** system-tray icon with persistent mode switcher (offline ↔ online)
+- **Desktop:** live splash-screen status during startup (database → server → index → ready)
 
 ### Reader Mode
 
@@ -71,6 +73,13 @@ Search ranking is now intentionally specificity-first:
 
 
 ### Latest Improvements (Apr 2026)
+
+**v4.0.0 — Electron UX + Security (Apr 2026):**
+- ✅ **Electron 41** — bumped from 35 to fix 15 CVEs; 0 production vulnerabilities
+- ✅ **Live splash status** — startup phases streamed to splash window via IPC
+- ✅ **System tray mode switcher** — persistent tray icon; switch offline/online at any time without relaunching
+- ✅ **LFS/GHCR pipeline** — `deploy.yml` is sole ingestion point for rebuilt analysis DBs; CI and Electron build always use GHCR
+- ✅ **New Linux build scripts** — `electron:build:linux:appimage` and `electron:build:linux:deb` for per-format builds
 
 **Search Engine v2.0 Overhaul:**
 - ✅ **Disabled ZCA whitening** — was inverting cosine similarity rankings; now uses raw L2-normalized embeddings
@@ -139,27 +148,38 @@ npm install
 ### Development
 
 ```bash
-# Start backend (port 3000) + frontend (port 5173)
-# Run in separate terminals:
-npm run dev --workspace=backend
-npm run dev --workspace=frontend
-
+# Run in separate terminals (dev script is sequential — use workspaces):
+npm run dev --workspace=backend      # backend on :3000
+npm run dev --workspace=frontend     # Vite on :5173
 ```
 
 ### Build
 
 ```bash
-npm run build                        # Build frontend
+npm run build                        # Build frontend (Vite)
 npm run build --workspace=frontend   # Frontend only
 ```
 
 ### Test
 
 ```bash
+npm test                             # All suites: backend + shared + frontend
 npm test --workspace=backend         # Backend tests (Jest)
+npm test --workspace=shared          # Shared tests (Jest)
 npm test --workspace=frontend        # Frontend tests (Vitest)
 npm run lint --workspace=frontend    # Frontend lint (ESLint)
-npm run check:prod                   # Full CI: build + test + lint
+npm run check:prod                   # Full CI gate: build + test + lint
+```
+
+### Desktop (Electron)
+
+```bash
+npm run electron:dev                 # Build frontend + launch Electron
+npm run electron:build:linux         # AppImage + deb (both)
+npm run electron:build:linux:appimage  # AppImage only
+npm run electron:build:linux:deb     # deb only
+npm run electron:build:win           # Windows NSIS installer
+npm run electron:build:mac           # macOS DMG (x64 + arm64)
 ```
 
 ---
@@ -169,24 +189,31 @@ npm run check:prod                   # Full CI: build + test + lint
 ```
 scicp/
 ├── backend/
-│   ├── index.js              # All server code (Fastify + Socket.IO)
+│   ├── index.js              # All server code (~2500 lines, Fastify + Socket.IO)
 │   ├── package.json
 │   └── __tests__/
-│       └── index.test.js     # 119 tests
+│       └── index.test.js     # 159 Jest tests
 ├── frontend/
 │   ├── src/
 │   │   ├── App.jsx           # Router + Home
 │   │   ├── socket.js         # Socket.IO singleton
-│   │   ├── pages/            # About, Client, Contact, Download, Presenter, Privacy, Terms
-│   │   └── components/       # Footer, ScriptureReader
-│   ├── vite.config.js
+│   │   ├── pages/            # About, Client, Contact, Download, Presenter, Reader, Privacy, Terms
+│   │   └── components/       # ConnectionStatus, ErrorBoundary, Footer, LoadingSpinner, SEO, Toast
+│   ├── vite.config.js        # also configures Vitest
 │   └── eslint.config.js
-├── electron/                 # Electron main process
-├── shared/                   # Common utilities
-├── resources/db/             # SQLite databases
+├── electron/
+│   ├── main.js               # Electron main process (splash, tray, IPC, auto-update)
+│   ├── preload.js            # contextBridge API (electronAPI)
+│   ├── loading.html          # Splash screen with live status
+│   └── backend-deps/         # Transitive backend deps for bundling
+├── shared/
+│   ├── db-adapter.js         # BetterSqliteAdapter + SqlJsAdapter
+│   └── scripture-engine.js   # parseScriptureReference, segmentVerseText, etc.
+├── scripts/                  # Prebake + ML pipeline scripts
+├── resources/db/             # SQLite databases (20+ files)
 ├── Dockerfile
 ├── railway.toml
-└── package.json              # Root workspaces: backend + frontend
+└── package.json              # Root workspaces: backend + frontend + shared
 ```
 
 ---
@@ -197,14 +224,22 @@ SQLite via `better-sqlite3` (synchronous API).
 
 | Database | Purpose |
 |----------|---------|
-| `lds-scriptures-sqlite.db` | English scriptures, themes, FTS5 index |
-| `ylt-scriptures-sqlite.db` | Young's Literal Translation alignment source |
-| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible alignment source |
+| `lds-scriptures-sqlite.db` | Primary: 41,995 English verses, themes, FTS5 index |
+| `ylt-scriptures-sqlite.db` | Young's Literal Translation |
+| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
-| `verse-embeddings.db` | Raw sentence embeddings plus HNSW index (embedding dimensionality depends on the active model) |
-| `verse-graph.db` | kNN, spectral, clusters, and graph features |
-| `search-graph.db` | Bundled lightweight search graph for runtime support |
+| `spanish-scriptures-sqlite.db` | Spanish translations |
+| `greek-scriptures-sqlite.db` | Greek translations |
+| `ilocano-scriptures-sqlite.db` | Ilocano translations |
+| `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA), HNSW index |
+| `verse-graph.db` | kNN similarity graph, spectral embeddings, clusters, cross-ref edges |
+| `search-graph.db` | Bundled runtime search graph |
+| `verse-tags.db` | Entity tags and topic annotations |
+| `verse-summaries.db` | AI-generated verse and chapter summaries |
+| `topical-guide.db` | LDS topical guide (3,512 topics, 21,991 verse links) |
+| `verse-cross-refs.db` | Cross-reference pairs |
+| `chapter-summaries-fts.db` | FTS5 index over chapter summaries |
 
 ---
 
@@ -220,21 +255,26 @@ SQLite via `better-sqlite3` (synchronous API).
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3000` / `8080` (Docker) | Server listen port |
-| `NODE_ENV` | `development` | Controls static file serving |
-| `PUBLIC_ORIGIN` | from Host header | For QR code URLs behind proxies |
-| `REBUILD_FTS_ON_START` | `false` | Force FTS5 index rebuild |
-| `SESSION_GRACE_MS` | `1800000` | Session keep-alive after disconnect |
+| Variable | Default | Purpose |
+|----------|---------|-------------------------|
+| `PORT` | `3000` dev / `8080` Docker | Server listen port |
+| `NODE_ENV` | `development` | Controls static file serving and `SKIP_RECOMPUTE` |
+| `PUBLIC_ORIGIN` | from `Host` header | Required behind reverse proxies / Cloudflare Tunnel |
+| `REBUILD_FTS_ON_START` | `false` | Force FTS5 index rebuild at startup |
+| `SESSION_GRACE_MS` | `1800000` (30 min) | Session keep-alive after disconnect |
+| `DB_DIR` | `resources/db/` | Override database directory (Electron uses `extraResources`) |
+| `USER_DATA_DIR` | same as `DB_DIR` | Writable dir for themes and reader state |
+| `FRONTEND_DIST_DIR` | `frontend/dist/` | Override built frontend path |
+| `SENTRY_DSN` | unset | Enable Sentry crash reporting (backend + Electron main) |
 
 ---
 
 ## Deployment
 
-- **Docker:** `docker build .` → serves on port 8080
-- **Railway:** Auto-deploy via `railway.toml`, health check at `/health`
-- **Desktop:** Electron Builder → Windows/macOS/Linux installers
+- **Docker / Railway:** `docker build .` → port 8080, health check at `/health`. Auto-deploy via `railway.toml`.
+- **Desktop:** GitHub Actions CI builds signed Electron installers (AppImage, deb, NSIS, DMG). See `electron-builder.yml`.
+- **Analysis DBs:** Tracked via Git LFS, baked into GHCR image on each `data:` commit. Never `git push` directly after a rebuild — always use `scripts/push-data.sh`.
+- **CI gate:** `npm run check:prod` — build + all tests + lint.
 
 ---
 
