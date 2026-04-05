@@ -34,4 +34,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-download-progress', (_e, data) => cb(data));
   },
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // Opens the mode-switcher dialog from the renderer at any time.
+  // Resolves with { mode, serverUrl? } once the user confirms, or the
+  // current mode if they cancelled.
+  openModeSwitcher: () => ipcRenderer.invoke('open-mode-switcher'),
+
+  // Subscribe to mode changes triggered from the tray or main process.
+  // cb receives { mode: 'offline' } or { mode: 'online', serverUrl: '…' }.
+  onModeChanged: (cb) => {
+    ipcRenderer.on('mode-changed', (_e, data) => cb(data));
+  },
 });

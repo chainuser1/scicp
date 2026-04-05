@@ -1031,6 +1031,19 @@ const Presenter = () => {
         setUpdateProgress(prev => ({ ...prev, percent: data.percent, status: 'downloading' }));
       });
     }
+    // Tray-triggered mode change: save state, then hot-reload via switchConnectionMode
+    if (window.electronAPI?.onModeChanged) {
+      window.electronAPI.onModeChanged(async (newMode) => {
+        try {
+          sessionStorage.setItem('scicp.mode_switch_state', JSON.stringify({
+            liveVerse, staged, currentTheme, currentLanguage, secondaryLanguage,
+            history: history.slice(0, 20),
+            setlist: setlist.slice(0, 50),
+          }));
+        } catch { /* ignore */ }
+        await window.electronAPI.switchConnectionMode(newMode);
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -2343,6 +2356,37 @@ const Presenter = () => {
 
         {/* Right controls — desktop (hidden on narrow screens via CSS) */}
         <div className="hdr-right hdr-right--desktop">
+          {isElectronApp && window.electronAPI?.openModeSwitcher && (
+            <HdrBtn
+              onClick={async () => {
+                try {
+                  sessionStorage.setItem('scicp.mode_switch_state', JSON.stringify({
+                    liveVerse, staged, currentTheme, currentLanguage, secondaryLanguage,
+                    history: history.slice(0, 20),
+                    setlist: setlist.slice(0, 50),
+                  }));
+                } catch { /* ignore */ }
+                const newMode = await window.electronAPI.openModeSwitcher();
+                if (newMode && (newMode.mode !== (isRemoteMode ? 'online' : 'offline') ||
+                    (newMode.mode === 'online' && newMode.serverUrl))) {
+                  await window.electronAPI.switchConnectionMode(newMode);
+                }
+              }}
+              label="Switch connection mode"
+              title={isRemoteMode ? 'Online mode — click to switch' : 'Offline mode — click to switch'}
+            >
+              {isRemoteMode ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/>
+                </svg>
+              )}
+            </HdrBtn>
+          )}
           {electronDisplayCount > 1 && (
             <HdrBtn
               onClick={() => window.electronAPI.changeProjectionDisplay()}
@@ -2917,26 +2961,26 @@ const Presenter = () => {
                       Change display
                     </button>
                   )}
-                  {isElectronApp && window.electronAPI?.switchConnectionMode && (
+                  {isElectronApp && (window.electronAPI?.openModeSwitcher || window.electronAPI?.switchConnectionMode) && (
                     <button className="theme-btn" onClick={async () => {
                       setMobileMenuOpen(false);
-                      // Save state to sessionStorage before reload
-                      try {
-                        sessionStorage.setItem('scicp.mode_switch_state', JSON.stringify({
-                          liveVerse, staged, currentTheme, currentLanguage, secondaryLanguage,
-                          history: history.slice(0, 20),
-                          setlist: setlist.slice(0, 50),
-                        }));
-                      } catch { /* ignore */ }
-                      // Switch to the opposite mode
-                      if (isRemoteMode) {
-                        await window.electronAPI.switchConnectionMode({ mode: 'offline' });
-                      } else {
-                        const url = prompt('Enter remote server URL:', 'https://cap-teyyko.live');
-                        if (url) await window.electronAPI.switchConnectionMode({ mode: 'online', serverUrl: url });
+                      if (window.electronAPI?.openModeSwitcher) {
+                        // Save state, get new mode from dialog, then apply
+                        try {
+                          sessionStorage.setItem('scicp.mode_switch_state', JSON.stringify({
+                            liveVerse, staged, currentTheme, currentLanguage, secondaryLanguage,
+                            history: history.slice(0, 20),
+                            setlist: setlist.slice(0, 50),
+                          }));
+                        } catch { /* ignore */ }
+                        const newMode = await window.electronAPI.openModeSwitcher();
+                        if (newMode && (newMode.mode !== (isRemoteMode ? 'online' : 'offline') ||
+                            (newMode.mode === 'online' && newMode.serverUrl))) {
+                          await window.electronAPI.switchConnectionMode(newMode);
+                        }
                       }
                     }}>
-                      {isRemoteMode ? '📱 Switch to Offline' : '🌐 Switch to Online'}
+                      🔌 Switch Mode…
                     </button>
                   )}
                 </div>
