@@ -36,9 +36,9 @@ jobs:
 
       - name: Resolve DBs — git (translation) + GHCR (large analysis DBs)
         run: |
-          # Translation DBs are regular git binaries — from the checkout step above.
-          # Do NOT overwrite them from the GHCR image (image may predate this commit).
-          # Only extract large LFS-tracked analysis DBs from GHCR.
+          # GHCR :latest is always up-to-date: deploy.yml bakes fresh LFS data in
+          # whenever push-data.sh commits a data: rebuild. Fall back to LFS only
+          # when no image exists yet (first deploy).
           LFS_DBS="concept-embeddings.db verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
                    topical-guide.db verse-cross-refs.db triple-index.db \
                    chapter-summaries-fts.db footnotes-lds-summaries.db"
@@ -51,8 +51,9 @@ jobs:
             docker rm "$container"
           else
             echo "No GHCR image found — falling back to git lfs pull for analysis DBs"
-            git lfs pull
+            git lfs pull --include="resources/db/*.db"
           fi
+
           # Validate translation DBs (from git checkout)
           missing=0
           for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \

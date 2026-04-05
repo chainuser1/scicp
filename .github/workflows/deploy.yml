@@ -1,10 +1,15 @@
 # Build Docker image and push to GHCR.
 # Railway deploys the pre-built image (no source build needed).
 #
-# DB files strategy: instead of fetching from Git LFS (which consumes bandwidth),
-# we extract the DB files from the last good GHCR image. The DBs are static
-# scripture databases that don't change between most deploys. If no previous
-# image exists (first deploy), fall back to LFS.
+# DB files strategy:
+#   - If the triggering commit starts with "data:" (pushed by push-data.sh after a
+#     post-training rebuild), pull the LFS DBs fresh from Git LFS — they are the
+#     source of truth and must be baked into the new image.
+#   - Otherwise, copy analysis DBs from the existing GHCR image to save LFS
+#     bandwidth (they haven't changed). If no image exists yet, fall back to LFS.
+# This ensures push-data.sh + deploy.yml form a complete round-trip: LFS always
+# holds exactly one version of each DB (push-data.sh amends in-place) and the
+# deploy image is always up-to-date after a rebuild.
 name: Deploy
 
 on:
@@ -34,19 +39,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve DBs — git (translation) + GHCR (large analysis DBs)
+      - name: Resolve DBs — git (translation) + LFS or GHCR (large analysis DBs)
         run: |
-          # Translation/scripture DBs are regular git binary objects — already
-          # in the working tree from the checkout step above. Do NOT copy them
-          # from the GHCR image, which may be older than the current commit.
-          #
-          # Only extract the large LFS-tracked analysis DBs from the GHCR image.
-          # These are not in regular git checkout (stored in Git LFS, not as
-          # binary objects). Falls back to git lfs pull when no image exists.
           LFS_DBS="concept-embeddings.db verse-embeddings.db verse-summaries.db verse-graph.db verse-tags.db \
                    topical-guide.db verse-cross-refs.db triple-index.db \
                    chapter-summaries-fts.db footnotes-lds-summaries.db"
-          if docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+
+          COMMIT_MSG=$(git log -1 --format="%s")
+          if [[ "$COMMIT_MSG" == data:* ]]; then
+            # This is a post-training rebuild commit from push-data.sh.
+            # LFS holds the authoritative new DBs — pull them directly.
+            echo "data: commit detected — pulling fresh analysis DBs from Git LFS"
+            git lfs pull --include="resources/db/*.db"
+            for db in $LFS_DBS; do
+              head -c 6 "resources/db/$db" 2>/dev/null | grep -q 'SQLite' \
+                && echo "  ✓ $db from LFS" || echo "  WARNING: $db not valid SQLite after LFS pull"
+            done
+          elif docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest 2>/dev/null; then
+            # Normal code push — reuse analysis DBs from the last good image
+            # to avoid unnecessary LFS bandwidth.
+            echo "Reusing analysis DBs from last GHCR image"
             container=$(docker create ghcr.io/${{ env.IMAGE_NAME }}:latest)
             for db in $LFS_DBS; do
               docker cp "$container:/app/resources/db/$db" resources/db/ 2>/dev/null \
@@ -55,9 +67,10 @@ jobs:
             docker rm "$container"
           else
             echo "No GHCR image found — falling back to git lfs pull for analysis DBs"
-            git lfs pull
+            git lfs pull --include="resources/db/*.db"
           fi
-          # Validate translation DBs (must be valid SQLite from git checkout)
+
+          # Validate translation DBs (regular git binaries, must be valid SQLite)
           missing=0
           for db in lds-scriptures-sqlite.db ylt-scriptures-sqlite.db \
                     tagalog-scriptures-sqlite.db cebuano-scriptures-sqlite.db; do
