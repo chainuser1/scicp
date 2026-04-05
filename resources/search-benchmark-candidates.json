@@ -1,209 +1,11 @@
 {
-  "version": 1,
-  "description": "Judged benchmark queries for scripture search evaluation. Supports positive expectations via expectedVerseTitles plus threshold rules, and negative expectations via forbiddenTop1VerseTitles / forbiddenTopKVerseTitles.",
+  "description": "Auto-generated silver-label candidates — review then run --merge",
+  "generated": "2026-04-05T02:22:46.818Z",
+  "totalCandidates": 140,
+  "tier1_topical": 58,
+  "tier2_crossref": 51,
+  "tier3_summary": 31,
   "queries": [
-    {
-      "id": "exact-john-316",
-      "label": "Exact reference",
-      "category": "exact-reference",
-      "query": "John 3:16",
-      "expectedVerseTitles": [
-        "John 3:16"
-      ],
-      "targetRankThreshold": 1
-    },
-    {
-      "id": "exact-1-ne-37",
-      "label": "Book of Mormon reference",
-      "category": "exact-reference",
-      "query": "1 Ne 3:7",
-      "expectedVerseTitles": [
-        "1 Nephi 3:7"
-      ],
-      "targetRankThreshold": 1
-    },
-    {
-      "id": "exact-dc-76",
-      "label": "Doctrine and Covenants reference",
-      "category": "exact-reference",
-      "query": "D&C 76",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 76:1"
-      ],
-      "targetRankThreshold": 1
-    },
-    {
-      "id": "exact-genesis-11",
-      "label": "Genesis opening reference",
-      "category": "exact-reference",
-      "query": "Genesis 1:1",
-      "expectedVerseTitles": [
-        "Genesis 1:1"
-      ],
-      "targetRankThreshold": 1
-    },
-    {
-      "id": "exact-rev-214",
-      "label": "Abbreviated Revelation reference",
-      "category": "exact-reference",
-      "query": "Rev 21:4",
-      "expectedVerseTitles": [
-        "Revelation 21:4"
-      ],
-      "targetRankThreshold": 1
-    },
-    {
-      "id": "semantic-battle",
-      "label": "Paraphrased battle narrative",
-      "category": "semantic-paraphrase",
-      "query": "their generals died with ten thousand each",
-      "expectedVerseTitles": [
-        "Mormon 6:14"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "semantic-nephi",
-      "label": "Nephi family wording",
-      "category": "phrase-fragment",
-      "query": "nephi said unto my father",
-      "expectedVerseTitles": [
-        "1 Nephi 3:7"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "semantic-work-glory",
-      "label": "Moses 1:39 wording",
-      "category": "phrase-fragment",
-      "query": "for behold my work and glory",
-      "expectedVerseTitles": [
-        "Moses 1:39"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "phrase-revelation",
-      "label": "Revelation phrase",
-      "category": "phrase-fragment",
-      "query": "lamb slain before the foundation foundation",
-      "expectedVerseTitles": [
-        "Revelation 13:8"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "phrase-exhort",
-      "label": "Moroni's Promise phrase",
-      "category": "phrase-fragment",
-      "query": "ask with a sincere heart with real intent",
-      "expectedVerseTitles": [
-        "Moroni 10:4"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "phrase-exhort-short",
-      "label": "Moroni exhort wording cluster",
-      "category": "phrase-fragment",
-      "query": "and moreover i would exhort you",
-      "expectedVerseTitles": [
-        "Moroni 10:3",
-        "Moroni 10:4",
-        "Moroni 10:18",
-        "Moroni 10:19",
-        "Moroni 10:30"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "phrase-created-heaven",
-      "label": "Genesis phrase fragment",
-      "category": "phrase-fragment",
-      "query": "created the heaven",
-      "expectedVerseTitles": [
-        "Genesis 1:1"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "situational-grief",
-      "label": "Situational grief",
-      "category": "situational",
-      "query": "dealing with grief",
-      "expectedVerseTitles": [],
-      "targetRankThreshold": null,
-      "forbiddenTop1VerseTitles": [
-        "1 Samuel 25:31"
-      ],
-      "notes": "A broad pastoral query should not collapse to Abigail's speech in 1 Samuel 25:31 as the single best hit."
-    },
-    {
-      "id": "situational-temptation",
-      "label": "Situational temptation",
-      "category": "situational",
-      "query": "overcoming temptation",
-      "expectedVerseTitles": [],
-      "targetRankThreshold": null,
-      "forbiddenTop1VerseTitles": [
-        "Genesis 49:19"
-      ],
-      "notes": "Broad temptation queries should not rank incidental lexical overlap above spiritually relevant passages."
-    },
-    {
-      "id": "conceptual-faith",
-      "label": "Conceptual faith",
-      "category": "conceptual",
-      "query": "faith",
-      "expectedVerseTitles": [],
-      "targetRankThreshold": null,
-      "forbiddenTop5VerseTitles": [
-        "Psalms 36:5",
-        "Psalms 92:2",
-        "Psalms 119:138",
-        "Psalms 119:90",
-        "Proverbs 29:14"
-      ],
-      "notes": "Faith queries should not be dominated by faithfulness-language lexical matches that miss the doctrinal concept."
-    },
-    {
-      "id": "conceptual-mercy",
-      "label": "Conceptual mercy",
-      "category": "conceptual",
-      "query": "mercy",
-      "expectedVerseTitles": [],
-      "targetRankThreshold": null,
-      "forbiddenTop5VerseTitles": [
-        "Exodus 37:9",
-        "Exodus 20:6",
-        "Exodus 25:20",
-        "Deuteronomy 5:10",
-        "Leviticus 16:15"
-      ],
-      "notes": "Mercy queries should not be overwhelmed by mercy-seat / ark-construction lexical artifacts."
-    },
-    {
-      "id": "phrase-called-many-few-chosen",
-      "label": "Called many but few chosen",
-      "category": "phrase-fragment",
-      "query": "called many but few chosen",
-      "expectedVerseTitles": [
-        "Matthew 22:14",
-        "Matthew 20:16"
-      ],
-      "targetRankThreshold": 3
-    },
-    {
-      "id": "fts-stem-children-gathering-woods",
-      "label": "Stem-variant FTS specificity (Jeremiah 7:18)",
-      "category": "phrase-fragment",
-      "query": "children gathering woods",
-      "expectedVerseTitles": [
-        "Jeremiah 7:18"
-      ],
-      "targetRankThreshold": 3,
-      "notes": "Porter stemming finds 'gathering'→'gather', 'woods'→'wood'. FTS AND returns only Jeremiah 7:18. Must reach top 3."
-    },
     {
       "id": "tg-ark-of-the-covenant",
       "label": "TG: Ark of the Covenant",
@@ -1075,660 +877,666 @@
     },
     {
       "id": "xref-john-3-16",
-      "label": "Full-sentence retrieval: John 3:16",
+      "label": "Cross-ref cluster: John 3:16",
       "category": "cross-reference",
       "query": "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.",
       "expectedVerseTitles": [
-        "John 3:16"
+        "John 3:16",
+        "1 Chronicles 16:18",
+        "1 Chronicles 16:34"
       ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
+      "targetRankThreshold": 5,
+      "notes": "Silver label: John 3:16 + human-curated cross-refs. Tests semantic clustering."
     },
     {
       "id": "xref-john-1-1",
-      "label": "Full-sentence retrieval: John 1:1",
+      "label": "Cross-ref cluster: John 1:1",
       "category": "cross-reference",
       "query": "In the beginning was the Word, and the Word was with God, and the Word was God.",
       "expectedVerseTitles": [
-        "John 1:1"
+        "John 1:1",
+        "1 Corinthians 10:13",
+        "1 Corinthians 10:4"
       ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
+      "targetRankThreshold": 5,
+      "notes": "Silver label: John 1:1 + human-curated cross-refs. Tests semantic clustering."
     },
     {
       "id": "xref-john-11-25",
-      "label": "Full-sentence retrieval: John 11:25",
-      "category": "cross-reference",
-      "query": "Jesus said unto her, I am the resurrection, and the life: he that believeth in me, though he were dead, yet shall he live:",
-      "expectedVerseTitles": [
-        "John 11:25"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-john-14-6",
-      "label": "Full-sentence retrieval: John 14:6",
-      "category": "cross-reference",
-      "query": "Jesus saith unto him, I am the way, the truth, and the life: no man cometh unto the Father, but by me.",
-      "expectedVerseTitles": [
-        "John 14:6"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-john-15-12",
-      "label": "Full-sentence retrieval: John 15:12",
-      "category": "cross-reference",
-      "query": "This is my commandment, That ye love one another, as I have loved you.",
-      "expectedVerseTitles": [
-        "John 15:12"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-matthew-5-3",
-      "label": "Full-sentence retrieval: Matthew 5:3",
-      "category": "cross-reference",
-      "query": "Blessed are the poor in spirit: for theirs is the kingdom of heaven.",
-      "expectedVerseTitles": [
-        "Matthew 5:3"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-matthew-5-44",
-      "label": "Full-sentence retrieval: Matthew 5:44",
-      "category": "cross-reference",
-      "query": "But I say unto you, Love your enemies, bless them that curse you, do good to them that hate you, and pray for them which despitefully use you, and persecute you;",
-      "expectedVerseTitles": [
-        "Matthew 5:44"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-matthew-6-9",
-      "label": "Full-sentence retrieval: Matthew 6:9",
-      "category": "cross-reference",
-      "query": "After this manner therefore pray ye: Our Father which art in heaven, Hallowed be thy name.",
-      "expectedVerseTitles": [
-        "Matthew 6:9"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-matthew-22-37",
-      "label": "Full-sentence retrieval: Matthew 22:37",
-      "category": "cross-reference",
-      "query": "Jesus said unto him, Thou shalt love the Lord thy God with all thy heart, and with all thy soul, and with all thy mind.",
-      "expectedVerseTitles": [
-        "Matthew 22:37"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-matthew-22-39",
-      "label": "Full-sentence retrieval: Matthew 22:39",
-      "category": "cross-reference",
-      "query": "And the second is like unto it, Thou shalt love thy neighbour as thyself.",
-      "expectedVerseTitles": [
-        "Matthew 22:39"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-romans-5-8",
-      "label": "Full-sentence retrieval: Romans 5:8",
-      "category": "cross-reference",
-      "query": "But God commendeth his love toward us, in that, while we were yet sinners, Christ died for us.",
-      "expectedVerseTitles": [
-        "Romans 5:8"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-romans-8-28",
-      "label": "Full-sentence retrieval: Romans 8:28",
-      "category": "cross-reference",
-      "query": "And we know that all things work together for good to them that love God, to them who are the called according to his purpose.",
-      "expectedVerseTitles": [
-        "Romans 8:28"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-ephesians-2-8",
-      "label": "Full-sentence retrieval: Ephesians 2:8",
-      "category": "cross-reference",
-      "query": "For by grace are ye saved through faith; and that not of yourselves: it is the gift of God:",
-      "expectedVerseTitles": [
-        "Ephesians 2:8"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-philippians-4-7",
-      "label": "Full-sentence retrieval: Philippians 4:7",
-      "category": "cross-reference",
-      "query": "And the peace of God, which passeth all understanding, shall keep your hearts and minds through Christ Jesus.",
-      "expectedVerseTitles": [
-        "Philippians 4:7"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-philippians-4-13",
-      "label": "Full-sentence retrieval: Philippians 4:13",
-      "category": "cross-reference",
-      "query": "I can do all things through Christ which strengtheneth me.",
-      "expectedVerseTitles": [
-        "Philippians 4:13"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-1-corinthians-13-4",
-      "label": "Full-sentence retrieval: 1 Corinthians 13:4",
-      "category": "cross-reference",
-      "query": "Charity suffereth long, and is kind; charity envieth not; charity vaunteth not itself, is not puffed up,",
-      "expectedVerseTitles": [
-        "1 Corinthians 13:4"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-1-corinthians-13-13",
-      "label": "Full-sentence retrieval: 1 Corinthians 13:13",
-      "category": "cross-reference",
-      "query": "And now abideth faith, hope, charity, these three; but the greatest of these is charity.",
-      "expectedVerseTitles": [
-        "1 Corinthians 13:13"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-james-1-5",
-      "label": "Full-sentence retrieval: James 1:5",
-      "category": "cross-reference",
-      "query": "If any of you lack wisdom, let him ask of God, that giveth to all men liberally, and upbraideth not; and it shall be given him.",
-      "expectedVerseTitles": [
-        "James 1:5"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-james-2-17",
-      "label": "Full-sentence retrieval: James 2:17",
-      "category": "cross-reference",
-      "query": "Even so faith, if it hath not works, is dead, being alone.",
-      "expectedVerseTitles": [
-        "James 2:17"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-hebrews-11-1",
-      "label": "Full-sentence retrieval: Hebrews 11:1",
-      "category": "cross-reference",
-      "query": "Now faith is the substance of things hoped for, the evidence of things not seen.",
-      "expectedVerseTitles": [
-        "Hebrews 11:1"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-1-john-4-8",
-      "label": "Full-sentence retrieval: 1 John 4:8",
-      "category": "cross-reference",
-      "query": "He that loveth not knoweth not God; for God is love.",
-      "expectedVerseTitles": [
-        "1 John 4:8"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-proverbs-3-5",
-      "label": "Full-sentence retrieval: Proverbs 3:5",
-      "category": "cross-reference",
-      "query": "Trust in the Lord with all thine heart; and lean not unto thine own understanding.",
-      "expectedVerseTitles": [
-        "Proverbs 3:5"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-proverbs-3-6",
-      "label": "Full-sentence retrieval: Proverbs 3:6",
-      "category": "cross-reference",
-      "query": "In all thy ways acknowledge him, and he shall direct thy paths.",
-      "expectedVerseTitles": [
-        "Proverbs 3:6"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-psalms-23-1",
-      "label": "Full-sentence retrieval: Psalms 23:1",
-      "category": "cross-reference",
-      "query": "The Lord is my shepherd; I shall not want.",
-      "expectedVerseTitles": [
-        "Psalms 23:1"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-isaiah-53-5",
-      "label": "Full-sentence retrieval: Isaiah 53:5",
-      "category": "cross-reference",
-      "query": "But he was wounded for our transgressions, he was bruised for our iniquities: the chastisement of our peace was upon him; and with his stripes we are healed.",
-      "expectedVerseTitles": [
-        "Isaiah 53:5"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-isaiah-40-31",
-      "label": "Full-sentence retrieval: Isaiah 40:31",
-      "category": "cross-reference",
-      "query": "But they that wait upon the Lord shall renew their strength; they shall mount up with wings as eagles; they shall run, and not be weary; and they shall walk, and not faint.",
-      "expectedVerseTitles": [
-        "Isaiah 40:31"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-isaiah-1-18",
-      "label": "Full-sentence retrieval: Isaiah 1:18",
-      "category": "cross-reference",
-      "query": "Come now, and let us reason together, saith the Lord: though your sins be as scarlet, they shall be as white as snow; though they be red like crimson, they shall be as wool.",
-      "expectedVerseTitles": [
-        "Isaiah 1:18"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-jeremiah-29-11",
-      "label": "Full-sentence retrieval: Jeremiah 29:11",
-      "category": "cross-reference",
-      "query": "For I know the thoughts that I think toward you, saith the Lord, thoughts of peace, and not of evil, to give you an expected end.",
-      "expectedVerseTitles": [
-        "Jeremiah 29:11"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-joshua-24-15",
-      "label": "Full-sentence retrieval: Joshua 24:15",
-      "category": "cross-reference",
-      "query": "And if it seem evil unto you to serve the Lord, choose you this day whom ye will serve; whether the gods which your fathers served that were on the other side of the flood, or the gods of the Amorites",
-      "expectedVerseTitles": [
-        "Joshua 24:15"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-micah-6-8",
-      "label": "Full-sentence retrieval: Micah 6:8",
-      "category": "cross-reference",
-      "query": "He hath shewed thee, O man, what is good; and what doth the Lord require of thee, but to do justly, and to love mercy, and to walk humbly with thy God?",
-      "expectedVerseTitles": [
-        "Micah 6:8"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-2-nephi-2-25",
-      "label": "Full-sentence retrieval: 2 Nephi 2:25",
-      "category": "cross-reference",
-      "query": "Adam fell that men might be; and men are, that they might have joy.",
-      "expectedVerseTitles": [
-        "2 Nephi 2:25"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-2-nephi-2-27",
-      "label": "Full-sentence retrieval: 2 Nephi 2:27",
-      "category": "cross-reference",
-      "query": "Wherefore, men are free according to the flesh; and all things are given them which are expedient unto man. And they are free to choose liberty and eternal life, through the great Mediator of all men,",
-      "expectedVerseTitles": [
-        "2 Nephi 2:27"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-2-nephi-31-20",
-      "label": "Full-sentence retrieval: 2 Nephi 31:20",
-      "category": "cross-reference",
-      "query": "Wherefore, ye must press forward with a steadfastness in Christ, having a perfect brightness of hope, and a love of God and of all men. Wherefore, if ye shall press forward, feasting upon the word of ",
-      "expectedVerseTitles": [
-        "2 Nephi 31:20"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-1-nephi-3-7",
-      "label": "Full-sentence retrieval: 1 Nephi 3:7",
-      "category": "cross-reference",
-      "query": "And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded, for I know that the Lord giveth no commandments unto the children of men, save he sha",
-      "expectedVerseTitles": [
-        "1 Nephi 3:7"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-alma-32-21",
-      "label": "Full-sentence retrieval: Alma 32:21",
-      "category": "cross-reference",
-      "query": "And now as I said concerning faith--faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true.",
-      "expectedVerseTitles": [
-        "Alma 32:21"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-alma-34-9",
-      "label": "Full-sentence retrieval: Alma 34:9",
-      "category": "cross-reference",
-      "query": "For it is expedient that an atonement should be made; for according to the great plan of the Eternal God there must be an atonement made, or else all mankind must unavoidably perish; yea, all are hard",
-      "expectedVerseTitles": [
-        "Alma 34:9"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-alma-42-15",
-      "label": "Full-sentence retrieval: Alma 42:15",
-      "category": "cross-reference",
-      "query": "And now, the plan of mercy could not be brought about except an atonement should be made; therefore God himself atoneth for the sins of the world, to bring about the plan of mercy, to appease the dema",
-      "expectedVerseTitles": [
-        "Alma 42:15"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-mosiah-3-19",
-      "label": "Full-sentence retrieval: Mosiah 3:19",
-      "category": "cross-reference",
-      "query": "For the natural man is an enemy to God, and has been from the fall of Adam, and will be, forever and ever, unless he yields to the enticings of the Holy Spirit, and putteth off the natural man and bec",
-      "expectedVerseTitles": [
-        "Mosiah 3:19"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-mosiah-4-9",
-      "label": "Full-sentence retrieval: Mosiah 4:9",
-      "category": "cross-reference",
-      "query": "Believe in God; believe that he is, and that he created all things, both in heaven and in earth; believe that he has all wisdom, and all power, both in heaven and in earth; believe that man doth not c",
-      "expectedVerseTitles": [
-        "Mosiah 4:9"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-moroni-7-45",
-      "label": "Full-sentence retrieval: Moroni 7:45",
-      "category": "cross-reference",
-      "query": "And charity suffereth long, and is kind, and envieth not, and is not puffed up, seeketh not her own, is not easily provoked, thinketh no evil, and rejoiceth not in iniquity but rejoiceth in the truth,",
-      "expectedVerseTitles": [
-        "Moroni 7:45"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-moroni-10-4",
-      "label": "Full-sentence retrieval: Moroni 10:4",
-      "category": "cross-reference",
-      "query": "And when ye shall receive these things, I would exhort you that ye would ask God, the Eternal Father, in the name of Christ, if these things are not true; and if ye shall ask with a sincere heart, wit",
-      "expectedVerseTitles": [
-        "Moroni 10:4"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-moroni-10-5",
-      "label": "Full-sentence retrieval: Moroni 10:5",
-      "category": "cross-reference",
-      "query": "And by the power of the Holy Ghost ye may know the truth of all things.",
-      "expectedVerseTitles": [
-        "Moroni 10:5"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-3-nephi-11-10",
-      "label": "Full-sentence retrieval: 3 Nephi 11:10",
-      "category": "cross-reference",
-      "query": "Behold, I am Jesus Christ, whom the prophets testified shall come into the world.",
-      "expectedVerseTitles": [
-        "3 Nephi 11:10"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-3-nephi-27-27",
-      "label": "Full-sentence retrieval: 3 Nephi 27:27",
-      "category": "cross-reference",
-      "query": "And know ye that ye shall be judges of this people, according to the judgment which I shall give unto you, which shall be just. Therefore, what manner of men ought ye to be? Verily I say unto you, eve",
-      "expectedVerseTitles": [
-        "3 Nephi 27:27"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-doctrine-and-covenants-4-2",
-      "label": "Full-sentence retrieval: Doctrine and Covenants 4:2",
-      "category": "cross-reference",
-      "query": "Therefore, O ye that embark in the service of God, see that ye serve him with all your heart, might, mind and strength, that ye may stand blameless before God at the last day.",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 4:2"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-doctrine-and-covenants-76-22",
-      "label": "Full-sentence retrieval: Doctrine and Covenants 76:22",
-      "category": "cross-reference",
-      "query": "And now, after the many testimonies which have been given of him, this is the testimony, last of all, which we give of him: That he lives!",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 76:22"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-doctrine-and-covenants-121-7",
-      "label": "Full-sentence retrieval: Doctrine and Covenants 121:7",
-      "category": "cross-reference",
-      "query": "My son, peace be unto thy soul; thine adversity and thine afflictions shall be but a small moment;",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 121:7"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-doctrine-and-covenants-121-8",
-      "label": "Full-sentence retrieval: Doctrine and Covenants 121:8",
-      "category": "cross-reference",
-      "query": "And then, if thou endure it well, God shall exalt thee on high; thou shalt triumph over all thy foes.",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 121:8"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-doctrine-and-covenants-130-22",
-      "label": "Full-sentence retrieval: Doctrine and Covenants 130:22",
-      "category": "cross-reference",
-      "query": "The Father has a body of flesh and bones as tangible as man's; the Son also; but the Holy Ghost has not a body of flesh and bones, but is a personage of Spirit. Were it not so, the Holy Ghost could no",
-      "expectedVerseTitles": [
-        "Doctrine and Covenants 130:22"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-moses-1-39",
-      "label": "Full-sentence retrieval: Moses 1:39",
-      "category": "cross-reference",
-      "query": "For behold, this is my work and my glory--to bring to pass the immortality and eternal life of man.",
-      "expectedVerseTitles": [
-        "Moses 1:39"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "xref-abraham-3-22",
-      "label": "Full-sentence retrieval: Abraham 3:22",
-      "category": "cross-reference",
-      "query": "Now the Lord had shown unto me, Abraham, the intelligences that were organized before the world was; and among all these there were many of the noble and great ones;",
-      "expectedVerseTitles": [
-        "Abraham 3:22"
-      ],
-      "targetRankThreshold": 1,
-      "notes": "Querying a verse's own text must return it at rank 1 (baseline sanity)."
-    },
-    {
-      "id": "sempair-hebrews-11-1-alma-32-21",
-      "label": "Semantic pair: Faith definition pair (Hebrews ↔ Alma)",
-      "category": "cross-reference",
-      "query": "Now faith is the substance of things hoped for, the evidence of things not seen.",
-      "expectedVerseTitles": [
-        "Hebrews 11:1",
-        "Alma 32:21"
-      ],
-      "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
-    },
-    {
-      "id": "sempair-john-11-25-isaiah-26-19",
-      "label": "Semantic pair: Resurrection promise pair",
+      "label": "Cross-ref cluster: John 11:25",
       "category": "cross-reference",
       "query": "Jesus said unto her, I am the resurrection, and the life: he that believeth in me, though he were dead, yet shall he live:",
       "expectedVerseTitles": [
         "John 11:25",
-        "Isaiah 26:19"
+        "1 Corinthians 13:7",
+        "1 Corinthians 14:24"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: John 11:25 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-john-15-12-moroni-7-45",
-      "label": "Semantic pair: Love commandment pair (John ↔ Moroni)",
+      "id": "xref-john-14-6",
+      "label": "Cross-ref cluster: John 14:6",
+      "category": "cross-reference",
+      "query": "Jesus saith unto him, I am the way, the truth, and the life: no man cometh unto the Father, but by me.",
+      "expectedVerseTitles": [
+        "John 14:6",
+        "1 Chronicles 29:14",
+        "1 Corinthians 10:11"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: John 14:6 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-john-15-12",
+      "label": "Cross-ref cluster: John 15:12",
       "category": "cross-reference",
       "query": "This is my commandment, That ye love one another, as I have loved you.",
       "expectedVerseTitles": [
         "John 15:12",
-        "Moroni 7:45"
+        "1 Corinthians 13:13",
+        "1 Corinthians 2:9"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: John 15:12 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-moses-1-39-2-nephi-10-23",
-      "label": "Semantic pair: Eternal life purpose pair",
+      "id": "xref-matthew-5-3",
+      "label": "Cross-ref cluster: Matthew 5:3",
       "category": "cross-reference",
-      "query": "For behold, this is my work and my glory--to bring to pass the immortality and eternal life of man.",
+      "query": "Blessed are the poor in spirit: for theirs is the kingdom of heaven.",
       "expectedVerseTitles": [
-        "Moses 1:39",
-        "2 Nephi 10:23"
+        "Matthew 5:3",
+        "1 Chronicles 16:36",
+        "1 Chronicles 28:12"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: Matthew 5:3 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-james-1-5-doctrine-and-covenants-42-68",
-      "label": "Semantic pair: Ask in faith pair (James ↔ D&C)",
+      "id": "xref-matthew-5-44",
+      "label": "Cross-ref cluster: Matthew 5:44",
       "category": "cross-reference",
-      "query": "If any of you lack wisdom, let him ask of God, that giveth to all men liberally, and upbraideth not; and it shall be given him.",
+      "query": "But I say unto you, Love your enemies, bless them that curse you, do good to them that hate you, and pray for them which despitefully use you, and persecute you;",
       "expectedVerseTitles": [
-        "James 1:5",
-        "Doctrine and Covenants 42:68"
+        "Matthew 5:44",
+        "1 Chronicles 16:34",
+        "1 Corinthians 10:16"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: Matthew 5:44 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-romans-8-28-doctrine-and-covenants-90-24",
-      "label": "Semantic pair: All things work for good pair",
+      "id": "xref-matthew-6-9",
+      "label": "Cross-ref cluster: Matthew 6:9",
+      "category": "cross-reference",
+      "query": "After this manner therefore pray ye: Our Father which art in heaven, Hallowed be thy name.",
+      "expectedVerseTitles": [
+        "Matthew 6:9",
+        "1 Chronicles 16:29",
+        "1 Corinthians 11:13"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Matthew 6:9 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-matthew-22-37",
+      "label": "Cross-ref cluster: Matthew 22:37",
+      "category": "cross-reference",
+      "query": "Jesus said unto him, Thou shalt love the Lord thy God with all thy heart, and with all thy soul, and with all thy mind.",
+      "expectedVerseTitles": [
+        "Matthew 22:37",
+        "1 Chronicles 16:29",
+        "1 Chronicles 28:9"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Matthew 22:37 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-matthew-22-39",
+      "label": "Cross-ref cluster: Matthew 22:39",
+      "category": "cross-reference",
+      "query": "And the second is like unto it, Thou shalt love thy neighbour as thyself.",
+      "expectedVerseTitles": [
+        "Matthew 22:39",
+        "1 Corinthians 13:13",
+        "1 Corinthians 13:4"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Matthew 22:39 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-romans-5-8",
+      "label": "Cross-ref cluster: Romans 5:8",
+      "category": "cross-reference",
+      "query": "But God commendeth his love toward us, in that, while we were yet sinners, Christ died for us.",
+      "expectedVerseTitles": [
+        "Romans 5:8",
+        "1 John 3:1",
+        "1 John 4:7"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Romans 5:8 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-romans-8-28",
+      "label": "Cross-ref cluster: Romans 8:28",
       "category": "cross-reference",
       "query": "And we know that all things work together for good to them that love God, to them who are the called according to his purpose.",
       "expectedVerseTitles": [
         "Romans 8:28",
-        "Doctrine and Covenants 90:24"
+        "1 Chronicles 16:34",
+        "1 Chronicles 29:1"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: Romans 8:28 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-2-nephi-2-25-alma-34-9",
-      "label": "Semantic pair: Atonement purpose pair (2 Ne ↔ Alma)",
+      "id": "xref-ephesians-2-8",
+      "label": "Cross-ref cluster: Ephesians 2:8",
+      "category": "cross-reference",
+      "query": "For by grace are ye saved through faith; and that not of yourselves: it is the gift of God:",
+      "expectedVerseTitles": [
+        "Ephesians 2:8",
+        "1 Chronicles 16:35",
+        "1 Corinthians 10:33"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Ephesians 2:8 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-philippians-4-7",
+      "label": "Cross-ref cluster: Philippians 4:7",
+      "category": "cross-reference",
+      "query": "And the peace of God, which passeth all understanding, shall keep your hearts and minds through Christ Jesus.",
+      "expectedVerseTitles": [
+        "Philippians 4:7",
+        "1 Corinthians 10:13",
+        "1 Corinthians 11:2"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Philippians 4:7 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-philippians-4-13",
+      "label": "Cross-ref cluster: Philippians 4:13",
+      "category": "cross-reference",
+      "query": "I can do all things through Christ which strengtheneth me.",
+      "expectedVerseTitles": [
+        "Philippians 4:13",
+        "1 Corinthians 10:31",
+        "1 Nephi 17:3"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Philippians 4:13 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-1-corinthians-13-4",
+      "label": "Cross-ref cluster: 1 Corinthians 13:4",
+      "category": "cross-reference",
+      "query": "Charity suffereth long, and is kind; charity envieth not; charity vaunteth not itself, is not puffed up,",
+      "expectedVerseTitles": [
+        "1 Corinthians 13:4",
+        "1 Corinthians 12:26",
+        "1 Corinthians 13:13"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 1 Corinthians 13:4 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-1-corinthians-13-13",
+      "label": "Cross-ref cluster: 1 Corinthians 13:13",
+      "category": "cross-reference",
+      "query": "And now abideth faith, hope, charity, these three; but the greatest of these is charity.",
+      "expectedVerseTitles": [
+        "1 Corinthians 13:13",
+        "1 Corinthians 12:9",
+        "1 Corinthians 13:4"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 1 Corinthians 13:13 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-james-1-5",
+      "label": "Cross-ref cluster: James 1:5",
+      "category": "cross-reference",
+      "query": "If any of you lack wisdom, let him ask of God, that giveth to all men liberally, and upbraideth not; and it shall be given him.",
+      "expectedVerseTitles": [
+        "James 1:5",
+        "1 Chronicles 16:18",
+        "1 Chronicles 16:34"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: James 1:5 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-james-2-17",
+      "label": "Cross-ref cluster: James 2:17",
+      "category": "cross-reference",
+      "query": "Even so faith, if it hath not works, is dead, being alone.",
+      "expectedVerseTitles": [
+        "James 2:17",
+        "1 Chronicles 16:12",
+        "1 Chronicles 16:24"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: James 2:17 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-hebrews-11-1",
+      "label": "Cross-ref cluster: Hebrews 11:1",
+      "category": "cross-reference",
+      "query": "Now faith is the substance of things hoped for, the evidence of things not seen.",
+      "expectedVerseTitles": [
+        "Hebrews 11:1",
+        "1 Chronicles 28:1",
+        "1 Corinthians 12:9"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Hebrews 11:1 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-1-john-4-8",
+      "label": "Cross-ref cluster: 1 John 4:8",
+      "category": "cross-reference",
+      "query": "He that loveth not knoweth not God; for God is love.",
+      "expectedVerseTitles": [
+        "1 John 4:8",
+        "1 Corinthians 10:13",
+        "1 Corinthians 11:3"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 1 John 4:8 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-proverbs-3-5",
+      "label": "Cross-ref cluster: Proverbs 3:5",
+      "category": "cross-reference",
+      "query": "Trust in the Lord with all thine heart; and lean not unto thine own understanding.",
+      "expectedVerseTitles": [
+        "Proverbs 3:5",
+        "1 Chronicles 5:20",
+        "1 Corinthians 10:24"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Proverbs 3:5 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-proverbs-3-6",
+      "label": "Cross-ref cluster: Proverbs 3:6",
+      "category": "cross-reference",
+      "query": "In all thy ways acknowledge him, and he shall direct thy paths.",
+      "expectedVerseTitles": [
+        "Proverbs 3:6",
+        "1 Corinthians 14:37",
+        "1 John 2:23"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Proverbs 3:6 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-psalms-23-1",
+      "label": "Cross-ref cluster: Psalms 23:1",
+      "category": "cross-reference",
+      "query": "The Lord is my shepherd; I shall not want.",
+      "expectedVerseTitles": [
+        "Psalms 23:1",
+        "1 Chronicles 16:29",
+        "1 Corinthians 11:20"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Psalms 23:1 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-isaiah-53-5",
+      "label": "Cross-ref cluster: Isaiah 53:5",
+      "category": "cross-reference",
+      "query": "But he was wounded for our transgressions, he was bruised for our iniquities: the chastisement of our peace was upon him; and with his stripes we are healed.",
+      "expectedVerseTitles": [
+        "Isaiah 53:5",
+        "1 Chronicles 10:13",
+        "1 Chronicles 9:1"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Isaiah 53:5 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-isaiah-40-31",
+      "label": "Cross-ref cluster: Isaiah 40:31",
+      "category": "cross-reference",
+      "query": "But they that wait upon the Lord shall renew their strength; they shall mount up with wings as eagles; they shall run, and not be weary; and they shall walk, and not faint.",
+      "expectedVerseTitles": [
+        "Isaiah 40:31",
+        "1 Corinthians 1:7",
+        "1 Corinthians 9:24"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Isaiah 40:31 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-isaiah-1-18",
+      "label": "Cross-ref cluster: Isaiah 1:18",
+      "category": "cross-reference",
+      "query": "Come now, and let us reason together, saith the Lord: though your sins be as scarlet, they shall be as white as snow; though they be red like crimson, they shall be as wool.",
+      "expectedVerseTitles": [
+        "Isaiah 1:18",
+        "1 Corinthians 15:56",
+        "1 Corinthians 6:18"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Isaiah 1:18 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-jeremiah-29-11",
+      "label": "Cross-ref cluster: Jeremiah 29:11",
+      "category": "cross-reference",
+      "query": "For I know the thoughts that I think toward you, saith the Lord, thoughts of peace, and not of evil, to give you an expected end.",
+      "expectedVerseTitles": [
+        "Jeremiah 29:11",
+        "1 Corinthians 10:12",
+        "1 Corinthians 13:5"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Jeremiah 29:11 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-joshua-24-15",
+      "label": "Cross-ref cluster: Joshua 24:15",
+      "category": "cross-reference",
+      "query": "And if it seem evil unto you to serve the Lord, choose you this day whom ye will serve; whether the gods which your fathers served that were on the other side of the flood, or the gods of the Amorites",
+      "expectedVerseTitles": [
+        "Joshua 24:15",
+        "1 Chronicles 16:29",
+        "1 Chronicles 17:10"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Joshua 24:15 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-micah-6-8",
+      "label": "Cross-ref cluster: Micah 6:8",
+      "category": "cross-reference",
+      "query": "He hath shewed thee, O man, what is good; and what doth the Lord require of thee, but to do justly, and to love mercy, and to walk humbly with thy God?",
+      "expectedVerseTitles": [
+        "Micah 6:8",
+        "1 Chronicles 16:34",
+        "1 Chronicles 17:6"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Micah 6:8 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-2-nephi-2-25",
+      "label": "Cross-ref cluster: 2 Nephi 2:25",
       "category": "cross-reference",
       "query": "Adam fell that men might be; and men are, that they might have joy.",
       "expectedVerseTitles": [
         "2 Nephi 2:25",
-        "Alma 34:9"
+        "1 Corinthians 10:12",
+        "1 Corinthians 15:22"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: 2 Nephi 2:25 + human-curated cross-refs. Tests semantic clustering."
     },
     {
-      "id": "sempair-mosiah-3-19-1-corinthians-2-14",
-      "label": "Semantic pair: Natural man pair (Mosiah ↔ 1 Cor)",
+      "id": "xref-2-nephi-2-27",
+      "label": "Cross-ref cluster: 2 Nephi 2:27",
+      "category": "cross-reference",
+      "query": "Wherefore, men are free according to the flesh; and all things are given them which are expedient unto man. And they are free to choose liberty and eternal life, through the great Mediator of all men,",
+      "expectedVerseTitles": [
+        "2 Nephi 2:27",
+        "1 Chronicles 16:11",
+        "1 Chronicles 16:18"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 2 Nephi 2:27 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-2-nephi-31-20",
+      "label": "Cross-ref cluster: 2 Nephi 31:20",
+      "category": "cross-reference",
+      "query": "Wherefore, ye must press forward with a steadfastness in Christ, having a perfect brightness of hope, and a love of God and of all men. Wherefore, if ye shall press forward, feasting upon the word of ",
+      "expectedVerseTitles": [
+        "2 Nephi 31:20",
+        "1 Corinthians 12:8",
+        "1 Corinthians 13:10"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 2 Nephi 31:20 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-1-nephi-3-7",
+      "label": "Cross-ref cluster: 1 Nephi 3:7",
+      "category": "cross-reference",
+      "query": "And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded, for I know that the Lord giveth no commandments unto the children of men, save he sha",
+      "expectedVerseTitles": [
+        "1 Nephi 3:7",
+        "1 Chronicles 16:29",
+        "1 Corinthians 10:11"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 1 Nephi 3:7 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-alma-32-21",
+      "label": "Cross-ref cluster: Alma 32:21",
+      "category": "cross-reference",
+      "query": "And now as I said concerning faith--faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true.",
+      "expectedVerseTitles": [
+        "Alma 32:21",
+        "1 Corinthians 12:9",
+        "1 Corinthians 13:13"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Alma 32:21 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-alma-34-9",
+      "label": "Cross-ref cluster: Alma 34:9",
+      "category": "cross-reference",
+      "query": "For it is expedient that an atonement should be made; for according to the great plan of the Eternal God there must be an atonement made, or else all mankind must unavoidably perish; yea, all are hard",
+      "expectedVerseTitles": [
+        "Alma 34:9",
+        "1 Corinthians 15:18",
+        "1 Corinthians 15:22"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Alma 34:9 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-alma-42-15",
+      "label": "Cross-ref cluster: Alma 42:15",
+      "category": "cross-reference",
+      "query": "And now, the plan of mercy could not be brought about except an atonement should be made; therefore God himself atoneth for the sins of the world, to bring about the plan of mercy, to appease the dema",
+      "expectedVerseTitles": [
+        "Alma 42:15",
+        "1 Chronicles 16:34",
+        "1 Corinthians 13:10"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Alma 42:15 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-mosiah-3-19",
+      "label": "Cross-ref cluster: Mosiah 3:19",
       "category": "cross-reference",
       "query": "For the natural man is an enemy to God, and has been from the fall of Adam, and will be, forever and ever, unless he yields to the enticings of the Holy Spirit, and putteth off the natural man and bec",
       "expectedVerseTitles": [
         "Mosiah 3:19",
-        "1 Corinthians 2:14"
+        "1 Chronicles 28:9",
+        "1 Corinthians 11:11"
       ],
       "targetRankThreshold": 5,
-      "notes": "Manually curated semantic pair — no circularity with embeddings."
+      "notes": "Silver label: Mosiah 3:19 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-mosiah-4-9",
+      "label": "Cross-ref cluster: Mosiah 4:9",
+      "category": "cross-reference",
+      "query": "Believe in God; believe that he is, and that he created all things, both in heaven and in earth; believe that he has all wisdom, and all power, both in heaven and in earth; believe that man doth not c",
+      "expectedVerseTitles": [
+        "Mosiah 4:9",
+        "1 Corinthians 11:9",
+        "1 Corinthians 12:8"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Mosiah 4:9 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-moroni-7-45",
+      "label": "Cross-ref cluster: Moroni 7:45",
+      "category": "cross-reference",
+      "query": "And charity suffereth long, and is kind, and envieth not, and is not puffed up, seeketh not her own, is not easily provoked, thinketh no evil, and rejoiceth not in iniquity but rejoiceth in the truth,",
+      "expectedVerseTitles": [
+        "Moroni 7:45",
+        "1 Chronicles 16:11",
+        "1 Chronicles 21:1"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Moroni 7:45 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-moroni-10-4",
+      "label": "Cross-ref cluster: Moroni 10:4",
+      "category": "cross-reference",
+      "query": "And when ye shall receive these things, I would exhort you that ye would ask God, the Eternal Father, in the name of Christ, if these things are not true; and if ye shall ask with a sincere heart, wit",
+      "expectedVerseTitles": [
+        "Moroni 10:4",
+        "1 Chronicles 16:29",
+        "1 Corinthians 11:13"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Moroni 10:4 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-moroni-10-5",
+      "label": "Cross-ref cluster: Moroni 10:5",
+      "category": "cross-reference",
+      "query": "And by the power of the Holy Ghost ye may know the truth of all things.",
+      "expectedVerseTitles": [
+        "Moroni 10:5",
+        "1 Chronicles 28:9",
+        "1 Corinthians 12:3"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Moroni 10:5 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-3-nephi-11-10",
+      "label": "Cross-ref cluster: 3 Nephi 11:10",
+      "category": "cross-reference",
+      "query": "Behold, I am Jesus Christ, whom the prophets testified shall come into the world.",
+      "expectedVerseTitles": [
+        "3 Nephi 11:10",
+        "1 Corinthians 11:23",
+        "1 Corinthians 12:3"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 3 Nephi 11:10 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-3-nephi-27-27",
+      "label": "Cross-ref cluster: 3 Nephi 27:27",
+      "category": "cross-reference",
+      "query": "And know ye that ye shall be judges of this people, according to the judgment which I shall give unto you, which shall be just. Therefore, what manner of men ought ye to be? Verily I say unto you, eve",
+      "expectedVerseTitles": [
+        "3 Nephi 27:27",
+        "1 Corinthians 15:33",
+        "1 Corinthians 16:13"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: 3 Nephi 27:27 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-doctrine-and-covenants-4-2",
+      "label": "Cross-ref cluster: Doctrine and Covenants 4:2",
+      "category": "cross-reference",
+      "query": "Therefore, O ye that embark in the service of God, see that ye serve him with all your heart, might, mind and strength, that ye may stand blameless before God at the last day.",
+      "expectedVerseTitles": [
+        "Doctrine and Covenants 4:2",
+        "1 Chronicles 28:9",
+        "1 Chronicles 29:5"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Doctrine and Covenants 4:2 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-doctrine-and-covenants-76-22",
+      "label": "Cross-ref cluster: Doctrine and Covenants 76:22",
+      "category": "cross-reference",
+      "query": "And now, after the many testimonies which have been given of him, this is the testimony, last of all, which we give of him: That he lives!",
+      "expectedVerseTitles": [
+        "Doctrine and Covenants 76:22",
+        "1 Corinthians 12:3",
+        "1 Corinthians 15:22"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Doctrine and Covenants 76:22 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-doctrine-and-covenants-121-7",
+      "label": "Cross-ref cluster: Doctrine and Covenants 121:7",
+      "category": "cross-reference",
+      "query": "My son, peace be unto thy soul; thine adversity and thine afflictions shall be but a small moment;",
+      "expectedVerseTitles": [
+        "Doctrine and Covenants 121:7",
+        "1 Corinthians 14:33",
+        "1 Corinthians 15:52"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Doctrine and Covenants 121:7 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-doctrine-and-covenants-121-8",
+      "label": "Cross-ref cluster: Doctrine and Covenants 121:8",
+      "category": "cross-reference",
+      "query": "And then, if thou endure it well, God shall exalt thee on high; thou shalt triumph over all thy foes.",
+      "expectedVerseTitles": [
+        "Doctrine and Covenants 121:8",
+        "1 Chronicles 29:11",
+        "1 Corinthians 10:12"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Doctrine and Covenants 121:8 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-doctrine-and-covenants-130-22",
+      "label": "Cross-ref cluster: Doctrine and Covenants 130:22",
+      "category": "cross-reference",
+      "query": "The Father has a body of flesh and bones as tangible as man's; the Son also; but the Holy Ghost has not a body of flesh and bones, but is a personage of Spirit. Were it not so, the Holy Ghost could no",
+      "expectedVerseTitles": [
+        "Doctrine and Covenants 130:22",
+        "1 Corinthians 11:13",
+        "1 Corinthians 2:10"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Doctrine and Covenants 130:22 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-moses-1-39",
+      "label": "Cross-ref cluster: Moses 1:39",
+      "category": "cross-reference",
+      "query": "For behold, this is my work and my glory--to bring to pass the immortality and eternal life of man.",
+      "expectedVerseTitles": [
+        "Moses 1:39",
+        "1 Chronicles 29:1",
+        "1 Corinthians 10:26"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Moses 1:39 + human-curated cross-refs. Tests semantic clustering."
+    },
+    {
+      "id": "xref-abraham-3-22",
+      "label": "Cross-ref cluster: Abraham 3:22",
+      "category": "cross-reference",
+      "query": "Now the Lord had shown unto me, Abraham, the intelligences that were organized before the world was; and among all these there were many of the noble and great ones;",
+      "expectedVerseTitles": [
+        "Abraham 3:22",
+        "1 Corinthians 13:13",
+        "1 Corinthians 16:9"
+      ],
+      "targetRankThreshold": 5,
+      "notes": "Silver label: Abraham 3:22 + human-curated cross-refs. Tests semantic clustering."
     },
     {
       "id": "summ-moses-1-39",
