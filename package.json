@@ -29,7 +29,9 @@
     "electron:build": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder",
     "electron:build:win": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder --win",
     "electron:build:mac": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && electron-builder --mac",
-    "electron:build:linux": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux; rm -rf $HOME/electron-tmp-build"
+    "electron:build:linux": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux; rm -rf $HOME/electron-tmp-build",
+    "electron:build:linux:appimage": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux AppImage; rm -rf $HOME/electron-tmp-build",
+    "electron:build:linux:deb": "node scripts/sync-electron-deps.js && npm run build --workspace=frontend && mkdir -p $HOME/electron-tmp-build && TMPDIR=$HOME/electron-tmp-build electron-builder --linux deb; rm -rf $HOME/electron-tmp-build"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

@@ -17,7 +17,7 @@ See [ARCHITECTURE.md](../ARCHITECTURE.md) for system diagrams, search pipeline d
 | Frontend framework | React 19 (JSX, no TypeScript) |
 | Frontend bundler | Vite 7 (tests via Vitest) |
 | Routing | React Router v7 |
-| Desktop | Electron 35 |
+| Desktop | Electron 41 |
 | Shared logic | `shared/` workspace (CommonJS, runs in Node + WASM/browser) |
 | Linting | ESLint 9 (flat config) |
 | Testing | Jest 29 (backend + shared); Vitest (frontend) |
@@ -83,10 +83,12 @@ npm run lint --workspace=frontend    # eslint .
 
 ### Electron
 ```bash
-npm run electron:dev            # Build frontend + launch Electron (dev)
-npm run electron:build:linux    # Build AppImage (Linux)
-npm run electron:build:win      # Build Windows installer
-npm run electron:build:mac      # Build macOS DMG
+npm run electron:dev                   # Build frontend + launch Electron (dev)
+npm run electron:build:linux           # AppImage + deb (both, default)
+npm run electron:build:linux:appimage  # AppImage only
+npm run electron:build:linux:deb       # deb only
+npm run electron:build:win             # Windows NSIS installer
+npm run electron:build:mac             # macOS DMG (x64 + arm64)
 ```
 
 ### ML / Prebake pipeline
@@ -140,6 +142,13 @@ import socket from '../socket'
 
 ### Electron ABI isolation
 `electron/main.js` patches `require('better-sqlite3')` at startup to route to the Electron-ABI build in `electron/node_modules/`. **Never `npm install better-sqlite3` inside `electron/` directly** — use `npm run electron:install` which calls `scripts/sync-electron-deps.js` first.
+
+### Electron splash + mode switcher
+- `loading.html` receives live status text via `ipcRenderer.on('loading-status', ...)`. The splash window uses `nodeIntegration: true` for this.
+- `setSplashStatus(splash, msg)` in `main.js` sends status strings at each startup phase.
+- `setupTray()` creates a persistent system-tray icon. `buildTrayMenu()` shows current mode; "Switch Mode…" re-opens the mode dialog at any time.
+- `open-mode-switcher` IPC handler — renderer calls `window.electronAPI.openModeSwitcher()` to trigger the dialog; main returns the chosen mode. The renderer calls `switchConnectionMode()` to apply it.
+- `mode-changed` IPC event — tray-triggered switches notify the renderer via `window.electronAPI.onModeChanged(cb)` so it can save React state before the hot reload.
 
 ---
 
