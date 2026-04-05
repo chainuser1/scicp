@@ -130,6 +130,7 @@ function summarizeResult(result, rank) {
     verse_number: result.verse_number,
     similarity_score: result.similarity_score ?? null,
     specificity_score: result._specificity_score ?? null,
+    relevance_probability: result._relevance_probability ?? null,
     tier: result._tier ?? null,
     source: result._source ?? null,
     scripture_text: result.scripture_text,

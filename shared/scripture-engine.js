@@ -322,6 +322,24 @@ const phraseSearch = (phrase, page = 0, pageSize = 10, db, log = null) => {
         if (results.length > 0 || total > 0) return { results, total, matchType: 'content-and' };
       }
 
+      // Content-term OR fallback for 5+ word queries.
+      // When content-AND fails (no verse contains all top-K high-IDF terms), find
+      // verses with ANY of the top terms.  This recovers multi-verse paraphrase
+      // queries whose keywords are split across several related verses — e.g.
+      // "exhort you brethren that ye might come unto Christ" spans Moroni 10:18 and
+      // 10:30 so no single verse passes the AND gate, but both verses score well
+      // on BM25 because they each hit multiple top-IDF terms (exhort, brethren,
+      // Christ).  The matchType 'content-or' keeps these out of the phrase lane
+      // so coverage/sequence signals drive the ranking instead.
+      if (raw.split(/\s+/).length >= 5) {
+        const contentOrQ = buildContentTermQuery(raw, 'or', db);
+        if (contentOrQ) {
+          const total = runFTSCount(contentOrQ, db);
+          const results = runFTSQuery(contentOrQ, raw, pageSize, offset, db);
+          if (results.length > 0 || total > 0) return { results, total, matchType: 'content-or' };
+        }
+      }
+
       // OR match (any term)
       // Skip raw OR fallback for long sentence-like queries because it mostly
       // returns generic connective-language noise instead of the intended verse.

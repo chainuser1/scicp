@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest --forceExit",
-    "test:coverage": "jest --coverage --forceExit",
+    "test": "jest --bail=1 --forceExit",
+    "test:coverage": "jest --bail=1 --coverage --forceExit",
     "build": "echo 'Backend is a Node.js server - no build step required'"
   },
   "keywords": [],

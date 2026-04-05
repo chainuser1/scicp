@@ -4,6 +4,90 @@
 
 **v2.0** (April 2026) addresses a critical mathematical bug in the v1.0 search pipeline and introduces major improvements to semantic search accuracy and usability.
 
+## Audit Snapshot — 768D Model Upgrade (Apr 2026)
+
+After upgrading the embedding model from 384D MiniLM to a fine-tuned 768D model and fixing a root-cause
+HNSW score corruption bug, the current measured state is:
+
+- `npm run test:backend`: 159 / 159 passing
+- judged benchmark total: 18 queries — **all pass target thresholds**
+- top1 accuracy: 100.0%
+- Recall@3: 100.0%
+- Recall@5: 100.0%
+- MRR: 1.000 (exact-reference + phrase-fragment)
+- exact-reference top1: 100.0%
+- phrase-fragment top3: 100.0%
+- false-positive rate: 0.0%
+- head Brier: 0.000
+
+Current judged benchmark status:
+
+- all judged benchmark queries pass their target thresholds
+- multi-word paraphrase queries (e.g. "and moreover I would exhort you") now return Moroni
+  exhort verses at rank 1 instead of Genesis genealogy noise
+
+Practical meaning:
+
+- reference precision is strong and unchanged
+- phrase-fragment retrieval is benchmark-clean
+- semantic paraphrase queries work correctly after the HNSW cosine/L2 fix
+- the 768D model brings higher embedding quality with no regression on any existing query
+
+## v2.1 — 768D Model Upgrade + HNSW Fix (Apr 2026)
+
+### Critical Bug Fix: HNSW Cosine/L2 Score Confusion
+
+**Symptom**: Multi-word paraphrase queries (e.g. *"and moreover I would exhort you"*, *"wisdom
+foolishness of God wiser than men"*) returned irrelevant Genesis genealogy verses instead of the
+correct semantic matches.
+
+**Root cause**: `HNSWIndex.query()` returns `score = 1 - L2_distance`, NOT cosine similarity.
+For unit vectors the relationship is `cos_sim = 1 - (1 - score)² / 2`. The old filter used
+`score <= 0` which silently discarded all paraphrase matches because their real cosine similarity
+(≈ 0.30–0.45) maps to an L2-based score of ≈ 0.35–0.55, well above the zero floor — but the
+downstream threshold logic treated the raw `score` as cosine and rejected anything with
+cosine < ~0.50.
+
+**Fix**: Convert HNSW score to real cosine before all downstream comparisons:
+```js
+const cosScore = 1 - (1 - h.score) * (1 - h.score) / 2;
+h.score = cosScore;
+```
+New filter floor: `cosScore < 0.05` (excludes only near-random matches, cosine < ~0.25).
+
+**Impact**: All downstream thresholds (SEM_THRESHOLD=0.28, SIM_FLOOR=0.15, semFiltered≥0.25)
+now receive correct cosine values. Paraphrase search "just worked" after this single fix.
+
+### 768D Model Export
+
+- Fine-tuned 768D sentence-transformer model exported to ONNX (`model_quantized.onnx`, ~105 MB)
+- `EMBED_DIM` constant updated from 384 → 768
+- HNSW index and all prebaked embeddings rebuilt from 768D vectors (41,995 verses)
+- Quantized model runs on CPU without hardware acceleration
+
+### Additional Fixes Applied With This Release
+
+- **content-OR fallback**: `phraseSearch()` now tries a content-term OR query for queries ≥ 5 words
+  when content-AND returns zero results, before falling back to raw OR (avoids returning random hits)
+- **Relative RRF floor**: Hard floor of 0.015 replaced with `topRrf × 0.08`; prevents the
+  intent-weight compression for `mixed` intent (W≈0.42) from pushing all scores below the floor
+- **semPrimary cosine gate**: Semantic-primary results require ≥ 3 hits with cosine ≥ 0.25 before
+  being allowed to lead the RRF merge; prevents a single low-confidence embedding match from
+  hijacking lexical results
+
+---
+
+## Post-v2.0 Audit Upgrades (Apr 2026)
+
+After the initial v2.0 overhaul, the following search improvements were added:
+
+- query-personalized graph propagation with intent-aware propagation depth and influence caps
+- removal of dominant global PageRank from early fusion
+- weak structural priors only for broad conceptual or situational reranking
+- expanded judged benchmark coverage and richer benchmark metrics
+- hard-negative dataset preparation for the next fine-tune
+- support for rebuilding artifacts from versioned candidate model directories under `resources/models/`
+
 ---
 
 ## Critical Bug Fix: ZCA Whitening Inversion

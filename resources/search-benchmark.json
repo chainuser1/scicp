@@ -35,6 +35,14 @@
       "targetRankThreshold": 1
     },
     {
+      "id": "exact-rev-214",
+      "label": "Abbreviated Revelation reference",
+      "category": "exact-reference",
+      "query": "Rev 21:4",
+      "expectedVerseTitles": ["Revelation 21:4"],
+      "targetRankThreshold": 1
+    },
+    {
       "id": "semantic-battle",
       "label": "Paraphrased battle narrative",
       "category": "semantic-paraphrase",
@@ -72,6 +80,14 @@
       "category": "phrase-fragment",
       "query": "ask with a sincere heart with real intent",
       "expectedVerseTitles": ["Moroni 10:4"],
+      "targetRankThreshold": 3
+    },
+    {
+      "id": "phrase-exhort-short",
+      "label": "Moroni exhort wording cluster",
+      "category": "phrase-fragment",
+      "query": "and moreover i would exhort you",
+      "expectedVerseTitles": ["Moroni 10:3", "Moroni 10:4", "Moroni 10:18", "Moroni 10:19", "Moroni 10:30"],
       "targetRankThreshold": 3
     },
     {
@@ -145,6 +161,15 @@
       "query": "called many but few chosen",
       "expectedVerseTitles": ["Matthew 22:14", "Matthew 20:16"],
       "targetRankThreshold": 3
+    },
+    {
+      "id": "fts-stem-children-gathering-woods",
+      "label": "Stem-variant FTS specificity (Jeremiah 7:18)",
+      "category": "phrase-fragment",
+      "query": "children gathering woods",
+      "expectedVerseTitles": ["Jeremiah 7:18"],
+      "targetRankThreshold": 3,
+      "notes": "Porter stemming finds 'gathering'→'gather', 'woods'→'wood'. FTS AND returns only Jeremiah 7:18. Must reach top 3."
     }
   ]
 }

@@ -5,7 +5,7 @@
   "description": "Shared scripture engine and DB adapters",
   "main": "index.js",
   "scripts": {
-    "test": "jest --forceExit"
+    "test": "jest --bail=1 --forceExit"
   },
   "devDependencies": {}
 }

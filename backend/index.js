@@ -16,8 +16,8 @@ if (process.env.SENTRY_DSN) {
 
 const fastify = require('fastify')({ logger: true, bodyLimit: 1048576 });
 const { Server } = require("socket.io");
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const { BetterSqliteAdapter } = require('../shared/db-adapter');
 const engine = require('../shared/scripture-engine');
@@ -25,7 +25,6 @@ const { replacements: kjvSpellingReplacements } = require('../shared/data/kjv-sp
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
-
 // ── SEO: per-route meta tags for server-side injection ──
 // Crawlers (Google, Facebook, Twitter) get correct meta without JS execution.
 const SEO_ROUTES = {
@@ -205,7 +204,7 @@ const ENABLE_PMI = true;      // PMI can be used for single-word fallback if nee
 
 // ── Concept embeddings DB (pre-baked by scripts/build-concept-index.js) ──
 let db_concepts = null;
-const conceptCache = []; // { phrase, source, vec: Float32Array(384) }
+const conceptCache = []; // { phrase, source, vec: Float32Array(768) }
 try {
   db_concepts = require('better-sqlite3')(path.join(DB_DIR, 'concept-embeddings.db'), { readonly: true, fileMustExist: true });
   const rows = db_concepts.prepare('SELECT phrase, source, embedding FROM concepts').all();
@@ -1320,15 +1319,15 @@ const EMBED_BATCH_SIZE   = 50;
 
 let embeddingsReady     = false;
 let embeddingPipe       = null;  // transformer pipeline (loaded in dev; null in production)
-const embeddingCache    = new Map(); // verse_id → Float32Array(384)
+const embeddingCache    = new Map(); // verse_id → Float32Array(768)
 let searchWarmupPromise = null;
 
 // ZCA whitening transform: v_white = W · (v - μ), then L2-normalize
 // Loaded from embedding_whitening table (prebaked by scripts/prebake-whitening.js)
-let whiteningW    = null; // Float32Array(384*384) — row-major ZCA matrix
-let whiteningMean = null; // Float32Array(384) — corpus mean vector
-const EMBED_DIM   = 384;
-const entityCentroidCache = new Map(); // entity_id → Float32Array(384)
+let whiteningW    = null; // Float32Array(768*768) — row-major ZCA matrix
+let whiteningMean = null; // Float32Array(768) — corpus mean vector
+const EMBED_DIM   = 768;
+const entityCentroidCache = new Map(); // entity_id → Float32Array(768)
 const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
 
 // Spectral graph embeddings (50D, from verse_spectral table in verse-graph.db)
@@ -1342,6 +1341,7 @@ const verseTopicCache  = new Map(); // verse_id → Set<topic_slug>
 const topicVerseIndex  = new Map(); // topic_slug → Set<verse_id>  (reverse index)
 const topicNameMap     = new Map(); // topic_slug → topic_name (display)
 const pageRankCache    = new Map(); // verse_id → PageRank score
+let pageRankP95        = 1;
 let topicalGuideReady = false;
 
 function buildTopicalGuideCache() {
@@ -1371,7 +1371,15 @@ function buildTopicalGuideCache() {
       // Load PageRank scores if available
       try {
         const prRows = db_tg.prepare('SELECT verse_id, pagerank FROM verse_pagerank').all();
-        for (const r of prRows) pageRankCache.set(r.verse_id, r.pagerank);
+        const prValues = [];
+        for (const r of prRows) {
+          pageRankCache.set(r.verse_id, r.pagerank);
+          if (r.pagerank > 0) prValues.push(r.pagerank);
+        }
+        if (prValues.length > 0) {
+          prValues.sort((a, b) => a - b);
+          pageRankP95 = prValues[Math.floor((prValues.length - 1) * 0.95)] || prValues[prValues.length - 1] || 1;
+        }
         fastify.log.info(`[PageRank] Loaded ${pageRankCache.size} scores`);
       } catch {}
 
@@ -1897,8 +1905,11 @@ function buildFocusedAnchorQuery(candidate, termWeights) {
   return selected.map(item => item.term).join(' ');
 }
 
-const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and', 'prefix']);
+const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and', 'prefix', 'content-and']);
 const SHORT_QUERY_PHRASE_MATCH_TYPES = new Set(['phrase', 'near']);
+// 'content-and' excluded: matching top-K IDF terms in any order is too broad for Tier 2
+// phrase-hit promotion; those results remain in pool via FTS lane at Tier 5.
+const LONG_QUERY_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and']);
 const PHRASE_MATCH_STRENGTH = {
   phrase: 1.0,
   near: 0.92,
@@ -2019,6 +2030,23 @@ function lexicalSignalQuality(query, ftsRows, termWeights) {
   return weighted / weightSum;
 }
 
+function isStructuredMultiWordQuery(query, anchorPhrases = []) {
+  const words = String(query || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\-\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 4) return false;
+  return anchorPhrases.length > 0 || words.length >= 5;
+}
+
+function topicallyEligible(queryWordCount, longStructuredQuery, hasExactTopicMatch, queryTopicSlugs) {
+  if (!queryTopicSlugs || queryTopicSlugs.length === 0) return false;
+  if (hasExactTopicMatch) return true;
+  if (queryWordCount <= 3) return true;
+  return !longStructuredQuery;
+}
+
 function median(values) {
   if (!values || values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -2050,6 +2078,8 @@ function computeRelevanceProbability(row, intentType = null, confidence = 0) {
   const anchor = Math.max(0, row._anchorWindowScore || 0);
   const sequence = Math.max(0, row._sequenceScore || 0);
   const phraseCoverage = Math.max(0, row._phraseCoverage || 0);
+  const graphPropagation = Math.max(0, row._qpprScore || 0);
+  const structurePrior = Math.max(0, row._structurePrior || 0);
   const sourceCount = Math.max(0, row._sourceCount || 0);
   const sourceBonus = Math.min(sourceCount, 4) * 0.12;
   const tierSignal = Math.max(0, 5 - tier);
@@ -2075,6 +2105,8 @@ function computeRelevanceProbability(row, intentType = null, confidence = 0) {
     + anchor * 1.0
     + sequence * 1.15
     + phraseCoverage * 0.55
+    + graphPropagation * 0.42
+    + structurePrior * 4.5
     + sourceBonus
     + phraseBoost
     + topicalBoost
@@ -2383,6 +2415,33 @@ function refineIntentWithTopicSignals(intentClass, queryWordCount, lexicalQualit
   return intentClass;
 }
 
+function normalizedPageRankScore(verseId) {
+  const raw = pageRankCache.get(verseId) || 0;
+  if (raw <= 0) return 0;
+  return Math.max(0, Math.min(1, raw / Math.max(pageRankP95, 1e-9)));
+}
+
+function shouldUseWeakStructurePrior(intentType, queryWordCount, lexicalQuality) {
+  if (intentType === 'reference' || intentType === 'phrase') return false;
+  if (queryWordCount >= 4 && lexicalQuality >= 0.45) return false;
+  return intentType === 'conceptual' || intentType === 'situational' || (intentType === 'mixed' && queryWordCount <= 2);
+}
+
+function computeWeakStructurePrior(row, intentType, queryWordCount, lexicalQuality) {
+  if (!row || !shouldUseWeakStructurePrior(intentType, queryWordCount, lexicalQuality)) return 0;
+  if (row._directQueryMatch || row._anchorPhraseMatch) return 0;
+
+  const pagerank = normalizedPageRankScore(row.verse_id);
+  const graphConsensus = Math.min(1, Math.max(0, (row._sourceCount || 1) - 1) / 3);
+  const topical = Math.min(1, Math.max(0, row._topicSignal || 0));
+  const qppr = Math.min(1, Math.max(0, row._qpprScore || 0));
+  const spectral = Math.min(1, Math.max(0, row._spectralSim || 0));
+
+  const blended = pagerank * 0.45 + graphConsensus * 0.2 + topical * 0.15 + qppr * 0.12 + spectral * 0.08;
+  const maxPrior = intentType === 'conceptual' ? 0.07 : 0.05;
+  return Math.min(maxPrior, blended * maxPrior);
+}
+
 // ── Reciprocal Rank Fusion (Algebra): merge ranked lists without weight tuning ──
 // score(d) = Σ_source 1/(k + rank_in_source)   k=60 (Cormack et al. 2009)
 const RRF_K = 60;
@@ -2425,10 +2484,6 @@ function reciprocalRankFusion(rankedLists, queryTopicSlugs = [], listWeights = n
       }
       if (bestPpr > 0) entry.rrfScore += bestPpr * 0.5; // ~0.0005-0.02 boost
     }
-
-    // Fallback: global PageRank bonus (smaller weight since PPR is more targeted)
-    const pr = pageRankCache.get(vid);
-    if (pr) entry.rrfScore += pr * 1000;
   }
   return scores;
 }
@@ -2561,12 +2616,101 @@ function chapterAggregate(verseScores) {
 // Returns a Map<verse_id, normalised_score> for every node in the local subgraph.
 // Verses that are both semantically near the query AND structurally central to the
 // top results receive the highest scores.
-function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
-  if (!db_graph || !seedIds || seedIds.length === 0) return new Map();
+function queryPPR(seedRows, options = {}) {
+  if (!db_graph || !seedRows || seedRows.length === 0) return new Map();
   try {
+    const alpha = options.alpha ?? 0.85;
+    const hops = options.hops ?? 2;
+    const iters = options.iters ?? 4;
+    const knnLimit = options.knnLimit ?? 10;
+    const crossRefLimit = options.crossRefLimit ?? 6;
+    const topicEdgeLimit = options.topicEdgeLimit ?? 4;
+    const queryTopicSlugs = Array.isArray(options.queryTopicSlugs) ? options.queryTopicSlugs : [];
     const knnQ = db_graph.prepare(
-      'SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT 15'
+      `SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT ${knnLimit}`
     );
+    const xrefQ = db_vxref
+      ? db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?')
+      : null;
+    const topicRowsBySlug = new Map();
+
+    const seedEntries = seedRows
+      .map((seed) => {
+        if (typeof seed === 'number') return { verse_id: seed, weight: 1 };
+        if (!seed || !seed.verse_id) return null;
+        const lexical = Math.max(0, seed._lexicalCoverage || seed._phraseCoverage || 0);
+        const semantic = Math.max(0, seed.similarity_score || 0);
+        const phraseEvidence = seed._directQueryMatch || seed._anchorPhraseMatch ? 0.45 : 0;
+        const anchorEvidence = Math.max(0, seed._anchorWindowScore || 0) * 0.18;
+        const sequenceEvidence = Math.max(0, seed._sequenceScore || 0) * 0.16;
+        const sourceTrust = {
+          'fts-phrase': 0.38,
+          'fts': 0.32,
+          'semantic': 0.28,
+          'semantic-primary': 0.3,
+          'topical-guide': 0.24,
+          'cross-ref': 0.24,
+          'knn-expand': 0.18,
+          'rwr': 0.18,
+        }[seed._source] || 0.14;
+        const weight = 0.12 + lexical * 0.34 + semantic * 0.24 + phraseEvidence + anchorEvidence + sequenceEvidence + sourceTrust;
+        return { verse_id: seed.verse_id, weight };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, options.seedLimit || 8);
+
+    if (seedEntries.length === 0) return new Map();
+
+    const seedWeightSum = seedEntries.reduce((sum, seed) => sum + seed.weight, 0) || 1;
+    const seedWeights = new Map(seedEntries.map((seed) => [seed.verse_id, seed.weight / seedWeightSum]));
+    const seedIds = seedEntries.map((seed) => seed.verse_id);
+
+    const addEdge = (targetMap, neighborId, weight) => {
+      if (!neighborId || weight <= 0) return;
+      targetMap.set(neighborId, Math.max(targetMap.get(neighborId) || 0, weight));
+    };
+
+    const collectNeighbors = (verseId) => {
+      const merged = new Map();
+
+      const knnRows = knnQ.all(verseId);
+      for (let idx = 0; idx < knnRows.length; idx++) {
+        const row = knnRows[idx];
+        addEdge(merged, row.neighbor_id, Math.max(0, row.similarity) * Math.exp(-idx * 0.1));
+      }
+
+      if (xrefQ) {
+        try {
+          const xrRow = xrefQ.get(verseId);
+          const refs = xrRow ? JSON.parse(xrRow.cross_references || '[]') : [];
+          for (let idx = 0; idx < Math.min(refs.length, crossRefLimit); idx++) {
+            addEdge(merged, refs[idx], 0.74 * Math.exp(-idx * 0.12));
+          }
+        } catch {}
+      }
+
+      if (queryTopicSlugs.length > 0 && pprStmt && verseTopicCache.has(verseId)) {
+        const verseTopics = verseTopicCache.get(verseId);
+        for (const slug of queryTopicSlugs) {
+          if (!verseTopics.has(slug)) continue;
+          let rows = topicRowsBySlug.get(slug);
+          if (!rows) {
+            rows = pprStmt.all(slug).slice(0, Math.max(topicEdgeLimit * 2, 8));
+            topicRowsBySlug.set(slug, rows);
+          }
+          let taken = 0;
+          for (const row of rows) {
+            if (row.verse_id === verseId) continue;
+            addEdge(merged, row.verse_id, 0.55 * Math.sqrt(Math.max(0, row.ppr || 0)));
+            taken += 1;
+            if (taken >= topicEdgeLimit) break;
+          }
+        }
+      }
+
+      return [...merged.entries()].map(([neighborId, weight]) => ({ n: neighborId, w: weight }));
+    };
 
     // BFS: collect local subgraph up to `hops` hops from seeds
     const adjOut  = new Map(); // verse_id → [{n: neighbor_id, w: similarity}]
@@ -2577,25 +2721,24 @@ function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
       const next = [];
       for (const vid of frontier) {
         if (adjOut.has(vid)) continue;
-        const rows = knnQ.all(vid);
-        adjOut.set(vid, rows.map(r => ({ n: r.neighbor_id, w: r.similarity })));
+        const rows = collectNeighbors(vid);
+        adjOut.set(vid, rows);
         for (const r of rows) {
-          if (!visited.has(r.neighbor_id)) { visited.add(r.neighbor_id); next.push(r.neighbor_id); }
+          if (!visited.has(r.n)) { visited.add(r.n); next.push(r.n); }
         }
       }
       frontier = next;
     }
 
-    // Initialise scores: seed nodes start with uniform weight
+    // Initialise scores: seed nodes start with query-conditioned weights
     const seedSet    = new Set(seedIds);
-    const seedWeight = (1 - alpha) / seedIds.length;
     const scores     = new Map();
-    for (const vid of visited) scores.set(vid, seedSet.has(vid) ? seedWeight / (1 - alpha) : 0);
+    for (const vid of visited) scores.set(vid, seedWeights.get(vid) || 0);
 
     // Power iteration
     for (let iter = 0; iter < iters; iter++) {
       const next = new Map();
-      for (const vid of visited) next.set(vid, seedSet.has(vid) ? seedWeight : 0);
+      for (const vid of visited) next.set(vid, (1 - alpha) * (seedWeights.get(vid) || 0));
       for (const [vid, neighbors] of adjOut) {
         const r = scores.get(vid) || 0;
         if (r === 0) continue;
@@ -2623,7 +2766,7 @@ function queryPPR(seedIds, alpha = 0.85, hops = 2, iters = 4) {
 // Weight for verse at position i (0=most recent): α·(1-α)^i
 // α=0.4 means ~67% of signal comes from the last 2 verses.
 //
-// Returns a normalized Float32Array(384), or null if unavailable.
+// Returns a normalized Float32Array(768), or null if unavailable.
 const EWMA_ALPHA = 0.4;
 
 function sessionCentroid(liveHistory) {
@@ -2662,12 +2805,23 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
 
     let hits = [];
     if (hnswIndex) {
-      // Deduplicate by verse_id and filter non-positive scores.
-      // HNSW score = 1 - L2_dist; negative means cos < 0 (anti-correlated, irrelevant).
+      // HNSW score = 1 − L2_dist (L2 is Euclidean distance between unit vectors).
+      // For unit-normalized vectors: cos_sim = 1 − L2² / 2
+      // So: cos_sim = 1 − (1 − score)² / 2
+      //
+      // The old filter `score <= 0` incorrectly treated cos_sim < 0.5 as irrelevant
+      // because score = 0 ↔ L2 = 1 ↔ cos_sim = 0.5, NOT cos_sim = 0.
+      // That silently dropped ALL results for paraphrase queries where the finest
+      // matching verse only reaches cosine ≈ 0.3–0.4 (perfectly relevant range).
+      // Fix: convert to actual cosine similarity and filter at a meaningful semantic floor.
       const seen = new Set();
+      const SEM_SEARCH_FLOOR = 0.05; // allow anything better than ~random (raw cosine ≈0.25 baseline)
       hits = hnswIndex.query(qvec, 200, 150)
         .filter((h) => {
-          if (h.score <= 0 || excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
+          // Convert L2-based score to cosine similarity
+          const cosSim = 1 - (1 - h.score) * (1 - h.score) / 2;
+          h.score = cosSim; // rewrite score to cosine for downstream correctness
+          if (cosSim < SEM_SEARCH_FLOOR || excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
           seen.add(h.verse_id);
           return true;
         });
@@ -2952,7 +3106,7 @@ function buildHNSWIndex() {
   fastify.log.info(`[HNSW] Built in ${Date.now() - t0} ms (${hnswIndex.nodes.length} nodes). Run scripts/prebake-hnsw.js to cache this.`);
 }
 
-// ── #3 Concept expansion via MiniLM: find nearest pre-embedded concepts ──
+// ── #3 Concept expansion via scripture_minilm: find nearest pre-embedded concepts ──
 async function expandWithConcepts(query, topN = 5, qvec = null) {
   if (!embeddingPipe || !conceptCache.length) return [];
   try {
@@ -2985,6 +3139,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     ? extractAnchorPhrases(query, termWeights, 4)
     : [];
   const anchorTexts = anchorPhrases.map(p => p.phrase.toLowerCase());
+  const structuredMultiWordQuery = isStructuredMultiWordQuery(query, anchorPhrases);
 
   // ── Detect significant phrases in query ──
   // For long queries (5+ words), skip sub-phrase decomposition — sub-bigrams create
@@ -3076,6 +3231,22 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
     );
   }
 
+  // ── FTS matchType-driven phrase evidence ──────────────────────────────────────
+  // FTS5 `matchType` reflects the quality of the match the porter-stemming engine
+  // confirmed, ordered from strongest to weakest:
+  //   'phrase'  — all query tokens matched sequentially (stem-normalised).  This is
+  //               stricter than normalizedTextIncludes() which compares raw strings.
+  //   'near'    — all tokens matched within a proximity window (NEAR/5 or similar).
+  // Both signal genuine phrase-level co-occurrence in the verse, regardless of whether
+  // the exact surface forms (e.g. "gathering" vs "gather", "woods" vs "wood") survive
+  // the direct-string check.  Promote these rows to _directQueryMatch so the tier-2
+  // scorer awards the 0.92 base and density/lexical/probability signals rank them.
+  if (directMatchEligible && (ftsResult.matchType === 'phrase' || ftsResult.matchType === 'near')) {
+    for (const row of ftsRanked) {
+      row._directQueryMatch = true;
+    }
+  }
+
   // ── Source A2: Exact phrase FTS — separate RRF lane for phrase matches ──
   const phraseCandidates = [...detectedPhrases, ...anchorPhrases]
     .filter(Boolean)
@@ -3160,7 +3331,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       }
     }
 
-    if (normWords.length >= 2 && normWords.length <= 4) {
+    if (!structuredMultiWordQuery && normWords.length >= 2 && normWords.length <= 4) {
       for (let i = 0; i < normWords.length - 1; i++) {
         const bigram = normWords[i] + ' ' + normWords[i + 1];
         const bigramSlug = normWords[i] + '-' + normWords[i + 1];
@@ -3175,7 +3346,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       }
     }
 
-    if (queryTopicSlugs.length === 0 && normWords.length <= 3) {
+    if (!structuredMultiWordQuery && queryTopicSlugs.length === 0 && normWords.length <= 3) {
       for (const [slug, name] of topicNameMap) {
         const slugNorm = slug.replace(/-/g, ' ');
         for (const w of normWords) {
@@ -3194,7 +3365,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   // ── Source B: Chapter summaries FTS — finds chapters thematically about the topic ──
   const summaryRanked = [];
   const shortTopicalQuery = queryWordCount <= 3 && queryTopicSlugs.length > 0;
-  const longStructuredQuery = queryWordCount >= 5 || anchorPhrases.length > 0 || detectedPhrases.length > 0;
+  const longStructuredQuery = structuredMultiWordQuery || detectedPhrases.length > 0;
   if (db_chsummary && !shortTopicalQuery && !longStructuredQuery) {
     try {
       const cleanQ = query.replace(/[^a-zA-Z0-9\-\s]/g, ' ').trim();
@@ -3223,7 +3394,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
 
   // ── Source C: Topical Guide — curated theological connections ──
   const tgRanked = [];
-  if (topicalGuideReady && queryTopicSlugs.length > 0) {
+  if (topicalGuideReady && topicallyEligible(queryWordCount, longStructuredQuery, hasExactTopicMatch, queryTopicSlugs)) {
     const bestByVerse = new Map();
     const probeLimit = hasExactTopicMatch ? 3 : Math.min(3, queryTopicSlugs.length);
     for (let slugIndex = 0; slugIndex < probeLimit; slugIndex++) {
@@ -3358,6 +3529,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       lexicalSignalQuality: lexicalSignalQuality(query, ftsRanked, termWeights),
       topFtsCount: ftsRanked.length,
       hasExactTopicMatch,
+      queryTopicSlugs,
       topicGuideHitCount: tgRanked.length,
     },
   };
@@ -3617,26 +3789,32 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     const autoPhraseWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
     const autoPhraseCoverageFloor = autoPhraseWordCount >= 5 ? 0.42 : 0.68;
     const normalizedQueryText = normalizeSearchText(query.trim());
+    const autoPhraseTermWeights = queryTermWeights(query.trim());
+    const autoAnchorPhrases = autoPhraseWordCount >= 5
+      ? extractAnchorPhrases(query.trim(), autoPhraseTermWeights, 4)
+      : [];
     const phraseHitEligible = autoPhraseWordCount >= 5
-      ? autoPhraseResult.matchType === 'phrase'
+      ? LONG_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType)
       : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
     const phraseHits = phraseHitEligible
       ? autoPhraseResult.results
         .map(r => {
-          const phraseCoverage = weightedLexicalCoverage(query.trim(), r, queryTermWeights(query.trim()));
+          const phraseCoverage = weightedLexicalCoverage(query.trim(), r, autoPhraseTermWeights);
           const normalizedVerseText = normalizeSearchText(r.scripture_text || '');
           const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText);
-          const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, queryTermWeights(query.trim()));
+          const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, autoPhraseTermWeights);
           return {
             ...r,
             _source: 'fts-phrase',
             _phraseMatch: true,
             _phraseCoverage: phraseCoverage,
             _directPhraseMatch: directPhraseMatch,
+            _anchorPhraseMatch: autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'near',
             // Mirror to _directQueryMatch so the tier-2 scorer awards the 0.92 bonus
             // to phrase hits that are literal substrings of the verse text.
             _directQueryMatch: directPhraseMatch,
             _sequenceScore: sequenceScore,
+            _anchorWindowScore: anchorWindowScore(r.scripture_text, autoAnchorPhrases, autoPhraseTermWeights),
           };
         })
         .filter(r => {
@@ -3644,7 +3822,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
           if (autoPhraseWordCount <= 4) {
             return Boolean(r._directPhraseMatch);
           }
-          return true;
+          return Boolean(r._directPhraseMatch)
+            || (r._sequenceScore || 0) >= 0.35
+            || ((r._anchorWindowScore || 0) >= 0.55 && (r._phraseCoverage || 0) >= 0.5);
         })
       : [];
     const phraseIdsSet = new Set(phraseHits.map(r => r.verse_id));
@@ -3715,14 +3895,19 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
 
     // Long narrative queries with weak lexical coverage should use dense retrieval
     // as a primary candidate generator, not only as a late injection source.
+    // Similarity floor (0.25) prevents the HNSW from injecting genealogy name-lists
+    // and other structurally-unrelated verses that happen to be nearest-neighbors for
+    // extreme outlier query vectors — these show up with sim ≈ 0 or even negative.
     if (shouldPreferSemantic && qvec) {
       try {
         const semPrimary = await semanticSearch(query.trim(), 0, 80, new Set(), qvec);
-        if (semPrimary && semPrimary.results.length > 0) {
+        // Filter out low-quality HNSW neighbors — require meaningful cosine similarity
+        const semFiltered = (semPrimary?.results || []).filter(r => (r.similarity_score || 0) >= 0.25);
+        if (semFiltered.length >= 3) {
           const semWeight = Math.max(1.8, (getIntentWeights(prelimIntent?.type || 'conceptual')[1] || 1.0) * 2.2);
           const mergedScores = reciprocalRankFusion(
             [
-              semPrimary.results.map(r => ({ ...r, _source: 'semantic-primary' })),
+              semFiltered.map(r => ({ ...r, _source: 'semantic-primary' })),
               fusionResult.results,
             ],
             [],
@@ -3762,6 +3947,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       fusionResult.total = fusionResult.results.length;
     }
 
+    const queryTopicSlugs = fusionResult.diagnostics?.queryTopicSlugs || [];
+
     results = fusionResult.results;
     total   = fusionResult.total;
 
@@ -3797,17 +3984,29 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       try {
         const semProbe = await semanticSearch(query.trim(), 0, 50, new Set(), qvec);
         if (semProbe && semProbe.results.length > 0) {
-          const existingIds = new Set(results.map(r => r.verse_id));
+          const existingByVerse = new Map(results.map((r, i) => [r.verse_id, i]));
           for (const sr of semProbe.results) {
             if ((sr.similarity_score || 0) < semInjectFloor) continue;
             if (queryWordCount >= 5 && strongLexicalHead && (sr.similarity_score || 0) < 0.28) continue;
-            if (!existingIds.has(sr.verse_id)) {
+            const existingIdx = existingByVerse.get(sr.verse_id);
+            if (existingIdx !== undefined) {
+              // Verse already in results from FTS/topical lane — update sim score if
+              // semantic score is higher (lets WMD reranking and tier scoring use it)
+              const existing = results[existingIdx];
+              if ((sr.similarity_score || 0) > (existing.similarity_score || 0)) {
+                existing.similarity_score = sr.similarity_score;
+                existing._rrfScore = Math.max(
+                  existing._rrfScore || 0,
+                  sr.similarity_score * semInjectWeight * 0.05
+                );
+              }
+            } else {
               results.push({
                 ...sr,
                 _source: 'sem-inject',
                 _rrfScore: Math.max(0.01, sr.similarity_score * semInjectWeight * 0.06),
               });
-              existingIds.add(sr.verse_id);
+              existingByVerse.set(sr.verse_id, results.length - 1);
             }
           }
           total = results.length;
@@ -3930,8 +4129,35 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     }
 
     // Step 6.5: Query-Personalized PageRank
-    const qpprSeeds = results.slice(0, 10).map(r => r.verse_id);
-    const qpprScores = qpprSeeds.length >= 3 ? queryPPR(qpprSeeds) : null;
+    const propagationIntentClass = prelimIntent || refineIntentWithTopicSignals(
+      classifyQueryIntent(query.trim(), confidence, qvec),
+      queryWordCount,
+      lexicalQuality,
+      topicGuideHitCount,
+      hasExactTopicMatch
+    );
+    const propagationProfiles = {
+      reference: null,
+      phrase: { alpha: 0.72, hops: 1, iters: 3, seedLimit: 5, maxInfluence: 0.06, knnLimit: 8, crossRefLimit: 4, topicEdgeLimit: 0 },
+      keyword: { alpha: 0.76, hops: 1, iters: 3, seedLimit: 6, maxInfluence: 0.07, knnLimit: 8, crossRefLimit: 5, topicEdgeLimit: hasExactTopicMatch ? 2 : 0 },
+      mixed: { alpha: 0.8, hops: 2, iters: 4, seedLimit: 7, maxInfluence: 0.09, knnLimit: 10, crossRefLimit: 6, topicEdgeLimit: queryTopicSlugs.length > 0 ? 2 : 0 },
+      situational: { alpha: 0.83, hops: 2, iters: 4, seedLimit: 8, maxInfluence: 0.12, knnLimit: 10, crossRefLimit: 6, topicEdgeLimit: queryTopicSlugs.length > 0 ? 4 : 0 },
+      conceptual: { alpha: 0.84, hops: 2, iters: 5, seedLimit: 8, maxInfluence: 0.14, knnLimit: 12, crossRefLimit: 6, topicEdgeLimit: queryTopicSlugs.length > 0 ? 4 : 2 },
+      entity: { alpha: 0.78, hops: 1, iters: 3, seedLimit: 5, maxInfluence: 0.07, knnLimit: 8, crossRefLimit: 4, topicEdgeLimit: 0 },
+    };
+    const propagationConfig = propagationProfiles[propagationIntentClass.type] || propagationProfiles.mixed;
+    const qpprSeedRows = propagationConfig && results.length > 0
+      ? results.filter((row) => {
+        if (!row || !row.verse_id) return false;
+        if (row._directQueryMatch || row._anchorPhraseMatch) return true;
+        if ((row._lexicalCoverage || 0) >= 0.44) return true;
+        if ((row.similarity_score || 0) >= 0.32) return true;
+        return row._source === 'topical-guide' || row._source === 'cross-ref' || row._source === 'semantic-primary';
+      }).slice(0, propagationConfig.seedLimit)
+      : [];
+    const qpprScores = propagationConfig && qpprSeedRows.length >= 3
+      ? queryPPR(qpprSeedRows, { ...propagationConfig, queryTopicSlugs })
+      : null;
     if (contextVerseId) {
       results = contextBoost(results, contextVerseId);
     }
@@ -4036,7 +4262,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // ═══════════════════════════════════════════════════════════════════════════
 
     // Threshold calibrated from distribution analysis:
-    // Raw MiniLM L6: random median≈0.22, adjacent-verse median≈0.35, P95≈0.65
+    // scripture_minilm (fine-tuned bge-base-en-v1.5): random median≈0.25, adjacent-verse median≈0.37, P95≈0.67
     // Whitening disabled — always use raw thresholds.
     const SEM_THRESHOLD_BASE = 0.28; // raw: separates signal (>0.35) from background noise (~0.22)
     const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
@@ -4061,11 +4287,20 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     // Raw cosine baseline for unrelated pairs ≈ 0.15-0.25; floor at 0.20 to exclude noise
     const SIM_FLOOR = 0.15;
     if (qvec) {
+      // Relative RRF floor: scale to the actual distribution of scores in the pool.
+      // Intent-specific weights (e.g. "mixed" W₀ ≈ 0.42 vs global W₀ = 3.0) compress
+      // all _rrfScore values proportionally, so a fixed 0.015 floor would zero the
+      // entire result set when the intent weight is low.
+      // Floor = max(topRrf × 0.08, 0.001): keeps results within ~12× of the top score.
+      const _topRrf = results.length > 0
+        ? Math.max(...results.slice(0, 20).map(r => r._rrfScore || 0))
+        : 0;
+      const RRF_FLOOR = _topRrf > 0 ? Math.max(_topRrf * 0.08, 0.001) : 0.015;
       results = results.filter(r => {
         if (phraseIdsSet.has(r.verse_id)) return true;
         const sim = r.similarity_score || 0;
         const rrf = r._rrfScore || 0;
-        return sim >= SIM_FLOOR || rrf >= 0.015;
+        return sim >= SIM_FLOOR || rrf >= RRF_FLOOR;
       });
     }
 
@@ -4077,6 +4312,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         const isTopicalSource = (r._source || '').includes('topical');
         // QPPR graph-authority score (0–1, normalised); 0 if not in local subgraph
         const qpprBoost = (qpprScores && qpprScores.get(r.verse_id)) || 0;
+        r._qpprScore = qpprBoost;
         // Spectral similarity for tier promotion (computed in Step 6 above)
         const specSim = r._spectralSim || 0;
         let tier, tierScore;
@@ -4141,11 +4377,12 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
 
         // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
         // Apply QPPR within-tier boost: max +0.15 — cannot cross tier boundary (gap=1.0)
-        let specificityScore = (6 - tier) + tierScore + qpprBoost * 0.15;
+        const structurePrior = computeWeakStructurePrior(r, intentClass.type, queryWordCount, lexicalQuality);
+        let specificityScore = (6 - tier) + tierScore + qpprBoost * (propagationConfig?.maxInfluence || 0.08) + structurePrior;
         if (calibrationCurves.size > 0) {
           specificityScore = calibrateScore(tier, specificityScore);
         }
-        const nextRow = { ...r, _specificity_score: specificityScore, _tier: tier };
+        const nextRow = { ...r, _specificity_score: specificityScore, _tier: tier, _structurePrior: structurePrior };
         nextRow._relevance_probability = computeRelevanceProbability(nextRow, intentClass.type, confidence);
         return nextRow;
       });
@@ -4174,6 +4411,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       expansions: allExpansions,
       facets,
       qpprActive:      !!(qpprScores && qpprScores.size > 0),
+      graphSeedCount: qpprSeedRows.length,
+      weakStructurePrior: shouldUseWeakStructurePrior(intentClass.type, queryWordCount, lexicalQuality),
       phraseMatchCount: phraseHits.length,
       adaptiveCutoff,
     };
@@ -4195,7 +4434,7 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     } catch {}
 
     results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _anchorPhraseMatch, _phraseSignal, _phraseCoverage, ...clean } = r;
+      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _anchorPhraseMatch, _phraseSignal, _phraseCoverage, _qpprScore, _structurePrior, ...clean } = r;
       return clean;
     });
     total = results.length;
@@ -4282,7 +4521,7 @@ function buildEmbeddingCache() {
   // cosine similarity rankings (e.g. 1Cor13:13 vs D&C4:5: raw=0.49, whitened=0.01).
   // Root cause: ZCA over-amplifies low-variance directions, destroying the semantic
   // signal from high-variance dimensions where the model encodes meaning.
-  // Raw L2-normalized MiniLM vectors preserve the correct similarity ordering.
+  // Raw L2-normalized scripture_minilm vectors preserve the correct similarity ordering.
   // Keeping the whitening data load commented out until a regularised (PCA-based)
   // whitening with ε≥0.1 is baked.
   //
@@ -4378,6 +4617,7 @@ async function initEmbeddings() {
       return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: true });
     }
     // Fallback to generic HuggingFace model if local ONNX not available
+    fastify.log.warn('[Embeddings] scripture_minilm ONNX not found — falling back to all-MiniLM-L6-v2 (training-time model will differ)');
     return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
   }
 
