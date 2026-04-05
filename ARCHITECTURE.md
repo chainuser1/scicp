@@ -32,6 +32,7 @@ Sacred Scripture Projector (scicp) is a real-time scripture presentation engine.
 
 | Version | Date | Key Changes |
 |---------|------|-------------|
+| **v2.1-audit** | Apr 2026 | Query-personalized graph propagation, weak structural prior, judged benchmark metrics, hard-negative prep workflow, versioned candidate-model rebuild support |
 | **v2.0** | Apr 2026 | **Disabled ZCA whitening** (was inverting similarity); **raw embeddings** (L2-normalized); **KJV spelling normalization**; **proactive semantic injection**; **_specificity_score API field**; **raw HNSW rebuild** |
 | v1.5 | Jan 2026 | Fine-tuning pipeline, Kaggle notebook, 460k training pairs |
 | v1.0 | Jul 2025 | Initial search pipeline with 41 components, ZCA whitening, HNSW indexing |
@@ -77,6 +78,14 @@ Passive display that receives verses from the Presenter. Auto-formats text, supp
 The backend implements a 41-component mathematical search pipeline in `backend/index.js` (~2500 lines). Focus on correct mathematical semantics without empirical hacks.
 
 ### Query Flow: 8 Sequential Steps
+
+Current ranking priority is specificity-first rather than topic-first:
+
+1. direct reference
+2. structured multi-word phrase or totality match
+3. cluster or semantic neighborhood match
+4. topical relation
+5. plain keyword fallback
 
 ### Bias-Free Retrieval Rules
 
@@ -124,7 +133,8 @@ If no early return, automatically run phrase + semantic + keyword in parallel:
   - Spectral embeddings (50D) for topic clustering and diversity re-ranking
   - Cross-reference graph: LDS cross-ref relationships ("See also...") for related verses
   - Topical guide integration (3512 topics, 21,991 linked verses)
-  - PageRank scores (verse importance in citation graph)
+  - Query-personalized propagation with intent-aware depth and capped influence
+  - Weak structure prior for broad conceptual/situational reranking only
 
 **Step 4: Proactive Semantic Injection**
 - For multi-word queries (N ≥ 2), inject high-similarity non-keyword-matching verses
@@ -133,9 +143,10 @@ If no early return, automatically run phrase + semantic + keyword in parallel:
 - Threshold: SEM_THRESHOLD_BASE=0.28 (raw cosine), SIM_FLOOR=0.15
 
 **Step 5: Reciprocal Rank Fusion (RRF)**
-Combine FTS + semantic + graph scores via learned weighted RRF:
+Combine FTS + semantic + graph scores via weighted RRF and late reranking:
 - Global weights (optimized via Adam): ~[3.0, 1.15, 0.05, 1.1, 0.3, 0.15]
 - Per-intent weights: entity, keyword, reference, phrase
+- Global PageRank is no longer used as a dominant early-fusion bonus
 - Produces unified ranking and combined score
 
 **Step 6: Session Context & Diversity**
@@ -185,7 +196,7 @@ Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts`
 
 ## Post-Training Operations
 
-After fine-tuning `resources/models/scripture-minilm`, all embedding-derived artifacts must be rebuilt.
+After fine-tuning a candidate model, all embedding-derived artifacts must be rebuilt.
 
 Recommended single command:
 
@@ -194,6 +205,29 @@ scripts/post-train-rebuild.sh
 ```
 
 This script installs the latest model zip and regenerates: embeddings, concept index, kNN, spectral, clusters, cluster labels, entity centroids, HNSW, and the search graph bundle. Whitening is intentionally excluded.
+
+It can also rebuild from a versioned candidate model directory without overwriting the default active model path first:
+
+```bash
+scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
+scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+```
+
+This is the preferred pre-promotion workflow for evaluating a newly trained model against the current baseline.
+
+## Current Audit State (Apr 2026)
+
+- backend tests: 159 / 159 passing
+- judged benchmark top1 accuracy: 100.0%
+- exact-reference top1: 100.0%
+- phrase-fragment top3: 100.0%
+- judged benchmark status: all current judged queries pass
+
+Interpretation:
+
+- search is already strong on exact references and most phrase retrieval
+- the retrieval stack is disciplined enough to support a real model comparison
+- the next milestone is not architectural invention; it is preserving this specificity-first behavior and only accepting future model changes if they beat this baseline
 
 ## Session Model
 

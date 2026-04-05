@@ -234,6 +234,12 @@ describe('Backend API Tests', () => {
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].verse_title).toBe('1 Nephi 3:7');
     });
+
+    test('should keep Jeremiah wood-gathering fragment near the top despite stemming differences', () => {
+      const { results, total } = searchScripture('children gathering woods');
+      expect(total).toBeGreaterThan(0);
+      expect(results.slice(0, 3).map((row) => row.verse_title)).toContain('Jeremiah 7:18');
+    });
   });
 
   describe('getVerseOfTheDay CFM cycle', () => {
@@ -705,12 +711,20 @@ describe('Backend API Tests', () => {
       expect(body.results[0].verse_title).toBe('1 Nephi 3:7');
     });
 
-    test('GET /search avoids generic scaffolding dominance for exhort wording', async () => {
+    test('GET /search keeps Jeremiah wood-gathering fragment in the head results', async () => {
+      const res = await fastify.inject({ method: 'GET', url: '/search?q=children+gathering+woods&pageSize=5' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.results.slice(0, 3).map((row) => row.verse_title)).toContain('Jeremiah 7:18');
+    });
+
+    test('GET /search keeps exhort wording inside the Moroni phrase cluster', async () => {
       const res = await fastify.inject({ method: 'GET', url: '/search?q=and+moreover+i+would+exhort+you' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.results.length).toBeGreaterThan(0);
       expect(body.results[0].verse_title).not.toMatch(/^Genesis 1:/);
+      expect(body.results.slice(0, 3).every((row) => /^Moroni 10:/.test(row.verse_title))).toBe(true);
     });
 
     test('GET /search preserves Moses 1:39 for work and glory wording', async () => {

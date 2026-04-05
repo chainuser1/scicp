@@ -61,6 +61,14 @@ Comprehensive 41-component mathematical pipeline optimized for scriptural semant
 7. **Re-ranking** — Maximum Marginal Relevance (MMR) diversity, session context, learned weight optimization (Adam)
 8. **Tier calibration** — 5-tier specificity scoring with sigmoid soft-gates, per-intent weighting, deadzone isolation
 
+Search ranking is now intentionally specificity-first:
+
+1. direct references
+2. structured multi-word phrase or totality matches
+3. cluster and semantic neighborhood matches
+4. topical related verses
+5. plain keyword matches
+
 
 ### Latest Improvements (Apr 2026)
 
@@ -76,6 +84,29 @@ Comprehensive 41-component mathematical pipeline optimized for scriptural semant
 - Training corpus: **460,979 pairs** (~461k)
 - LDS ↔ Rotherham, Strong's lexicon, Kaggle fine-tuning pipeline
 - One-command rebuild: `scripts/post-train-rebuild.sh`
+- Hard-negative prep workflow: `npm run prepare:training-hard-negatives`
+
+### Current Audit State (Apr 2026, Pre-Retrain)
+
+- backend tests: **159 / 159 passing**
+- judged benchmark top1 accuracy: **100.0%**
+- Recall@3 / Recall@5: **100.0% / 100.0%**
+- exact-reference top1: **100.0%**
+- phrase-fragment top3: **100.0%**
+- false-positive rate: **0.0%**
+- judged benchmark status: **all current judged queries pass**
+
+### Goal Progress
+
+The search engine is already well past the baseline overhaul stage.
+
+- Phase 1 (measurement and benchmark discipline): mostly complete
+- Phase 2 (query-aware fusion): materially advanced, not fully complete
+- Phase 3 (query-personalized graph propagation): materially implemented
+- Phase 4 (embedding-space sharpening): dataset preparation complete enough to retrain, retrain itself still pending
+- Phase 5 (weak structural priors): partially implemented, still being validated
+
+In plain terms: the system is already strong and mathematically serious, and the current judged benchmark is green. The next major step is not mandatory retraining; it is preserving this specificity-first ranking discipline while deciding whether any future model change genuinely improves the current baseline.
 
 
 ---

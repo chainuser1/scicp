@@ -17,6 +17,7 @@
  * same vector space.
  *
  * Usage: node scripts/build-concept-index.js
+ *        SCRIPTURE_MODEL_DIR=resources/models/scripture-minilm-vNext node scripts/build-concept-index.js
  */
 'use strict';
 
@@ -27,6 +28,7 @@ const { execSync } = require('child_process');
 
 const DB_DIR      = path.resolve(__dirname, '../resources/db');
 const PHRASES_TMP = path.resolve(__dirname, '../resources/concept-phrases.json');
+const MODEL_DIR   = process.env.SCRIPTURE_MODEL_DIR ? path.resolve(process.cwd(), process.env.SCRIPTURE_MODEL_DIR) : null;
 
 async function main() {
   const phrases = new Map(); // phrase → source
@@ -105,7 +107,10 @@ async function main() {
   // and writes concept-embeddings.db. stdout is inherited so progress shows.
   console.log('\nShelling out to embed-concepts.py...');
   const embedScript = path.resolve(__dirname, 'embed-concepts.py');
-  execSync(`python3 "${embedScript}"`, { stdio: 'inherit' });
+  execSync(`python3 "${embedScript}"`, {
+    stdio: 'inherit',
+    env: MODEL_DIR ? { ...process.env, SCRIPTURE_MODEL_DIR: MODEL_DIR } : process.env,
+  });
 
   // ── Cleanup temp file ────────────────────────────────────────────────────
   fs.unlinkSync(PHRASES_TMP);

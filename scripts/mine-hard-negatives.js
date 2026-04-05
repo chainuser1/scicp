@@ -56,6 +56,7 @@ const OUT_FILE = path.join(ROOT, 'resources', 'training-pairs-hard-neg.json');
 //   too high → near-duplicates that poison the embedding space
 const MIN_SIM   = 0.50;
 const MAX_SIM   = 0.90;
+const MIN_OVERLAP = 0.08;
 
 // Deterministic PRNG (mulberry32)
 let _seed = 42;
@@ -71,11 +72,15 @@ function seededRandom() {
 const args = process.argv.slice(2);
 let LIMIT = 100000;
 let MIN_SIM_OVERRIDE = null;
+let MIN_OVERLAP_OVERRIDE = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--limit' && args[i + 1]) LIMIT = parseInt(args[++i], 10);
   if (args[i] === '--min-sim' && args[i + 1]) MIN_SIM_OVERRIDE = parseFloat(args[++i]);
+  if (args[i] === '--min-overlap' && args[i + 1]) MIN_OVERLAP_OVERRIDE = parseFloat(args[++i]);
+  if (/^\d+$/.test(args[i])) LIMIT = parseInt(args[i], 10);
 }
 const effectiveMinSim = MIN_SIM_OVERRIDE ?? MIN_SIM;
+const effectiveMinOverlap = MIN_OVERLAP_OVERRIDE ?? MIN_OVERLAP;
 
 // ── Load databases ────────────────────────────────────────────────────────────
 
@@ -101,17 +106,37 @@ function normalizeText(t) {
   return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function tokenizeText(t) {
+  return normalizeText(t)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 3);
+}
+
+function tokenOverlapScore(aTokens, bTokens) {
+  if (aTokens.length === 0 || bTokens.length === 0) return 0;
+  const aSet = new Set(aTokens);
+  const bSet = new Set(bTokens);
+  let shared = 0;
+  for (const token of aSet) {
+    if (bSet.has(token)) shared += 1;
+  }
+  return (2 * shared) / (aSet.size + bSet.size);
+}
+
 const textToId   = new Map(); // normalized text → verse_id
 const idToText   = new Map(); // verse_id → original scripture text
 const idToChapter = new Map(); // verse_id → chapter_id
+const idToBook   = new Map(); // verse_id → book_id
 
 // Load all LDS verses (primary)
-for (const row of db.prepare('SELECT v.id, v.scripture_text, v.chapter_id FROM verses v').all()) {
+for (const row of db.prepare('SELECT v.id, v.scripture_text, v.chapter_id, c.book_id FROM verses v JOIN chapters c ON c.id = v.chapter_id').all()) {
   const norm = normalizeText(row.scripture_text);
   if (norm.length >= 15) {
     textToId.set(norm, row.id);
     idToText.set(row.id, row.scripture_text);
     idToChapter.set(row.id, row.chapter_id);
+    idToBook.set(row.id, row.book_id);
   }
 }
 console.log(`  LDS: ${textToId.size.toLocaleString()} verse texts indexed`);
@@ -155,12 +180,15 @@ for (let i = allPairs.length - 1; i > 0; i--) {
 
 // ── Mine hard negatives ───────────────────────────────────────────────────────
 
-console.log(`\nMining hard negatives (min_sim=${effectiveMinSim}, max_sim=${MAX_SIM}, limit=${LIMIT.toLocaleString()})...`);
+console.log(`\nMining hard negatives (min_sim=${effectiveMinSim}, min_overlap=${effectiveMinOverlap}, max_sim=${MAX_SIM}, limit=${LIMIT.toLocaleString()})...`);
 
 const triplets = [];
 let skippedNoId    = 0;
 let skippedNoNeighbor = 0;
 let processed = 0;
+let sameBookSelections = 0;
+let totalSimilarity = 0;
+let totalOverlap = 0;
 
 for (const pair of allPairs) {
   if (triplets.length >= LIMIT) break;
@@ -174,24 +202,43 @@ for (const pair of allPairs) {
   if (!positiveId) { skippedNoId++; continue; }
 
   const positiveChapter = idToChapter.get(positiveId);
+  const positiveBook = idToBook.get(positiveId);
+  const anchorTokens = tokenizeText(pair.anchor);
+  const positiveTokens = tokenizeText(pair.positive);
 
-  // Find hard negative from kNN
+  // Find the hardest safe negative from kNN: semantically near, lexically scaffolded,
+  // but still clearly not the positive target.
   const neighbors = knnStmt.all(positiveId);
   let hardNeg = null;
+  let bestCandidate = null;
 
   for (const nb of neighbors) {
-    // Similarity window
     if (nb.similarity < effectiveMinSim || nb.similarity > MAX_SIM) continue;
-    // Skip same chapter (too trivially adjacent)
     if (idToChapter.get(nb.neighbor_id) === positiveChapter) continue;
-    // Skip if the neighbor text is the same as the anchor
     const nbText = idToText.get(nb.neighbor_id);
     if (!nbText) continue;
     const normNbText = normalizeText(nbText);
+    if (normNbText === normPositive) continue;
     if (normNbText === normalizeText(pair.anchor)) continue;
-    // Found a valid hard negative
-    hardNeg = nbText;
-    break;
+    const nbTokens = tokenizeText(nbText);
+    const overlap = Math.max(
+      tokenOverlapScore(anchorTokens, nbTokens),
+      tokenOverlapScore(positiveTokens, nbTokens)
+    );
+    if (overlap < effectiveMinOverlap) continue;
+
+    const sameBookBonus = idToBook.get(nb.neighbor_id) === positiveBook ? 0.08 : 0;
+    const score = nb.similarity * 0.72 + overlap * 0.2 + sameBookBonus;
+    if (!bestCandidate || score > bestCandidate.score) {
+      bestCandidate = { text: nbText, similarity: nb.similarity, overlap, sameBook: sameBookBonus > 0, score };
+    }
+  }
+
+  if (bestCandidate) {
+    hardNeg = bestCandidate.text;
+    totalSimilarity += bestCandidate.similarity;
+    totalOverlap += bestCandidate.overlap;
+    if (bestCandidate.sameBook) sameBookSelections += 1;
   }
 
   if (!hardNeg) { skippedNoNeighbor++; continue; }
@@ -209,6 +256,11 @@ console.log(`  pairs processed       : ${processed.toLocaleString()}`);
 console.log(`  triplets written      : ${triplets.length.toLocaleString()}`);
 console.log(`  skipped (no verse_id) : ${skippedNoId.toLocaleString()}`);
 console.log(`  skipped (no neighbor) : ${skippedNoNeighbor.toLocaleString()}`);
+if (triplets.length > 0) {
+  console.log(`  avg similarity        : ${(totalSimilarity / triplets.length).toFixed(3)}`);
+  console.log(`  avg lexical overlap   : ${(totalOverlap / triplets.length).toFixed(3)}`);
+  console.log(`  same-book negatives   : ${sameBookSelections.toLocaleString()} (${((sameBookSelections / triplets.length) * 100).toFixed(1)}%)`);
+}
 console.log(`  output                : ${path.relative(ROOT, OUT_FILE)}`);
 
 // Print a few samples for manual inspection

@@ -8,22 +8,90 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/post-train-rebuild.sh [path/to/scripture-minilm.zip]
+#   scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
+#   scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
 #
 # Default zip path:
 #   ~/Downloads/scripture-minilm.zip
 
-ZIP_PATH="${1:-$HOME/Downloads/scripture-minilm.zip}"
+ZIP_PATH="$HOME/Downloads/scripture-minilm.zip"
+INSTALL_DIR="resources/models/scripture-minilm"
+MODEL_DIR=""
+SKIP_INSTALL=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --zip)
+      ZIP_PATH="$2"
+      shift 2
+      ;;
+    --install-dir)
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --model-dir)
+      MODEL_DIR="$2"
+      shift 2
+      ;;
+    --skip-install)
+      SKIP_INSTALL=1
+      shift
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage:
+  scripts/post-train-rebuild.sh [path/to/scripture-minilm.zip]
+  scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
+  scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+
+Options:
+  --zip PATH          Zip artifact to install. Defaults to ~/Downloads/scripture-minilm.zip.
+  --install-dir PATH  Model install destination inside or outside the repo.
+  --model-dir PATH    Model directory to use for rebake/rebuild. Defaults to install dir.
+  --skip-install      Reuse an already unpacked model directory.
+EOF
+      exit 0
+      ;;
+    *)
+      if [[ "$1" == -* ]]; then
+        echo "[error] unknown option: $1" >&2
+        exit 1
+      fi
+      ZIP_PATH="$1"
+      shift
+      ;;
+  esac
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+resolve_path() {
+  local raw="$1"
+  if [[ "$raw" = /* ]]; then
+    printf '%s\n' "$raw"
+  else
+    printf '%s\n' "$REPO_ROOT/$raw"
+  fi
+}
+
+INSTALL_DIR_ABS="$(resolve_path "$INSTALL_DIR")"
+MODEL_DIR_ABS="${MODEL_DIR:+$(resolve_path "$MODEL_DIR")}" 
+if [[ -z "$MODEL_DIR_ABS" ]]; then
+  MODEL_DIR_ABS="$INSTALL_DIR_ABS"
+fi
+
 echo "[info] repo: $REPO_ROOT"
 echo "[info] model zip: $ZIP_PATH"
+echo "[info] install dir: $INSTALL_DIR_ABS"
+echo "[info] rebuild model dir: $MODEL_DIR_ABS"
 
-if [[ ! -f "$ZIP_PATH" ]]; then
-  echo "[error] model zip not found: $ZIP_PATH" >&2
-  echo "[hint] pass an explicit path: scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip" >&2
-  exit 1
+if [[ "$SKIP_INSTALL" -eq 0 ]]; then
+  if [[ ! -f "$ZIP_PATH" ]]; then
+    echo "[error] model zip not found: $ZIP_PATH" >&2
+    echo "[hint] pass an explicit path: scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip" >&2
+    exit 1
+  fi
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -48,16 +116,25 @@ then
   exit 1
 fi
 
-echo "[step] installing fine-tuned model"
-rm -rf resources/models/scripture-minilm
-mkdir -p resources/models/scripture-minilm
-unzip -o "$ZIP_PATH" -d resources/models/scripture-minilm >/dev/null
+if [[ "$SKIP_INSTALL" -eq 0 ]]; then
+  echo "[step] installing fine-tuned model"
+  rm -rf "$INSTALL_DIR_ABS"
+  mkdir -p "$INSTALL_DIR_ABS"
+  unzip -o "$ZIP_PATH" -d "$INSTALL_DIR_ABS" >/dev/null
+else
+  echo "[step] skipping install; reusing existing model directory"
+fi
+
+if [[ ! -d "$MODEL_DIR_ABS" ]]; then
+  echo "[error] rebuild model directory not found: $MODEL_DIR_ABS" >&2
+  exit 1
+fi
 
 echo "[step] rebaking embeddings"
-python3 scripts/rebake-embeddings.py
+SCRIPTURE_MODEL_DIR="$MODEL_DIR_ABS" python3 scripts/rebake-embeddings.py
 
 echo "[step] rebuilding concept index"
-node scripts/build-concept-index.js
+SCRIPTURE_MODEL_DIR="$MODEL_DIR_ABS" node scripts/build-concept-index.js
 
 echo "[step] rebuilding SVD"
 node scripts/prebake-svd.js
@@ -85,6 +162,9 @@ node scripts/prebake-search-graph.js
 
 echo "[done] post-training rebuild complete"
 echo "[next] restart backend: npm run dev --workspace=backend"
+echo ""
+echo "[note] active rebuild model: $MODEL_DIR_ABS"
+echo "[note] current default active path remains: $REPO_ROOT/resources/models/scripture-minilm"
 echo ""
 echo "[push] Run the following to push rebuilt DBs (squashes into one LFS commit):"
 echo "       scripts/push-data.sh \"fine-tuned scripture-minilm\""

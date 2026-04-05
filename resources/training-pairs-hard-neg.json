@@ -1,0 +1,127 @@
+[
+  {
+    "anchor": "Mercy, Merciful",
+    "positive": "Nevertheless for thy great mercies' sake thou didst not utterly consume them, nor forsake them; for thou art a gracious and merciful God.",
+    "hard_negative": "(For the Lord thy God is a merciful God;) he will not forsake thee, neither destroy thee, nor forget the covenant of thy fathers which he sware unto them."
+  },
+  {
+    "anchor": "Plain",
+    "positive": "And straightway his ears were opened, and the string of his tongue was loosed, and he spake plain.",
+    "hard_negative": "And his mouth was opened immediately, and his tongue loosed, and he spake, and praised God."
+  },
+  {
+    "anchor": "The same clause also closes the circle of divine judgment and royal restoration announced earlier in the chapter.  Nathan’s oracle (vv 10-12) declared that because David “despised” the LORD by taking Uriah’s wife, the sword would never depart from his house; yet once David confessed, “I have sinned against the LORD,” the prophet answered, “Now the LORD has put away your sin” (vv 13-14).  The death of the first child born to Bathsheba fulfilled the threatened penalty, and David’s subsequent worship and renewed marital union with her (vv 20-24) mark a re-ordered relationship with the LORD.  By stepping forward to capture Rabbah, David re-assumes the military leadership that had slackened while he remained in Jerusalem, and the victory—together with the birth of Solomon, “loved” by the LORD (v 24-25)—demonstrates that the divine favor pronounced through Nathan is already taking effect.  Thus the taking of Rabbah functions as both a practical and a symbolic affirmation that, after judgment, the king is once again acting in concert with the LORD’s purposes for Israel.",
+    "positive": "And David gathered all the people together, and went to Rabbah, and fought against it, and took it.",
+    "hard_negative": "And when David heard of it, he sent Joab, and all the host of the mighty men."
+  },
+  {
+    "anchor": "That through his atonement, and by obedience to the principles of the gospel, mankind might be saved.",
+    "positive": "Women should be silent in the churches. For they are not permitted to speak but should be subordinate, as the law also says.",
+    "hard_negative": "But I speak this by permission, and not of commandment."
+  },
+  {
+    "anchor": "They turn the needy out of the way: the poor of the earth hide themselves together.",
+    "positive": "Behold, as wild asses in the desert, go they forth to their work; rising betimes for a prey: the wilderness yieldeth food for them and for their children.",
+    "hard_negative": "They give drink to every beast of the field: the wild asses quench their thirst."
+  },
+  {
+    "anchor": "And Solomon said, Thou hast shewed unto thy servant David my father great mercy, according as he walked before thee in truth, and in righteousness, and in uprightness of heart with thee; and thou hast kept for him this great kindness, that thou hast given him a son to sit on his throne, as it is this day.",
+    "positive": "And Solomon saith, `Thou hast done with Thy servant David my father great kindness, as he walked before Thee in truth and in righteousness, and in uprightness of heart with Thee, and Thou dost keep for him this great kindness, and dost give to him a son sitting on his throne, as at this day.",
+    "hard_negative": "And if thou wilt walk before me, as David thy father walked, in integrity of heart, and in uprightness, to do according to all that I have commanded thee, and wilt keep my statutes and my judgments:"
+  },
+  {
+    "anchor": "When the Philistines took the ark of God, they brought it into the house of Dagon, and set it by Dagon.",
+    "positive": "Give not that which is holy unto the dogs, neither cast ye your pearls before swine, lest they trample them under their feet, and turn again and rend you.",
+    "hard_negative": "For it is not meet that the things which belong to the children of the kingdom should be given to them that are not worthy, or to dogs, or the pearls to be cast before swine."
+  },
+  {
+    "anchor": "And he sent, and beheaded John in the prison.",
+    "positive": "But they did not listen; Manasseh misled them to do more evil than the nations had done that the Lord destroyed before the people of Israel.",
+    "hard_negative": "And the Lord spake to Manasseh, and to his people: but they would not hearken."
+  },
+  {
+    "anchor": "And it was the third hour, and they crucified him.",
+    "positive": "It was nine o’clock in the morning when they crucified him.",
+    "hard_negative": "He was crucified, died, and rose again the third day;"
+  },
+  {
+    "anchor": "That which was from the beginning, which we have heard, which we have seen with our eyes, which we have looked upon, and our hands have handled, of the Word of life;",
+    "positive": "nevertheless, in church I would rather speak five words with my mind, in order to instruct others also, than ten thousand words in a tongue.",
+    "hard_negative": "This is a great mystery: but I speak concerning Christ and the church."
+  },
+  {
+    "anchor": "There is a path which no fowl knoweth, and which the vulture's eye hath not seen:",
+    "positive": "A path--not known it hath a ravenous fowl, Nor scorched it hath an eye of the kite,",
+    "hard_negative": "The fowl of the air, and the fish of the sea, and whatsoever passeth through the paths of the seas."
+  },
+  {
+    "anchor": "Because they have committed villany in Israel, and have committed adultery with their neighbours' wives, and have spoken lying words in my name, which I have not commanded them; even I know, and am a witness, saith the Lord.",
+    "positive": "Do you not know that wrongdoers will not inherit the kingdom of God? Do not be deceived! The sexually immoral, idolaters, adulterers, male prostitutes, men who engage in illicit sex,",
+    "hard_negative": "For this ye know, that no whoremonger, nor unclean person, nor covetous man, who is an idolater, hath any inheritance in the kingdom of Christ and of God."
+  },
+  {
+    "anchor": "When Judah saw her, he thought her to be an harlot; because she had covered her face.",
+    "positive": "When Judah saw her, he thought her to be a prostitute, for she had covered her face.",
+    "hard_negative": "Then went Samson to Gaza, and saw there an harlot, and went in unto her."
+  },
+  {
+    "anchor": "Israel, Judah, People of",
+    "positive": "And then shall the Jews look upon me and say: What are these wounds in thine hands and in thy feet?",
+    "hard_negative": "And one shall say unto him, What are these wounds in thine hands? Then he shall answer, Those with which I was wounded in the house of my friends."
+  },
+  {
+    "anchor": "And the sons of Uzzi; Izrahiah: and the sons of Izrahiah; Michael, and Obadiah, and Joel, Ishiah, five: all of them chief men.",
+    "positive": "And with them, by their generations, after the house of their fathers, were bands of soldiers for war, six and thirty thousand men: for they had many wives and sons.",
+    "hard_negative": "And their brethren, according to their generations, nine hundred and fifty and six. All these men were chief of the fathers in the house of their fathers."
+  },
+  {
+    "anchor": "And they smote him on the head with a reed, and did spit upon him, and bowing their knees worshipped him.",
+    "positive": "Yet I will leave seven thousand in Israel, all the knees that have not bowed to Baal, and every mouth that has not kissed him.”",
+    "hard_negative": "But what saith the answer of God unto him? I have reserved to myself seven thousand men, who have not bowed the knee to the image of Baal."
+  },
+  {
+    "anchor": "Or else let these same here say, if they have found any evil doing in me, while I stood before the council,",
+    "positive": "Or let these men here tell what crime they had found when I stood before the council,",
+    "hard_negative": "And when I would have known the cause wherefore they accused him, I brought him forth into their council:"
+  },
+  {
+    "anchor": "O my brethren, I fear that unless ye shall repent of your sins that their skins will be whiter than yours, when ye shall be brought with them before the throne of God.",
+    "positive": "And it came to pass that I looked and beheld the great city of Jerusalem, and also other cities. And I beheld the city of Nazareth; and in the city of Nazareth I beheld a virgin, and she was exceedingly fair and white.",
+    "hard_negative": "And I beheld the Spirit of the Lord, that it was upon the Gentiles, and they did prosper and obtain the land for their inheritance; and I beheld that they were white, and exceedingly fair and beautiful, like unto my people before they were slain."
+  },
+  {
+    "anchor": "In God is my salvation and my glory: the rock of my strength, and my refuge, is in God.",
+    "positive": "Trust in him at all times; ye people, pour out your heart before him: God is a refuge for us. Selah.",
+    "hard_negative": "I will say of the Lord, He is my refuge and my fortress: my God; in him will I trust."
+  },
+  {
+    "anchor": "Liken",
+    "positive": "And unto the fourth, and so on unto the twelfth.",
+    "hard_negative": "Likewise the second also, and the third, unto the seventh."
+  },
+  {
+    "anchor": "The related scriptures echo the same sequence.  1 Timothy 6:9 says those who seek riches “fall into temptation and are trapped by many senseless and harmful desires,” a line that mirrors Alma’s grief over hearts swallowed by costly apparel and pride.  1 Nephi 12:17 and 15:24 call temptations “mists of darkness” and “fiery darts” that blind and lead away; the Zoramites, by ceasing daily supplication, walk into that mist and are blinded to their own prideful prayer.  1 Corinthians 10:13 promises that when testing comes God “will also provide the way out so that you may be able to endure it,” yet the Zoramites never take the way out because they never ask.  2 Corinthians 11:3 warns of thoughts “led astray from a sincere and pure devotion to Christ,” exactly what Alma sees as their prayer boasts of being “chosen” while denying Christ.  Together these passages reinforce the verse’s warning: neglect of daily prayer is not a neutral omission but the moment temptation is given room to settle, harden, and finally dictate worship.",
+    "positive": "Neither would they observe the performances of the church, to continue in prayer and supplication to God daily, that they might not enter into temptation.",
+    "hard_negative": "Therefore let the church take heed and pray always, lest they fall into temptation;"
+  },
+  {
+    "anchor": "In Jeremiah 14:7, the people of Judah acknowledge their iniquities and rebellions against God, asking Him to act for His name's sake despite their wrongdoings. This verse highlights the people's recognition of their sins and their reliance on God's mercy. The phrase \"our iniquities testify against us\" suggests that the people's actions serve as evidence of their guilt, and they are aware that they have sinned against God.",
+    "positive": "O Lord, though our iniquities testify against us, do thou it for thy name's sake: for our backslidings are many; we have sinned against thee.",
+    "hard_negative": "Return, ye backsliding children, and I will heal your backslidings. Behold, we come unto thee; for thou art the Lord our God."
+  },
+  {
+    "anchor": "For we cannot but speak the things which we have seen and heard.",
+    "positive": "for we cannot keep from speaking about what we have seen and heard.”",
+    "hard_negative": "I speak that which I have seen with my Father: and ye do that which ye have seen with your father."
+  },
+  {
+    "anchor": "Almsgiving",
+    "positive": "And he called unto him his disciples, and saith unto them, Verily I say unto you, That this poor widow hath cast more in, than all they which have cast into the treasury:",
+    "hard_negative": "And he said, Of a truth I say unto you, that this poor widow hath cast in more than they all:"
+  },
+  {
+    "anchor": "Esther 9:30 states that “letters were sent wishing peace and security to all the Jews, to the one hundred twenty-seven provinces of the kingdom of Ahasuerus.”  Within the chapter this sentence forms the final, stabilizing act after the violence has ended.  First the Jews had defended themselves and killed their enemies (vv 5-16); then they rested, feasted, and instituted Purim (vv 17-19).  Mordecai next recorded these events and sent an initial letter requiring annual observance (vv 20-23).  Esther’s own letter, jointly authorized with Mordecai (v 29), repeats the command but adds the explicit wish for “peace and security.”  Thus the verse shifts the narrative from wartime deliverance to settled, ongoing communal life: the same imperial post that once carried Haman’s decree of destruction (3:12-15) now carries words that protect and unite the scattered Jewish population.",
+    "positive": "And he sent the letters unto all the Jews, to the hundred twenty and seven provinces of the kingdom of Ahasuerus, with words of peace and truth,",
+    "hard_negative": "And he wrote in the king Ahasuerus' name, and sealed it with the king's ring, and sent letters by posts on horseback, and riders on mules, camels, and young dromedaries:"
+  }
+]

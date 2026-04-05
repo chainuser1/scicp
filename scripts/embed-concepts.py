@@ -11,27 +11,44 @@ unless you want to re-encode without re-collecting phrases.
 
 Usage (manual):
   python3 scripts/embed-concepts.py
+  python3 scripts/embed-concepts.py --model-dir resources/models/scripture-minilm-vNext
 """
 
-import sqlite3, json, pathlib, time
+import os, sqlite3, json, pathlib, sys, time
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 ROOT        = pathlib.Path(__file__).parent.parent
 DB_DIR      = ROOT / 'resources' / 'db'
-MODEL_DIR   = ROOT / 'resources' / 'models' / 'scripture-minilm'
+DEFAULT_MODEL_DIR = ROOT / 'resources' / 'models' / 'scripture-minilm'
 PHRASES_TMP = ROOT / 'resources' / 'concept-phrases.json'
 OUT_DB      = DB_DIR / 'concept-embeddings.db'
 BATCH_SIZE  = 256
 
+def resolve_model_dir(argv):
+    model_dir = os.environ.get('SCRIPTURE_MODEL_DIR')
+    for idx, arg in enumerate(argv):
+        if arg == '--model-dir' and idx + 1 < len(argv):
+            model_dir = argv[idx + 1]
+        elif arg in ('-h', '--help'):
+            print('Usage: python3 scripts/embed-concepts.py [--model-dir PATH]')
+            raise SystemExit(0)
+
+    if model_dir:
+        candidate = pathlib.Path(model_dir)
+        return candidate if candidate.is_absolute() else ROOT / candidate
+    return DEFAULT_MODEL_DIR
+
 def main():
+    model_dir = resolve_model_dir(sys.argv[1:])
+
     # ── Load model ──────────────────────────────────────────────────────────
-    if not MODEL_DIR.exists():
-        raise SystemExit(f'[embed-concepts] Fine-tuned model not found at {MODEL_DIR}\n'
+    if not model_dir.exists():
+        raise SystemExit(f'[embed-concepts] Fine-tuned model not found at {model_dir}\n'
                          f'Run post-train-rebuild.sh first to install the model.')
 
-    print(f'[embed-concepts] Loading model from {MODEL_DIR}')
-    model = SentenceTransformer(str(MODEL_DIR))
+    print(f'[embed-concepts] Loading model from {model_dir}')
+    model = SentenceTransformer(str(model_dir))
     dim   = model.get_sentence_embedding_dimension()
     print(f'[embed-concepts] Model ready  dim={dim}')
 

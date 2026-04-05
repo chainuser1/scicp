@@ -13,7 +13,7 @@ npm install  # from project root
 | Script | Purpose | Input DB | Output |
 |--------|---------|----------|--------|
 | `compute-embeddings.js` | Generate baseline MiniLM-L6 verse embeddings | `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
-| `rebake-embeddings.py` | Re-encode verses using fine-tuned model | `resources/models/scripture-minilm` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
+| `rebake-embeddings.py` | Re-encode verses using fine-tuned model (default path or custom `--model-dir`) | `resources/models/scripture-minilm` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-knn.js` | Build k-nearest-neighbor verse graph | `verse-embeddings.db` | `verse-graph.db` | ✅ Active |
 | `prebake-svd.js` | Truncated SVD for dimensionality reduction | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-whitening.js` | **DEPRECATED** (ZCA whitening disabled v2.0) | — | — | ❌ Disabled |
@@ -24,8 +24,9 @@ npm install  # from project root
 | `prebake-hnsw.js` | Build ANN index from raw embeddings (v2.0+) | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-search-graph.js` | Bundle graph/search tables for runtime packaging | `verse-graph.db` + other DBs | `search-graph.db` | ✅ Active |
 | `export-training-pairs.js` | Export training data for fine-tuning/evaluation, including modern-English translation pairs (YLT + NRSVUE) | `verse-graph.db` + other DBs | stdout/file | ✅ Active |
+| `mine-hard-negatives.js` | Mine semantically-near but wrong verses from the current embedding geometry for Phase 4 retraining | `training-pairs.json` + `verse-graph.db` | `training-pairs-hard-neg.json` | ✅ Active |
 | `calibrate-rrf-k.js` | Calibrate RRF k parameter | training pairs | stdout | ✅ Active |
-| `post-train-rebuild.sh` | One-command post-training rebuild pipeline | model zip + project DBs | refreshed semantic artifacts | ✅ Active |
+| `post-train-rebuild.sh` | One-command post-training rebuild pipeline, optionally against a versioned model directory | model zip + project DBs | refreshed semantic artifacts | ✅ Active |
 
 ## Execution Order
 
@@ -44,15 +45,50 @@ For post-training updates (after a new `scripture-minilm.zip`), run:
 scripts/post-train-rebuild.sh
 # or pass a custom zip path:
 scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip
+# or install/rebuild from a versioned sibling directory without touching the default path:
+scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
+# or rebuild from an already unpacked candidate directory:
+scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
 
 This wrapper currently refreshes the fine-tuned model, concept index, verse embeddings,
 SVD, kNN graph, spectral features, clusters, cluster labels, entity centroids, HNSW, and
 the packaged search graph bundle. Whitening is intentionally skipped because it remains
 disabled in search v2.0.
 
+When `--install-dir` or `--model-dir` is used, the rebuild runs against that selected
+candidate model directory. This lets you keep multiple trained models under
+`resources/models/` without overwriting the default `scripture-minilm` folder first.
+
 HNSW is built from the raw `verse_embeddings` table by default. If a stale
 `verse_embeddings_white` table still exists from older pipelines, it is ignored unless
 `--white` is passed explicitly for debugging.
+
+## Phase 4 Data Preparation
+
+To prepare a harder training set for the next `scripture-minilm` rebuild:
+
+```bash
+npm run prepare:training-hard-negatives
+```
+
+That workflow:
+
+1. exports the current positive training pairs to `resources/training-pairs.json`
+2. mines explicit hard negatives to `resources/training-pairs-hard-neg.json`
+3. leaves the base dataset intact while producing a triplet dataset for Kaggle/Colab fine-tuning
+
+Useful variants:
+
+```bash
+npm run export:training-pairs
+npm run mine:hard-negatives -- --limit 50000 --min-sim 0.55 --min-overlap 0.12
+```
+
+The hard-negative miner prefers neighbors that are:
+
+- semantically close in the current embedding space
+- lexically scaffold-similar to the anchor or positive
+- outside the positive verse's chapter, so the negatives stay challenging without being trivial adjacency noise
 ```
 
 ## Notes

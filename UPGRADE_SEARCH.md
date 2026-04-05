@@ -12,6 +12,65 @@ This document is intentionally opinionated. It describes:
 
 The goal is not to imitate web search mechanically. The goal is to use the right mathematics for a small, stable, scripture-centered corpus.
 
+## Status Update (Apr 2026)
+
+This document started as a forward-looking plan. It now needs an explicit audit snapshot before the next embedding retrain.
+
+### Current Audit State
+
+- Query-personalized graph propagation is now materially implemented in the live backend.
+- Global PageRank has been demoted from a dominant fusion signal to a weak, gated structural prior.
+- The judged benchmark exists and now tracks Recall@3, Recall@5, MRR, NDCG, exact-reference top1, phrase-fragment top3, false-positive rate, and head-result calibration.
+- Hard-negative dataset preparation is implemented for the next model retrain.
+- Versioned candidate model directories are supported for post-training rebuilds, so a new model can be evaluated without deleting the current one first.
+
+### Measured State — 768D Model + HNSW Fix (Apr 2026)
+
+Current benchmark snapshot from `npm run evaluate:search-benchmark -- --no-fail-fast`:
+
+- total judged queries: 18 — **all pass target thresholds**
+- positive queries: 14
+- top1 accuracy: 100.0%
+- Recall@3: 100.0%
+- Recall@5: 100.0%
+- MRR: 1.000 (exact-reference and phrase-fragment categories)
+- exact-reference top1: 100.0%
+- phrase-fragment top3: 100.0%
+- false-positive rate: 0.0%
+- head Brier: 0.000
+
+Current backend verification snapshot:
+
+- `npm run test:backend`: 159 / 159 passing
+
+### Current Ranking Discipline
+
+The live ranking now follows a specificity-first order:
+
+1. direct reference
+2. structured multi-word phrase or totality match
+3. cluster or semantic neighborhood match
+4. topical related verses
+5. plain keyword fallback
+
+This matters because multi-word queries like `and moreover i would exhort you` should stay inside the Moroni exhort phrase cluster instead of being hijacked by broad topical exhortation results.
+
+### How Far We Are Toward the Goal
+
+Against the roadmap below:
+
+- Phase 1: mostly complete
+- Phase 2: materially advanced, but not complete
+- Phase 3: materially complete in implementation, still subject to continued validation
+- Phase 4: prepared, but the actual retrain has not happened yet
+- Phase 5: partially implemented through a weak structure prior, but not fully validated as a finished phase
+
+The honest summary is that the system is no longer in the "idea stage." It is already a serious retrieval engine with disciplined benchmarking and query-aware graph math. It is also currently benchmark-clean on the judged set. It is still not a final endpoint, because:
+
+- the judged benchmark is still small
+- future model changes still need proof against the current baseline
+- fusion remains interpretable but still partly heuristic rather than fully learned
+
 ## Executive Summary
 
 scicp already has the core ingredients of a serious retrieval system:
@@ -133,6 +192,12 @@ Why it helps:
 - makes future embedding upgrades and ranking changes safer
 - prevents regressions hidden by a few good smoke-test examples
 
+Status as of Apr 2026:
+
+- implemented with a real benchmark file and comparison script
+- metrics expanded beyond smoke tests
+- still too small to be considered a final benchmark corpus
+
 ### 3. Stronger Final Fusion
 
 The current engine already exposes many useful signals. The next step is to combine them more rigorously.
@@ -181,6 +246,12 @@ Guardrail:
 
 - bad negatives can poison the embedding space, so curate this carefully
 
+Status as of Apr 2026:
+
+- hard-negative mining workflow implemented
+- explicit triplet dataset generation implemented
+- retrain itself not yet executed in this audit snapshot
+
 ### 5. Weak Verse-Centrality Prior
 
 Prebake a small prior for verse centrality using the scripture graph.
@@ -209,6 +280,11 @@ Why it can help:
 Why it can hurt if misused:
 
 - famous verses start winning for the wrong reasons
+
+Status as of Apr 2026:
+
+- implemented only as a weak reranking prior for broad conceptual and situational cases
+- no longer used as a dominant global PageRank bonus in early fusion
 
 ### 6. Better Query Taxonomy
 
@@ -306,6 +382,10 @@ Exit criteria:
 - every search change can be evaluated on a stable benchmark
 - every model rebuild can be compared against a baseline snapshot
 
+Current status:
+
+- largely complete, though the judged benchmark still needs broader coverage
+
 ### Phase 2: Improve Query-Aware Fusion
 
 Objective:
@@ -324,6 +404,12 @@ Exit criteria:
 
 - broad conceptual queries improve without harming exact references
 - phrase-fragment queries stop over-rewarding generic scaffolding
+
+Current status:
+
+- materially advanced
+- exact-reference behavior is strong
+- phrase handling is now benchmark-clean on the current judged set, with structured multi-word queries kept above topical drift
 
 ### Phase 3: Add Query-Personalized Graph Propagation
 
@@ -345,6 +431,11 @@ Exit criteria:
 - exact-reference precision does not regress
 - graph drift remains controlled
 
+Current status:
+
+- implemented in the live backend with intent-aware propagation profiles and weighted seed rows
+- drift is materially better controlled than before because propagation is now shallow and query-conditioned
+
 ### Phase 4: Sharpen the Embedding Space
 
 Objective:
@@ -363,6 +454,11 @@ Exit criteria:
 - lower false-positive rate on hard phrase and doctrinal searches
 - improved semantic precision without recall collapse
 
+Current status:
+
+- data-preparation side complete enough to start retraining
+- benchmark-side validation still pending until the next model is trained, installed, rebuilt, and compared
+
 ### Phase 5: Add Weak Structural Priors
 
 Objective:
@@ -380,6 +476,11 @@ Exit criteria:
 - broad topical queries improve
 - no visible “famous verse bias” regression
 
+Current status:
+
+- partially complete
+- weak structure prior exists, but this still needs continued validation against broader judged queries
+
 ## Operational Rules
 
 Use these rules during all search work:
@@ -393,13 +494,12 @@ Use these rules during all search work:
 
 ## Immediate Next Actions
 
-These are the next practical moves after the current prebake and rebuild work:
+These are the next practical moves from the current audit state:
 
-1. finish the current semantic artifact rebuild cleanly
-2. capture a fresh baseline snapshot of the rebuilt model
-3. run boss-query and hard-query smoke tests again
-4. build the first real judged benchmark file
-5. design a minimal query-personalized graph propagation experiment
+1. preserve the current specificity-first ranking behavior as the baseline
+2. expand the judged benchmark so it covers more hard phrase and conceptual queries
+3. only test a new embedding model if it can be benchmark-compared against this current green baseline
+4. keep graph and topical signals subordinate to structured multi-word evidence
 
 ## Bottom Line
 

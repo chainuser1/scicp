@@ -12,3 +12,4 @@ resources/db/verse-cross-refs.db    filter=lfs diff=lfs merge=lfs -text
 resources/db/triple-index.db        filter=lfs diff=lfs merge=lfs -text
 resources/db/chapter-summaries-fts.db filter=lfs diff=lfs merge=lfs -text
 resources/db/footnotes-lds-summaries.db filter=lfs diff=lfs merge=lfs -text
+*.onnx filter=lfs diff=lfs merge=lfs -text
