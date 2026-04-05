@@ -72,7 +72,21 @@
       <div class="dot"></div>
       <div class="dot"></div>
     </div>
-    <p>Loading search index&hellip;</p>
+    <p id="status">Starting&hellip;</p>
   </div>
+  <script>
+    // Receive live status updates from main process via IPC
+    if (typeof window !== 'undefined') {
+      try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.on('loading-status', (_e, msg) => {
+          const el = document.getElementById('status');
+          if (el) el.textContent = msg;
+        });
+      } catch (e) {
+        // nodeIntegration disabled fallback — status stays static
+      }
+    }
+  </script>
 </body>
 </html>

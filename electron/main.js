@@ -611,6 +611,93 @@ function setupAutoUpdater() {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 // Default to offline so macOS dock re-open / early activate events work safely.
 let selectedMode = { mode: 'offline' };
+let tray = null;
+
+// ─── Tray icon + persistent mode switcher ────────────────────────────────────
+function buildTrayMenu() {
+  const { Menu, Tray, nativeImage } = require('electron');
+  const modeLabel = selectedMode?.mode === 'online'
+    ? `Mode: Online (${selectedMode.serverUrl || ''})`
+    : 'Mode: Offline (Local)';
+
+  return Menu.buildFromTemplate([
+    { label: 'Scriptures in View', enabled: false },
+    { type: 'separator' },
+    { label: modeLabel, enabled: false },
+    {
+      label: 'Switch Mode…',
+      click: async () => {
+        const newMode = await selectConnectionMode();
+        if (newMode.mode !== selectedMode.mode ||
+            (newMode.mode === 'online' && newMode.serverUrl !== selectedMode?.serverUrl)) {
+          selectedMode = newMode;
+          tray.setContextMenu(buildTrayMenu());
+          // Ask the renderer to save its state then do the hot reload
+          if (presenterWin && !presenterWin.isDestroyed()) {
+            presenterWin.webContents.send('mode-changed', selectedMode);
+          }
+        }
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Show Presenter',
+      click: () => { if (presenterWin && !presenterWin.isDestroyed()) presenterWin.focus(); },
+    },
+    {
+      label: 'Show Display',
+      click: () => { if (clientWin && !clientWin.isDestroyed()) clientWin.focus(); },
+    },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]);
+}
+
+function setupTray() {
+  const { Tray, nativeImage } = require('electron');
+  // Linux prefers PNG; Windows/macOS use .ico. Try platform-appropriate icon first.
+  const iconCandidates = process.platform === 'linux'
+    ? ['emblem-512.png', 'emblem.ico']
+    : ['emblem.ico', 'emblem-512.png'];
+
+  const iconPath = isDev
+    ? iconCandidates.map(f => path.resolve(__dirname, '../frontend/public', f))
+    : iconCandidates.map(f => path.join(process.resourcesPath, f));
+
+  let trayIcon = nativeImage.createEmpty();
+  for (const p of iconPath) {
+    try {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) { trayIcon = img; break; }
+    } catch { /* try next */ }
+  }
+
+  try {
+    tray = new Tray(trayIcon);
+  } catch (err) {
+    console.warn('Tray icon creation failed:', err.message);
+    return; // tray is non-critical — skip gracefully
+  }
+  tray.setToolTip('Scriptures in View');
+  tray.setContextMenu(buildTrayMenu());
+  tray.on('click', () => {
+    if (presenterWin && !presenterWin.isDestroyed()) presenterWin.focus();
+    else tray.popUpContextMenu();
+  });
+}
+
+// IPC: renderer can ask to open the mode switcher at any time.
+// Returns the new mode (or unchanged mode if cancelled).
+// The RENDERER is responsible for saving state and calling switchConnectionMode.
+ipcMain.handle('open-mode-switcher', async () => {
+  const newMode = await selectConnectionMode();
+  if (newMode.mode !== selectedMode.mode ||
+      (newMode.mode === 'online' && newMode.serverUrl !== selectedMode?.serverUrl)) {
+    selectedMode = newMode;
+    if (tray) tray.setContextMenu(buildTrayMenu());
+  }
+  return selectedMode;
+});
 
 // Splash window — created immediately so users see something while the backend loads.
 function createSplashWindow() {
@@ -621,11 +708,18 @@ function createSplashWindow() {
     transparent: false,
     resizable: false,
     skipTaskbar: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true },
+    // nodeIntegration needed so loading.html can receive ipcRenderer events
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
   splash.loadFile(path.join(__dirname, 'loading.html'));
   splash.once('ready-to-show', () => splash.show());
   return splash;
+}
+
+function setSplashStatus(splash, msg) {
+  if (splash && !splash.isDestroyed()) {
+    splash.webContents.send('loading-status', msg);
+  }
 }
 
 app.whenReady().then(async () => {
@@ -636,8 +730,10 @@ app.whenReady().then(async () => {
 
   // Lazy-require the backend here so the splash is visible during
   // the synchronous module-level DB-open work in backend/index.js.
+  setSplashStatus(splash, 'Opening databases\u2026');
   ({ startElectron } = require('../backend/index.js'));
 
+  setSplashStatus(splash, 'Starting local server\u2026');
   const port = await findAvailablePort(3000, 3010);
   process.env.PORT = String(port);
   try {
@@ -673,10 +769,15 @@ app.whenReady().then(async () => {
     });
   });
 
+  setSplashStatus(splash, 'Loading search index\u2026');
   waitForServer(async () => {
+    setSplashStatus(splash, 'Ready!');
+    // Small pause so the user sees "Ready!" before the splash closes
+    await new Promise(r => setTimeout(r, 400));
     selectedMode = await selectConnectionMode();
     if (splash && !splash.isDestroyed()) splash.close();
     createWindows(selectedMode);
+    setupTray();
     setupAutoUpdater();
   });
 });
