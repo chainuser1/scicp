@@ -176,8 +176,8 @@ npm run check:prod                   # Full CI gate: build + test + lint
 ```bash
 npm run electron:dev                 # Build frontend + launch Electron
 npm run electron:build:linux         # AppImage + deb (both)
-npm run electron:build:linux:appimage  # AppImage only
-npm run electron:build:linux:deb     # deb only
+npm run electron:build:linux:appimage  # AppImage only  →  electron-builder --linux appimage
+npm run electron:build:linux:deb     # deb only         →  electron-builder --linux deb
 npm run electron:build:win           # Windows NSIS installer
 npm run electron:build:mac           # macOS DMG (x64 + arm64)
 ```
