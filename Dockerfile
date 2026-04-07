@@ -43,10 +43,10 @@ COPY --from=build /app/resources ./resources
 RUN npm ci --omit=dev --workspace=backend \
   && npm rebuild better-sqlite3
 
-# Verify the fine-tuned Scripture-MiniLM ONNX model is present
-RUN test -f resources/onnx/scripture-minilm/onnx/model_quantized.onnx \
-  && echo "Scripture-MiniLM ONNX model found ($(du -h resources/onnx/scripture-minilm/onnx/model_quantized.onnx | cut -f1))" \
-  || echo "WARNING: ONNX model not found — will fall back to generic MiniLM from HuggingFace"
+# Verify the fine-tuned Scripture-BGE ONNX model is present
+RUN test -f resources/onnx/scripture-bge/onnx/model_quantized.onnx \
+  && echo "Scripture-BGE ONNX model found ($(du -h resources/onnx/scripture-bge/onnx/model_quantized.onnx | cut -f1))" \
+  || echo "WARNING: ONNX model not found — will fall back to generic BGE from HuggingFace"
 
 EXPOSE 8080
 

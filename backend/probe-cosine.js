@@ -19,7 +19,7 @@ const cosineSim = (a, b) => {
   const ONNX_DIR = path.join(ROOT, 'resources/onnx');
   env.localModelPath = ONNX_DIR;
   env.allowRemoteModels = false;
-  const pipe = await pipeline('feature-extraction', 'scripture-minilm', { quantized: true });
+  const pipe = await pipeline('feature-extraction', 'scripture-bge', { quantized: true });
   console.log('Pipeline ready');
 
   const tests = [

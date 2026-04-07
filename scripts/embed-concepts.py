@@ -3,7 +3,7 @@
 embed-concepts.py — Step 2 of build-concept-index pipeline.
 
 Reads concept-phrases.json written by build-concept-index.js,
-encodes all phrases using the fine-tuned scripture-minilm model,
+encodes all phrases using the fine-tuned scripture-bge model,
 and writes the results into concept-embeddings.db.
 
 Called automatically by build-concept-index.js — do not run directly
@@ -11,7 +11,7 @@ unless you want to re-encode without re-collecting phrases.
 
 Usage (manual):
   python3 scripts/embed-concepts.py
-  python3 scripts/embed-concepts.py --model-dir resources/models/scripture-minilm-vNext
+  python3 scripts/embed-concepts.py --model-dir resources/models/scripture-bge-vNext
 """
 
 import os, sqlite3, json, pathlib, sys, time
@@ -20,7 +20,7 @@ from sentence_transformers import SentenceTransformer
 
 ROOT        = pathlib.Path(__file__).parent.parent
 DB_DIR      = ROOT / 'resources' / 'db'
-DEFAULT_MODEL_DIR = ROOT / 'resources' / 'models' / 'scripture-minilm'
+DEFAULT_MODEL_DIR = ROOT / 'resources' / 'models' / 'scripture-bge'
 PHRASES_TMP = ROOT / 'resources' / 'concept-phrases.json'
 OUT_DB      = DB_DIR / 'concept-embeddings.db'
 BATCH_SIZE  = 256

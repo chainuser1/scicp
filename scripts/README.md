@@ -13,7 +13,7 @@ npm install  # from project root
 | Script | Purpose | Input DB | Output |
 |--------|---------|----------|--------|
 | `compute-embeddings.js` | Generate baseline MiniLM-L6 verse embeddings | `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
-| `rebake-embeddings.py` | Re-encode verses using fine-tuned model (default path or custom `--model-dir`) | `resources/models/scripture-minilm` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
+| `rebake-embeddings.py` | Re-encode verses using fine-tuned model (default path or custom `--model-dir`) | `resources/models/scripture-bge` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-knn.js` | Build k-nearest-neighbor verse graph | `verse-embeddings.db` | `verse-graph.db` | ✅ Active |
 | `prebake-svd.js` | Truncated SVD for dimensionality reduction | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-whitening.js` | **DEPRECATED** (ZCA whitening disabled v2.0) | — | — | ❌ Disabled |
@@ -39,16 +39,16 @@ node scripts/prebake-svd.js            # ~2 min
 # prebake-whitening.js is DISABLED — ZCA whitening was inverting similarity rankings
 node scripts/prebake-spectral.js       # ~3 min
 
-For post-training updates (after a new `scripture-minilm.zip`), run:
+For post-training updates (after a new `scripture-bge.zip`), run:
 
 ```bash
 scripts/post-train-rebuild.sh
 # or pass a custom zip path:
-scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip
+scripts/post-train-rebuild.sh /path/to/scripture-bge.zip
 # or install/rebuild from a versioned sibling directory without touching the default path:
-scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
+scripts/post-train-rebuild.sh --zip /path/to/scripture-bge.zip --install-dir resources/models/scripture-bge-vNext
 # or rebuild from an already unpacked candidate directory:
-scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+scripts/post-train-rebuild.sh --model-dir resources/models/scripture-bge-vNext --skip-install
 
 This wrapper currently refreshes the fine-tuned model, concept index, verse embeddings,
 SVD, kNN graph, spectral features, clusters, cluster labels, entity centroids, HNSW, and
@@ -57,7 +57,7 @@ disabled in search v2.0.
 
 When `--install-dir` or `--model-dir` is used, the rebuild runs against that selected
 candidate model directory. This lets you keep multiple trained models under
-`resources/models/` without overwriting the default `scripture-minilm` folder first.
+`resources/models/` without overwriting the default `scripture-bge` folder first.
 
 HNSW is built from the raw `verse_embeddings` table by default. If a stale
 `verse_embeddings_white` table still exists from older pipelines, it is ignored unless
@@ -65,7 +65,7 @@ HNSW is built from the raw `verse_embeddings` table by default. If a stale
 
 ## Phase 4 Data Preparation
 
-To prepare a harder training set for the next `scripture-minilm` rebuild:
+To prepare a harder training set for the next `scripture-bge` rebuild:
 
 ```bash
 npm run prepare:training-hard-negatives

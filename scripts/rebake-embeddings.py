@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Re-bake all verse embeddings using the fine-tuned scripture-minilm model.
+Re-bake all verse embeddings using the fine-tuned scripture-bge model.
 
 Reads all 41,995 verses from lds-scriptures-sqlite.db, encodes them with
 the fine-tuned model, and writes Float32Array BLOBs back to verse-embeddings.db.
@@ -9,7 +9,7 @@ Run this after finetune-embeddings.py has completed successfully.
 
 Usage:
     python3 scripts/rebake-embeddings.py
-    python3 scripts/rebake-embeddings.py --model-dir resources/models/scripture-minilm-vNext
+    python3 scripts/rebake-embeddings.py --model-dir resources/models/scripture-bge-vNext
 
 The server will pick up the new embeddings on next restart (buildEmbeddingCache
 reads all rows from verse-embeddings.db at startup).
@@ -21,7 +21,7 @@ import numpy as np
 ROOT      = pathlib.Path(__file__).parent.parent
 DB_MAIN   = ROOT / 'resources/db/lds-scriptures-sqlite.db'
 DB_EMBED  = ROOT / 'resources/db/verse-embeddings.db'
-DEFAULT_MODEL_DIR = ROOT / 'resources/models/scripture-minilm'
+DEFAULT_MODEL_DIR = ROOT / 'resources/models/scripture-bge'
 BATCH_SIZE = 256
 
 def resolve_model_dir(argv):

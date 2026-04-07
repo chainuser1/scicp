@@ -245,8 +245,8 @@ This script installs the latest model zip and regenerates: embeddings, concept i
 It can also rebuild from a versioned candidate model directory without overwriting the default active model path first:
 
 ```bash
-scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
-scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+scripts/post-train-rebuild.sh --zip /path/to/scripture-bge.zip --install-dir resources/models/scripture-bge-vNext
+scripts/post-train-rebuild.sh --model-dir resources/models/scripture-bge-vNext --skip-install
 ```
 
 This is the preferred pre-promotion workflow for evaluating a newly trained model against the current baseline.

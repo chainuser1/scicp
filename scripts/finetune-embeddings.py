@@ -12,7 +12,7 @@ Training signal:
   as a negative — no manual negative mining required.
 
 Output:
-  resources/models/scripture-minilm/   ← fine-tuned sentence-transformers model
+  resources/models/scripture-bge/   ← fine-tuned sentence-transformers model
 
 After running this, run rebake-embeddings.py to re-encode all 41k verses
 and write them back to verse-embeddings.db.
@@ -23,7 +23,7 @@ import os, sys, sqlite3, random, time, pathlib
 ROOT = pathlib.Path(__file__).parent.parent
 DB_MAIN  = ROOT / 'resources/db/lds-scriptures-sqlite.db'
 DB_TG    = ROOT / 'resources/db/topical-guide.db'
-OUT_DIR  = ROOT / 'resources/models/scripture-minilm'
+OUT_DIR  = ROOT / 'resources/models/scripture-bge'
 
 BASE_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 BATCH_SIZE  = 64
