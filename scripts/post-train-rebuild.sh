@@ -7,15 +7,15 @@ set -euo pipefail
 # 3) rebuild all embedding-dependent artifacts
 #
 # Usage:
-#   scripts/post-train-rebuild.sh [path/to/scripture-minilm.zip]
-#   scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
-#   scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+#   scripts/post-train-rebuild.sh [path/to/scripture-bge.zip]
+#   scripts/post-train-rebuild.sh --zip /path/to/scripture-bge.zip --install-dir resources/models/scripture-bge-vNext
+#   scripts/post-train-rebuild.sh --model-dir resources/models/scripture-bge-vNext --skip-install
 #
 # Default zip path:
-#   ~/Downloads/scripture-minilm.zip
+#   ~/Downloads/scripture-bge.zip
 
-ZIP_PATH="$HOME/Downloads/scripture-minilm.zip"
-INSTALL_DIR="resources/models/scripture-minilm"
+ZIP_PATH="$HOME/Downloads/scripture-bge.zip"
+INSTALL_DIR="resources/models/scripture-bge"
 MODEL_DIR=""
 SKIP_INSTALL=0
 
@@ -40,12 +40,12 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       cat <<'EOF'
 Usage:
-  scripts/post-train-rebuild.sh [path/to/scripture-minilm.zip]
-  scripts/post-train-rebuild.sh --zip /path/to/scripture-minilm.zip --install-dir resources/models/scripture-minilm-vNext
-  scripts/post-train-rebuild.sh --model-dir resources/models/scripture-minilm-vNext --skip-install
+  scripts/post-train-rebuild.sh [path/to/scripture-bge.zip]
+  scripts/post-train-rebuild.sh --zip /path/to/scripture-bge.zip --install-dir resources/models/scripture-bge-vNext
+  scripts/post-train-rebuild.sh --model-dir resources/models/scripture-bge-vNext --skip-install
 
 Options:
-  --zip PATH          Zip artifact to install. Defaults to ~/Downloads/scripture-minilm.zip.
+  --zip PATH          Zip artifact to install. Defaults to ~/Downloads/scripture-bge.zip.
   --install-dir PATH  Model install destination inside or outside the repo.
   --model-dir PATH    Model directory to use for rebake/rebuild. Defaults to install dir.
   --skip-install      Reuse an already unpacked model directory.
@@ -89,7 +89,7 @@ echo "[info] rebuild model dir: $MODEL_DIR_ABS"
 if [[ "$SKIP_INSTALL" -eq 0 ]]; then
   if [[ ! -f "$ZIP_PATH" ]]; then
     echo "[error] model zip not found: $ZIP_PATH" >&2
-    echo "[hint] pass an explicit path: scripts/post-train-rebuild.sh /path/to/scripture-minilm.zip" >&2
+    echo "[hint] pass an explicit path: scripts/post-train-rebuild.sh /path/to/scripture-bge.zip" >&2
     exit 1
   fi
 fi
@@ -164,7 +164,7 @@ echo "[done] post-training rebuild complete"
 echo "[next] restart backend: npm run dev --workspace=backend"
 echo ""
 echo "[note] active rebuild model: $MODEL_DIR_ABS"
-echo "[note] current default active path remains: $REPO_ROOT/resources/models/scripture-minilm"
+echo "[note] current default active path remains: $REPO_ROOT/resources/models/scripture-bge"
 echo ""
 echo "[push] Run the following to push rebuilt DBs (squashes into one LFS commit):"
-echo "       scripts/push-data.sh \"fine-tuned scripture-minilm\""
+echo "       scripts/push-data.sh \"fine-tuned scripture-bge\""

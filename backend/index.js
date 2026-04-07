@@ -91,7 +91,7 @@ function injectSeoMeta(html, routePath) {
 }
 const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
 const ONNX_MODEL_DIR = path.resolve(__dirname, '../resources/onnx');
-const SCRIPTURE_MODEL = 'scripture-minilm';
+const SCRIPTURE_MODEL = 'scripture-bge';
 // Inside Electron the DBs live in the read-only extraResources — open them
 // as readonly so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;

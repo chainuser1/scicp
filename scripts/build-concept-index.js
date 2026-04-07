@@ -17,7 +17,7 @@
  * same vector space.
  *
  * Usage: node scripts/build-concept-index.js
- *        SCRIPTURE_MODEL_DIR=resources/models/scripture-minilm-vNext node scripts/build-concept-index.js
+ *        SCRIPTURE_MODEL_DIR=resources/models/scripture-bge-vNext node scripts/build-concept-index.js
  */
 'use strict';
 
