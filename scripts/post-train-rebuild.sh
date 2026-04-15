@@ -120,9 +120,51 @@ if [[ "$SKIP_INSTALL" -eq 0 ]]; then
   echo "[step] installing fine-tuned model"
   rm -rf "$INSTALL_DIR_ABS"
   mkdir -p "$INSTALL_DIR_ABS"
+  if ! command -v unzip >/dev/null 2>&1; then
+    echo "[error] 'unzip' not found in PATH. Install 'unzip' or run with --skip-install" >&2
+    exit 1
+  fi
+
   unzip -o "$ZIP_PATH" -d "$INSTALL_DIR_ABS" >/dev/null
 else
   echo "[step] skipping install; reusing existing model directory"
+fi
+
+# Detect whether the model files are nested one level down inside the install dir.
+# Some zips package the model under a top-level folder (e.g. scripture-bge/*). In
+# that case, defaulting to the install dir will not point at the actual model root.
+detect_model_root() {
+  local dir="$1"
+  local candidates=(config.json tokenizer.json pytorch_model.bin model_index.json flax_model.msgpack)
+  for f in "${candidates[@]}"; do
+    if [[ -f "$dir/$f" ]]; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+  done
+
+  # If there's exactly one child directory, check inside it for model artifacts.
+  local children=("$dir"/*)
+  if [[ ${#children[@]} -eq 1 && -d "${children[0]}" ]]; then
+    local subdir="${children[0]}"
+    for f in "${candidates[@]}"; do
+      if [[ -f "$subdir/$f" ]]; then
+        printf '%s\n' "$subdir"
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
+# If the model dir exists, try to detect the actual model root (may be nested).
+if [[ -d "$MODEL_DIR_ABS" ]]; then
+  detected_root="$(detect_model_root "$MODEL_DIR_ABS" || true)"
+  if [[ -n "$detected_root" && "$detected_root" != "$MODEL_DIR_ABS" ]]; then
+    MODEL_DIR_ABS="$detected_root"
+    echo "[info] adjusted model root to nested folder: $MODEL_DIR_ABS"
+  fi
 fi
 
 if [[ ! -d "$MODEL_DIR_ABS" ]]; then
