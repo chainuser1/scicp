@@ -24,6 +24,7 @@ npm install  # from project root
 | `prebake-hnsw.js` | Build ANN index from raw embeddings (v2.0+) | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-search-graph.js` | Bundle graph/search tables for runtime packaging | `verse-graph.db` + other DBs | `search-graph.db` | ✅ Active |
 | `export-training-pairs.js` | Export training data for fine-tuning/evaluation, including modern-English translation pairs (YLT + NRSVUE) | `verse-graph.db` + other DBs | stdout/file | ✅ Active |
+| `export-onnx.py` | Export a fine-tuned Scripture model to ONNX for backend runtime | `resources/models/scripture-bge` | `resources/onnx/scripture-bge` | ✅ Active |
 | `mine-hard-negatives.js` | Mine semantically-near but wrong verses from the current embedding geometry for Phase 4 retraining | `training-pairs.json` + `verse-graph.db` | `training-pairs-hard-neg.json` | ✅ Active |
 | `calibrate-rrf-k.js` | Calibrate RRF k parameter | training pairs | stdout | ✅ Active |
 | `post-train-rebuild.sh` | One-command post-training rebuild pipeline, optionally against a versioned model directory | model zip + project DBs | refreshed semantic artifacts | ✅ Active |
@@ -50,10 +51,10 @@ scripts/post-train-rebuild.sh --zip /path/to/scripture-bge.zip --install-dir res
 # or rebuild from an already unpacked candidate directory:
 scripts/post-train-rebuild.sh --model-dir resources/models/scripture-bge-vNext --skip-install
 
-This wrapper currently refreshes the fine-tuned model, concept index, verse embeddings,
-SVD, kNN graph, spectral features, clusters, cluster labels, entity centroids, HNSW, and
-the packaged search graph bundle. Whitening is intentionally skipped because it remains
-disabled in search v2.0.
+This wrapper currently refreshes the fine-tuned model, exports the ONNX runtime model,
+concept index, verse embeddings, SVD, kNN graph, spectral features, clusters,
+cluster labels, entity centroids, HNSW, and the packaged search graph bundle.
+Whitening is intentionally skipped because it remains disabled in search v2.0.
 
 When `--install-dir` or `--model-dir` is used, the rebuild runs against that selected
 candidate model directory. This lets you keep multiple trained models under

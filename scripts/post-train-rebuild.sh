@@ -172,6 +172,9 @@ if [[ ! -d "$MODEL_DIR_ABS" ]]; then
   exit 1
 fi
 
+echo "[step] exporting ONNX runtime model"
+python3 scripts/export-onnx.py --model-dir "$MODEL_DIR_ABS" --output-dir "$REPO_ROOT/resources/onnx/scripture-bge"
+
 echo "[step] rebaking embeddings"
 SCRIPTURE_MODEL_DIR="$MODEL_DIR_ABS" python3 scripts/rebake-embeddings.py
 

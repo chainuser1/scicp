@@ -4610,15 +4610,16 @@ async function initEmbeddings() {
   async function loadScripturePipeline() {
     const { pipeline, env } = await import('@xenova/transformers');
     const localModel = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL);
-    const hasLocal = fs.existsSync(path.join(localModel, 'onnx', 'model_quantized.onnx'));
-    if (hasLocal) {
-      env.localModelPath = ONNX_MODEL_DIR;
-      env.allowRemoteModels = false;
-      return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: true });
+    const quantizedPath = path.join(localModel, 'onnx', 'model_quantized.onnx');
+    const plainPath = path.join(localModel, 'onnx', 'model.onnx');
+    const hasQuantized = fs.existsSync(quantizedPath);
+    const hasPlain = fs.existsSync(plainPath);
+    if (!hasQuantized && !hasPlain) {
+      throw new Error('[Embeddings] scripture_minilm ONNX not found — local ONNX model required; Xenova fallback disabled');
     }
-    // Fallback to generic HuggingFace model if local ONNX not available
-    fastify.log.warn('[Embeddings] scripture_minilm ONNX not found — falling back to all-MiniLM-L6-v2 (training-time model will differ)');
-    return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    env.localModelPath = ONNX_MODEL_DIR;
+    env.allowRemoteModels = false;
+    return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: hasQuantized });
   }
 
   try {
