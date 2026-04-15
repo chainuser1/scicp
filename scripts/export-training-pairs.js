@@ -1,32 +1,33 @@
 #!/usr/bin/env node
 /**
- * Export training pairs for scripture embedding fine-tuning (BGE-Large).
+ * export-training-pairs-summary.js
  *
- * Pair sources (ranked by training signal strength):
+ * Training pair strategy: verse_summary → verse_text
+ * ──────────────────────────────────────────────────
+ * Anchor   : verse_summary  (short semantic description of what the verse means)
+ * Positive : verse_text     (the actual scripture verse from lds-scriptures-sqlite.db)
+ * Hard Neg : a different verse_text from the SAME CHAPTER
+ *            (forces fine-grained distinction, not just broad topic clusters)
  *
- *   1. Verse summaries — scholarly commentary ↔ verse (meaning grounding)
- *        1a. paragraph_1 ↔ verse    — narrative context anchor
- *        1b. paragraph_2 ↔ verse    — cross-canon pattern anchor
- *        1c. verse ↔ full commentary — bidirectional meaning retrieval
+ * Why this works for BGE-M3:
+ *   Summaries are query-shaped — they describe intent and meaning.
+ *   Verse texts are what users want retrieved.
+ *   The semantic gap between summary ↔ verse is exactly what BGE-M3
+ *   needs to bridge for your scripture search use case.
  *
- *   2. Translation pairs    — LDS ↔ modern-English (paraphrase invariance)
- *   3. Topical guide        — topic name ↔ verse (concept grounding)
- *   4. Triple Index         — topic name ↔ verse (broader concept coverage)
- *   5. Cross-references     — theologically linked verses (human-curated)
- *   6. Adjacent verses      — same-chapter narrative continuity
- *   7. Same-topic (TG)      — two verses under the same TG topic
- *   8. Same-topic (TI)      — two verses under the same Triple Index topic
+ * Output:
+ *   resources/training-pairs.json
+ *   [ { "anchor": "...", "positive": "...", "hard_negative": "..." }, ... ]
+ *   (pairs without a hard negative omit that field gracefully)
  *
- * Sources intentionally excluded:
- *   ✗ kNN neighbors — encodes the geometry of the current embedding model, not ground truth.
- *     Neighbor structure should be discovered after retraining and prebaking, not baked back into supervision.
- *     Re-add only in a later round using the new model's own embeddings and a measured justification.
- *
- * Output: resources/training-pairs.json
- *   [ { "anchor": "...", "positive": "..." }, ... ]
+ * Schema expected in verse-summaries.db:
+ *   verse_summaries(verse_id INTEGER, verse_summary TEXT, status TEXT)
+ *   Only rows with status = 'ai-verified' are used.
+ *   Adjust the WHERE clause below if your status value differs.
  *
  * Usage:
- *   node scripts/export-training-pairs.js
+ *   node scripts/export-training-pairs-summary.js
+ *   node scripts/export-training-pairs-summary.js --no-hard-negatives
  */
 
 'use strict';
@@ -35,422 +36,240 @@ const Database = require('better-sqlite3');
 const fs       = require('fs');
 const path     = require('path');
 
+// ── CLI args ─────────────────────────────────────────────────────────────────
+const args = process.argv.slice(2);
+const MIN_VERSE_LEN  = 15;  // only verse texts are length-guarded
+const HARD_NEGATIVES = !args.includes('--no-hard-negatives');
+// Summaries are NOT length-filtered — ai-verified status already guarantees quality.
+
+// ── Paths ─────────────────────────────────────────────────────────────────────
 const ROOT   = path.join(__dirname, '..');
 const DB_DIR = path.join(ROOT, 'resources/db');
 const OUT    = path.join(ROOT, 'resources/training-pairs.json');
 
-// ── Deterministic PRNG (LCG, seed=42) ───────────────────────────────────────
-// Used for ALL random sampling — Math.random() is never called in this script.
-// Every run produces identical output, making training fully reproducible.
+// ── Deterministic PRNG (LCG, seed=42) ────────────────────────────────────────
+// Never use Math.random() — this ensures identical output across runs.
 let _seed = 42;
 function seededRandom() {
   _seed = (_seed * 16807 + 0) % 2147483647;
   return _seed / 2147483647;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+function seededChoice(arr) {
+  return arr[Math.floor(seededRandom() * arr.length)];
+}
+
+// ── Text helpers ──────────────────────────────────────────────────────────────
 function clean(text, minLen = 15) {
-  if (!text) return null;
+  if (!text || typeof text !== 'string') return null;
   const t = text.trim();
   return t.length >= minLen ? t : null;
 }
 
-// Join two paragraphs into one coherent commentary block.
-function joinParagraphs(p1, p2) {
-  const parts = [p1, p2].filter(Boolean);
-  return parts.length > 0 ? parts.join(' ') : null;
-}
+// ── Step 1: Load LDS verse text ───────────────────────────────────────────────
+console.log('\n── Step 1: Loading LDS verse texts ──────────────────────────────');
+const ldsDbPath = path.join(DB_DIR, 'lds-scriptures-sqlite.db');
+if (!fs.existsSync(ldsDbPath)) throw new Error(`LDS DB not found: ${ldsDbPath}`);
 
-// ── Load all language DBs ────────────────────────────────────────────────────
-// English-only: non-English translations contaminate the embedding space
-// and split model capacity toward languages we never search in.
-const LANG_DBS = {
-  lds:    'lds-scriptures-sqlite.db',
-  ylt:    'ylt-scriptures-sqlite.db',
-  nrsvue: 'nrsvue-scriptures-sqlite.db',
-};
+const ldsDb = new Database(ldsDbPath, { readonly: true });
 
-const versesByLang = new Map();
-
-console.log('Loading verse databases...');
-for (const [lang, file] of Object.entries(LANG_DBS)) {
-  const dbPath = path.join(DB_DIR, file);
-  if (!fs.existsSync(dbPath)) {
-    console.log(`  skip ${lang} (not found: ${file})`);
-    continue;
-  }
-  const db  = new Database(dbPath, { readonly: true });
-  const map = new Map();
-  for (const r of db.prepare('SELECT id, scripture_text FROM verses').all()) {
-    const t = clean(r.scripture_text);
-    if (t) map.set(r.id, t);
-  }
-  versesByLang.set(lang, map);
-  console.log(`  ${lang}: ${map.size.toLocaleString()} verses`);
-  db.close();
-}
-
-const ldsVerses = versesByLang.get('lds');
-if (!ldsVerses || ldsVerses.size === 0)
-  throw new Error('LDS verse database not loaded — cannot continue.');
-
-// ── Build chapter membership map for safe adjacency checks ──────────────────
-// verse_id → chapter_id, so we never pair across chapter boundaries
-// even when verse IDs happen to be numerically consecutive there.
+/** verse_id → verse_text */
+const verseText   = new Map();
+/** verse_id → chapter_id */
 const verseChapter = new Map();
-try {
-  const ldsDb = new Database(path.join(DB_DIR, LANG_DBS.lds), { readonly: true });
-  for (const r of ldsDb.prepare('SELECT id, chapter_id FROM verses').all())
-    verseChapter.set(r.id, r.chapter_id);
-  ldsDb.close();
-  console.log(`  chapter map: ${verseChapter.size.toLocaleString()} entries`);
-} catch (e) {
-  console.warn('  ⚠️  Could not load chapter_id — adjacent pairs will use ID-gap fallback');
+/** chapter_id → verse_id[] */
+const chapterVerses = new Map();
+
+for (const r of ldsDb.prepare('SELECT id, chapter_id, scripture_text FROM verses').all()) {
+  const t = clean(r.scripture_text, MIN_VERSE_LEN);
+  if (!t) continue;
+  verseText.set(r.id, t);
+  verseChapter.set(r.id, r.chapter_id);
+  if (!chapterVerses.has(r.chapter_id)) chapterVerses.set(r.chapter_id, []);
+  chapterVerses.get(r.chapter_id).push(r.id);
 }
+ldsDb.close();
+
+console.log(`  Verses loaded  : ${verseText.size.toLocaleString()}`);
+console.log(`  Chapters loaded: ${chapterVerses.size.toLocaleString()}`);
+
+// ── Step 2: Load verse summaries ──────────────────────────────────────────────
+console.log('\n── Step 2: Loading verse summaries ──────────────────────────────');
+const summaryDbPath = path.join(DB_DIR, 'verse-summaries.db');
+if (!fs.existsSync(summaryDbPath)) throw new Error(`verse-summaries.db not found: ${summaryDbPath}`);
+
+const vsDb = new Database(summaryDbPath, { readonly: true });
+
+// Detect schema — support both column naming conventions:
+//   verse_summary  (single column)
+//   paragraph_1 / paragraph_2  (two-paragraph schema from your existing pipeline)
+const cols = vsDb.pragma('table_info(verse_summaries)').map(c => c.name);
+const hasSingleSummary = cols.includes('verse_summary') || cols.includes('summary');
+const summaryColumn = cols.includes('verse_summary') ? 'verse_summary' : (cols.includes('summary') ? 'summary' : null);
+const hasParagraphs    = cols.includes('paragraph_1') && cols.includes('paragraph_2');
+
+if (!hasSingleSummary && !hasParagraphs) {
+  throw new Error(
+    `verse_summaries table has neither 'verse_summary' nor 'paragraph_1/paragraph_2' columns.\n` +
+    `Columns found: ${cols.join(', ')}`
+  );
+}
+
+console.log(`  Schema detected: ${hasSingleSummary ? `${summaryColumn} (single column)` : 'paragraph_1 + paragraph_2'}`);
+
+// Build query based on detected schema
+// STATUS FILTER: adjust 'ai-verified' to match your actual status values if needed.
+// Run:  SELECT DISTINCT status FROM verse_summaries;  to check.
+const STATUS_FILTER = `status = 'ai-verified'`;
+
+let summaryQuery;
+if (hasSingleSummary) {
+  summaryQuery = `SELECT verse_id, ${summaryColumn} AS verse_summary FROM verse_summaries WHERE ${STATUS_FILTER}`;
+} else {
+  summaryQuery = `SELECT verse_id, paragraph_1, paragraph_2 FROM verse_summaries WHERE ${STATUS_FILTER}`;
+}
+
+/** verse_id → full_summary (single anchor per verse) */
+const verseSummary = new Map();
+
+function normalizeSummary(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+
+  // Drop leading header-like lines (wrapped in **, __, ``, ~, or short title-like lines)
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const wrapped = (
+      /^\*{1,}.*\*{1,}$/.test(line) ||
+      /^_{1,}.*_{1,}$/.test(line) ||
+      /^`.*`$/.test(line) ||
+      /^~+.*~+$/.test(line) ||
+      /^#+\s*/.test(line)
+    );
+    const shortNoPunct = line.split(/\s+/).length <= 12 && !/[.!?]/.test(line);
+    if (wrapped || shortNoPunct) i++; else break;
+  }
+
+  const remaining = lines.slice(i).join(' ');
+  if (!remaining) return null;
+
+  // Remove markdown links, emphasis, code markers, bullets and collapse whitespace
+  let cleaned = remaining.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  cleaned = cleaned.replace(/[*_`~]+/g, '');
+  cleaned = cleaned.replace(/^\s*[-•]\s*/gm, '');
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned.length ? cleaned : null;
+}
+
+for (const r of vsDb.prepare(summaryQuery).all()) {
+  const vid = r.verse_id;
+  if (!verseText.has(vid)) continue; // no corresponding verse text — skip
+  let raw;
+  if (hasSingleSummary) {
+    raw = r.verse_summary;
+  } else {
+    raw = joinParagraphs(r.paragraph_1, r.paragraph_2);
+  }
+
+  const full = normalizeSummary(raw);
+  if (full) verseSummary.set(vid, full);
+}
+vsDb.close();
+
+console.log(`  Summaries matched to verses: ${verseSummary.size.toLocaleString()}`);
+
+if (verseSummary.size === 0) {
+  console.error('\n⚠️  No summaries matched. Possible causes:');
+  console.error(`  1. Status filter mismatch — check: SELECT DISTINCT status FROM verse_summaries;`);
+  console.error(`  2. verse_id values in verse-summaries.db don't match lds-scriptures-sqlite.db`);
+  process.exit(1);
+}
+
+// ── Step 3: Build pairs ───────────────────────────────────────────────────────
+console.log('\n── Step 3: Building training pairs ──────────────────────────────');
 
 const pairs = [];
+let hardNegAdded   = 0;
+let noHardNegAvail = 0;
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 1 — Verse summaries (scholarly commentary)
-// ════════════════════════════════════════════════════════════════════════════
-//
-// The verse_summaries table contains two-paragraph scholarly commentary per verse:
-//
-//   paragraph_1 — Narrative/contextual analysis: positions the verse within its
-//                 chapter, identifies key literary and theological details, and
-//                 explains what the verse accomplishes in its immediate context.
-//
-//   paragraph_2 — Cross-canon pattern analysis: identifies related scriptures,
-//                 names the theological pattern they share (e.g. "weeping before
-//                 divine reversal"), and explains how the anchor verse fits that
-//                 canon-wide pattern.
-//
-// Three pair types are generated per verse:
-//
-//   1a. paragraph_1 → verse
-//       Anchor: narrative description of the verse's meaning and context.
-//       Teaches: "what this verse means in context" → retrieve the verse.
-//
-//   1b. paragraph_2 → verse  ← highest-value pair type in the entire dataset
-//       Anchor: named cross-canon theological pattern + related scriptures.
-//       Teaches: "weeping before divine reversal" → retrieve ALL verses that
-//       participate in that pattern across testaments and canonicals.
-//       No other source provides this pattern-level cross-canon signal.
-//
-//   1c. verse → full commentary (bidirectional)
-//       Teaches: given a verse, retrieve its full theological interpretation.
-//       Reinforces 1a and 1b in the reverse retrieval direction.
-//
-// Only rows where status = 'ai-verified' are included.
-// Paragraphs shorter than 40 characters are treated as incomplete and skipped.
+for (const [vid, summary] of verseSummary) {
+  const positive = verseText.get(vid);
+  if (!positive) continue; // defensive — already filtered above
 
-let summaryP1Count = 0;
-let summaryP2Count = 0;
-let summaryBiCount = 0;
+  const pair = { anchor: summary, positive };
 
-try {
-  const vsDb = new Database(path.join(DB_DIR, 'verse-summaries.db'), { readonly: true });
+  // ── Hard negative: a different verse from the same chapter ─────────────────
+  if (HARD_NEGATIVES) {
+    const chapId    = verseChapter.get(vid);
+    const siblings  = chapterVerses.get(chapId) ?? [];
+    const candidates = siblings.filter(id => id !== vid && verseText.has(id));
 
-  // Detect column layout — support both paragraph_1/paragraph_2 and legacy summary
-  const cols        = vsDb.pragma('table_info(verse_summaries)').map(c => c.name);
-  const hasParagraphs = cols.includes('paragraph_1') && cols.includes('paragraph_2');
-  const hasSummary    = cols.includes('summary');
-
-  if (!hasParagraphs && !hasSummary) {
-    console.warn('  ⚠️  verse_summaries: no recognised text columns — skipping source 1');
-  } else {
-    const query = hasParagraphs
-      ? "SELECT verse_id, paragraph_1, paragraph_2 FROM verse_summaries WHERE status = 'ai-verified'"
-      : "SELECT verse_id, summary            FROM verse_summaries WHERE status = 'ai-verified'";
-
-    for (const r of vsDb.prepare(query).all()) {
-      const verseText = ldsVerses.get(r.verse_id);
-      if (!verseText) continue;
-
-      let p1, p2;
-
-      if (hasParagraphs) {
-        p1 = clean(r.paragraph_1, 40);
-        p2 = clean(r.paragraph_2, 40);
-      } else {
-        // Fallback: split single summary on blank line to approximate paragraphs
-        const raw   = clean(r.summary, 40);
-        if (!raw) continue;
-        const parts = raw.split(/\n\n+/);
-        p1 = parts[0]?.trim() || null;
-        p2 = parts.length > 1 ? parts.slice(1).join(' ').trim() : null;
-        if (!p1) p1 = raw; // no split found — use full text as p1
-      }
-
-      // 1a — narrative context → verse
-      if (p1) {
-        pairs.push({ anchor: p1, positive: verseText });
-        summaryP1Count++;
-      }
-
-      // 1b — cross-canon pattern → verse (highest-value pair type)
-      if (p2) {
-        pairs.push({ anchor: p2, positive: verseText });
-        summaryP2Count++;
-      }
-
-      // 1c — verse → full commentary (bidirectional)
-      const fullCommentary = joinParagraphs(p1, p2);
-      if (fullCommentary) {
-        pairs.push({ anchor: verseText, positive: fullCommentary });
-        summaryBiCount++;
-      }
+    if (candidates.length > 0) {
+      const hardNegId   = seededChoice(candidates);
+      pair.hard_negative = verseText.get(hardNegId);
+      hardNegAdded++;
+    } else {
+      noHardNegAvail++;
     }
   }
 
-  vsDb.close();
-} catch (e) { console.error('  verse-summaries.db error:', e.message); }
-
-const summaryTotal = summaryP1Count + summaryP2Count + summaryBiCount;
-console.log(`\n1. Verse summary pairs: ${summaryTotal.toLocaleString()}`);
-console.log(`   1a. paragraph_1 → verse : ${summaryP1Count.toLocaleString()}`);
-console.log(`   1b. paragraph_2 → verse : ${summaryP2Count.toLocaleString()}`);
-console.log(`   1c. verse → commentary  : ${summaryBiCount.toLocaleString()}`);
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 2 — Translation pairs: LDS ↔ modern English
-// ════════════════════════════════════════════════════════════════════════════
-// Same verse, different words — teaches paraphrase invariance.
-// KJV archaic forms ("thee", "thou", "hath") map to modern equivalents.
-let translationCount = 0;
-for (const [lang, map] of versesByLang) {
-  if (lang === 'lds') continue;
-  for (const [vid, text] of map) {
-    const ldsText = ldsVerses.get(vid);
-    if (ldsText) {
-      pairs.push({ anchor: ldsText, positive: text });
-      translationCount++;
-    }
-  }
+  pairs.push(pair);
 }
-console.log(`2. Translation pairs (LDS ↔ modern English): ${translationCount.toLocaleString()}`);
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 3 — Topical guide: topic name ↔ verse
-// ════════════════════════════════════════════════════════════════════════════
-// Teaches concept grounding — enables queries like "faith" → verse.
-let topicCount = 0;
-try {
-  const tg     = new Database(path.join(DB_DIR, 'topical-guide.db'), { readonly: true });
-  const topics = new Map();
-  for (const r of tg.prepare('SELECT id, name FROM topics').all())
-    topics.set(r.id, r.name.trim());
-
-  for (const r of tg.prepare('SELECT topic_id, verse_id FROM topical_guide').all()) {
-    const topic = topics.get(r.topic_id);
-    const verse = ldsVerses.get(r.verse_id);
-    if (topic && verse) {
-      pairs.push({ anchor: topic, positive: verse });
-      topicCount++;
-    }
-  }
-  tg.close();
-} catch (e) { console.error('  topical-guide.db error:', e.message); }
-console.log(`3. Topical guide pairs: ${topicCount.toLocaleString()}`);
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 4 — Triple Combination Index: topic name ↔ verse
-// ════════════════════════════════════════════════════════════════════════════
-// Broader coverage than TG (3,059 topics, ~44k mappings).
-// TI snippets ignored — verse text only for consistent pair format.
-let tripleTopicCount = 0;
-try {
-  const ti        = new Database(path.join(DB_DIR, 'triple-index.db'), { readonly: true });
-  const triTopics = new Map();
-  for (const r of ti.prepare('SELECT id, name FROM topics').all())
-    triTopics.set(r.id, r.name.trim());
-
-  for (const r of ti.prepare(
-    'SELECT topic_id, verse_id FROM triple_index WHERE verse_id IS NOT NULL'
-  ).all()) {
-    const topic = triTopics.get(r.topic_id);
-    const verse = ldsVerses.get(r.verse_id);
-    if (topic && verse) {
-      pairs.push({ anchor: topic, positive: verse });
-      tripleTopicCount++;
-    }
-  }
-  ti.close();
-} catch (e) { console.error('  triple-index.db error:', e.message); }
-console.log(`4. Triple Index pairs: ${tripleTopicCount.toLocaleString()}`);
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 5 — Cross-references: theologically linked verses
-// ════════════════════════════════════════════════════════════════════════════
-// Human scholars explicitly marked these as connected — strong inter-verse
-// signal. Capped at 3 per verse to prevent high-ref verses dominating.
-let crossRefCount = 0;
-try {
-  const crDb = new Database(path.join(DB_DIR, 'verse-cross-refs.db'), { readonly: true });
-  for (const r of crDb.prepare(
-    'SELECT verse_id, cross_references FROM verse_cross_references'
-  ).all()) {
-    const srcText = ldsVerses.get(r.verse_id);
-    if (!srcText) continue;
-    let refs;
-    try { refs = JSON.parse(r.cross_references); } catch { continue; }
-    for (let i = 0; i < Math.min(3, refs.length); i++) {
-      const refText = clean(refs[i]?.text);
-      if (refText) {
-        pairs.push({ anchor: srcText, positive: refText });
-        crossRefCount++;
-      }
-    }
-  }
-  crDb.close();
-} catch (e) { console.error('  cross-refs error:', e.message); }
-console.log(`5. Cross-reference pairs: ${crossRefCount.toLocaleString()}`);
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 6 — Adjacent verses: same-chapter narrative continuity
-// ════════════════════════════════════════════════════════════════════════════
-// Consecutive verses within the same chapter share narrative flow.
-// chapter_id equality verified from DB — never pairs across chapter boundaries.
-let adjCount = 0;
-const sortedIds = [...ldsVerses.keys()].sort((a, b) => a - b);
-
-for (let i = 0; i < sortedIds.length - 1; i++) {
-  const idA = sortedIds[i];
-  const idB = sortedIds[i + 1];
-
-  const sameChapter = verseChapter.size > 0
-    ? verseChapter.get(idA) !== undefined &&
-      verseChapter.get(idA) === verseChapter.get(idB)
-    : (idB - idA === 1); // fallback if chapter map unavailable
-
-  if (sameChapter) {
-    pairs.push({ anchor: ldsVerses.get(idA), positive: ldsVerses.get(idB) });
-    adjCount++;
-  }
+console.log(`  Pairs built      : ${pairs.length.toLocaleString()}`);
+if (HARD_NEGATIVES) {
+  console.log(`  With hard negs   : ${hardNegAdded.toLocaleString()}`);
+  console.log(`  Without hard negs: ${noHardNegAvail.toLocaleString()} (single-verse chapters)`);
 }
-console.log(`6. Adjacent verse pairs: ${adjCount.toLocaleString()}`);
 
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 7 — Same-topic verse pairs (Topical Guide)
-// ════════════════════════════════════════════════════════════════════════════
-// Two verses grouped under the same TG topic by human editors.
-// Up to 5 pairs per topic, seeded PRNG, canonical min:max deduplication.
-let sameTopicTGCount = 0;
-try {
-  const tg          = new Database(path.join(DB_DIR, 'topical-guide.db'), { readonly: true });
-  const topicVerses = new Map();
-  for (const r of tg.prepare('SELECT topic_id, verse_id FROM topical_guide').all()) {
-    if (!ldsVerses.has(r.verse_id)) continue;
-    if (!topicVerses.has(r.topic_id)) topicVerses.set(r.topic_id, []);
-    topicVerses.get(r.topic_id).push(r.verse_id);
-  }
-  tg.close();
-
-  for (const [, vids] of topicVerses) {
-    if (vids.length < 2) continue;
-    const maxPairs = Math.min(5, Math.floor(vids.length * (vids.length - 1) / 2));
-    const seen     = new Set();
-    let attempts   = 0;
-    while (seen.size < maxPairs && attempts < maxPairs * 4) {
-      attempts++;
-      const i   = Math.floor(seededRandom() * vids.length);
-      let j     = Math.floor(seededRandom() * vids.length);
-      if (i === j) j = (j + 1) % vids.length;
-      const key = Math.min(vids[i], vids[j]) + ':' + Math.max(vids[i], vids[j]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push({ anchor: ldsVerses.get(vids[i]), positive: ldsVerses.get(vids[j]) });
-      sameTopicTGCount++;
-    }
-  }
-} catch (e) { console.error('  same-topic (TG) error:', e.message); }
-console.log(`7. Same-topic verse pairs (TG): ${sameTopicTGCount.toLocaleString()}`);
-
-// ════════════════════════════════════════════════════════════════════════════
-// SOURCE 8 — Same-topic verse pairs (Triple Index)
-// ════════════════════════════════════════════════════════════════════════════
-// Same pattern as source 7 using Triple Index groupings.
-// Broader doctrinal coverage — TI topics tend to be more specific.
-let sameTopicTICount = 0;
-try {
-  const ti             = new Database(path.join(DB_DIR, 'triple-index.db'), { readonly: true });
-  const triTopicVerses = new Map();
-  for (const r of ti.prepare(
-    'SELECT topic_id, verse_id FROM triple_index WHERE verse_id IS NOT NULL'
-  ).all()) {
-    if (!ldsVerses.has(r.verse_id)) continue;
-    if (!triTopicVerses.has(r.topic_id)) triTopicVerses.set(r.topic_id, []);
-    triTopicVerses.get(r.topic_id).push(r.verse_id);
-  }
-  ti.close();
-
-  for (const [, vids] of triTopicVerses) {
-    if (vids.length < 2) continue;
-    const maxPairs = Math.min(5, Math.floor(vids.length * (vids.length - 1) / 2));
-    const seen     = new Set();
-    let attempts   = 0;
-    while (seen.size < maxPairs && attempts < maxPairs * 4) {
-      attempts++;
-      const i   = Math.floor(seededRandom() * vids.length);
-      let j     = Math.floor(seededRandom() * vids.length);
-      if (i === j) j = (j + 1) % vids.length;
-      const key = Math.min(vids[i], vids[j]) + ':' + Math.max(vids[i], vids[j]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push({ anchor: ldsVerses.get(vids[i]), positive: ldsVerses.get(vids[j]) });
-      sameTopicTICount++;
-    }
-  }
-} catch (e) { console.error('  same-topic (TI) error:', e.message); }
-console.log(`8. Same-topic verse pairs (Triple): ${sameTopicTICount.toLocaleString()}`);
-
-// ── Deduplicate ──────────────────────────────────────────────────────────────
-// Remove exact (anchor, positive) duplicates — arise when the same verse
-// appears in both TG and TI under identically named topics, or when a summary
-// paragraph coincidentally matches a topical entry.
-// Null-byte separator cannot appear in scripture or commentary text.
-const beforeDedup  = pairs.length;
-const dedupSeen    = new Set();
-const dedupedPairs = pairs.filter(p => {
+// ── Step 4: Deduplicate ───────────────────────────────────────────────────────
+console.log('\n── Step 4: Deduplication ─────────────────────────────────────────');
+const seen      = new Set();
+const deduped   = pairs.filter(p => {
   const key = p.anchor + '\x00' + p.positive;
-  if (dedupSeen.has(key)) return false;
-  dedupSeen.add(key);
+  if (seen.has(key)) return false;
+  seen.add(key);
   return true;
 });
-const dedupRemoved = beforeDedup - dedupedPairs.length;
-if (dedupRemoved > 0)
-  console.log(`\nDeduplication: removed ${dedupRemoved.toLocaleString()} exact duplicates`);
+const removed = pairs.length - deduped.length;
+if (removed > 0) console.log(`  Removed ${removed.toLocaleString()} exact duplicates`);
+else             console.log(`  No duplicates found`);
 
-// ── Deterministic shuffle ────────────────────────────────────────────────────
-// Interleave all sources uniformly across training batches.
-// Uses seededRandom() — fully reproducible across runs.
-dedupedPairs.sort(() => seededRandom() - 0.5);
+// ── Step 5: Deterministic shuffle ─────────────────────────────────────────────
+// Ensures batches during training see a uniform mix, not all OT then all NT.
+console.log('\n── Step 5: Shuffling ─────────────────────────────────────────────');
+deduped.sort(() => seededRandom() - 0.5);
+console.log('  Shuffled (seed=42, deterministic)');
 
-// ── Write output ─────────────────────────────────────────────────────────────
-fs.writeFileSync(OUT, JSON.stringify(dedupedPairs, null, 0));
-const sizeMB = (fs.statSync(OUT).size / 1024 / 1024).toFixed(1);
+// ── Step 6: Write output ──────────────────────────────────────────────────────
+console.log('\n── Step 6: Writing output ───────────────────────────────────────');
+fs.mkdirSync(path.dirname(OUT), { recursive: true });
+fs.writeFileSync(OUT, JSON.stringify(deduped, null, 0));
+const sizeMB = (fs.statSync(OUT).size / 1024 / 1024).toFixed(2);
 
+// ── Summary ───────────────────────────────────────────────────────────────────
 console.log(`
 ════════════════════════════════════════════════════════════
-Total pairs : ${dedupedPairs.length.toLocaleString()}
-Output      : ${OUT}
-Size        : ${sizeMB} MB
+ Training pairs export complete
+════════════════════════════════════════════════════════════
+ Strategy     : verse_summary → verse_text
+ Hard negatives: ${HARD_NEGATIVES ? 'YES (same-chapter verse)' : 'NO (--no-hard-negatives passed)'}
+ Total pairs  : ${deduped.length.toLocaleString()}
+ Duplicates   : ${removed.toLocaleString()} removed
+ Output       : ${OUT}
+ Size         : ${sizeMB} MB
 ════════════════════════════════════════════════════════════
 
-Breakdown:
-  1. Verse summaries                      : ${summaryTotal.toLocaleString()}
-     1a. paragraph_1 → verse              : ${summaryP1Count.toLocaleString()}
-     1b. paragraph_2 → verse              : ${summaryP2Count.toLocaleString()}
-     1c. verse → full commentary          : ${summaryBiCount.toLocaleString()}
-  2. Translation (LDS ↔ modern English)   : ${translationCount.toLocaleString()}
-  3. Topical guide (topic ↔ verse)        : ${topicCount.toLocaleString()}
-  4. Triple Index (topic ↔ verse)         : ${tripleTopicCount.toLocaleString()}
-  5. Cross-references (verse ↔ verse)     : ${crossRefCount.toLocaleString()}
-  6. Adjacent verses (same chapter)       : ${adjCount.toLocaleString()}
-  7. Same-topic pairs (TG)                : ${sameTopicTGCount.toLocaleString()}
-  8. Same-topic pairs (TI)                : ${sameTopicTICount.toLocaleString()}
-  ────────────────────────────────────────────────────────
-  Duplicates removed                      : ${dedupRemoved.toLocaleString()}
+BGE-M3 training command (Kaggle):
+  python3 scripts/finetune-kaggle.py \\
+    --model bge-m3 \\
+    --profile fast \\
+    --output scripture-bge-m3
 
-Next: upload resources/training-pairs.json to Kaggle → scicp-training dataset
+Troubleshooting:
+  • 0 pairs → check status filter value in verse_summaries
+  • Run: SELECT DISTINCT status FROM verse_summaries;
+  • Adjust STATUS_FILTER constant in this script if needed
 `);
