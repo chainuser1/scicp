@@ -57,3 +57,4 @@ electron/backend-deps/
 # Generated analysis outputs
 artifacts/
 frontend/bundle-stats.html
+scripts/__pycache__/
