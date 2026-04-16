@@ -74,7 +74,7 @@ Search ranking is now intentionally specificity-first:
 
 ### Latest Improvements (Apr 2026)
 
-**v4.0.0 — Electron UX + Security (Apr 2026):**
+**v4.5.0 — Electron UX + Security (Apr 2026):**
 - ✅ **Electron 41** — bumped from 35 to fix 15 CVEs; 0 production vulnerabilities
 - ✅ **Live splash status** — startup phases streamed to splash window via IPC
 - ✅ **System tray mode switcher** — persistent tray icon; switch offline/online at any time without relaunching
