@@ -7,7 +7,7 @@ partition so it never competes for space with the project drive.
 
 Usage:
     python3 scripts/export-onnx.py
-    python3 scripts/export-onnx.py --model-dir resources/models/scripture-bge-vNext \
+    python3 scripts/export-onnx.py --model-dir resources/models/scripture-bge \
         --output-dir resources/onnx/scripture-bge --force
 
 Requirements (install once):
@@ -50,6 +50,10 @@ def parse_args() -> argparse.Namespace:
         help='Path to the fine-tuned SentenceTransformer model directory.',
     )
     parser.add_argument(
+        '--onnx-input', type=Path, default=None,
+        help='Path to an existing exported ONNX model file to quantize instead of exporting from a model dir.',
+    )
+    parser.add_argument(
         '--output-dir', type=Path, default=DEFAULT_OUTPUT_DIR,
         help='Destination directory for the ONNX runtime artefacts.',
     )
@@ -64,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--tmp-dir', type=Path, default=None,
         help='Parent directory for the intermediate export scratch space. '
-             'Defaults to the system temp dir (usually on the largest partition).',
+             'Defaults to the system temp dir, but can be set to a larger partition when /tmp is full.',
     )
     parser.add_argument(
         '--direct-output', action='store_true',
@@ -122,17 +126,33 @@ def copy_tokenizer_files(model_dir: Path, output_dir: Path) -> None:
 # Scratch space management
 # ---------------------------------------------------------------------------
 
-def make_tmp_dir(parent: Path | None) -> Path:
+def make_tmp_dir(parent: Path | None, fallback: Path | None = None) -> Path:
     """
-    Create a fresh scratch directory on the system temp partition (or an
-    explicit --tmp-dir) so the intermediate weights are never written to a
-    partition that might be constrained for space.
+    Create a fresh scratch directory on the system temp partition, an
+    explicit --tmp-dir, or a fallback path if the preferred location runs out
+    of space.
 
     The directory is registered with atexit so it is always removed — including
     on unhandled exceptions and Ctrl+C.
     """
     parent_str = str(parent) if parent else None
-    tmp = Path(tempfile.mkdtemp(prefix='scicp_onnx_export_', dir=parent_str))
+    try:
+        # If an explicit parent path was provided, ensure it exists so
+        # tempfile.mkdtemp(..., dir=parent) can create the child directory.
+        if parent_str:
+            Path(parent_str).mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix='scicp_onnx_export_', dir=parent_str))
+    except OSError as exc:
+        # If we can't create a temp dir at the requested location, try the
+        # fallback (usually the output partition). If no fallback is given,
+        # propagate the original error.
+        if fallback is None:
+            raise
+        print(f'[export] warning: unable to create scratch dir at {parent_str or "system temp partition"}: {exc}')
+        print(f'[export] falling back to output partition: {fallback}')
+        fallback.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(prefix='scicp_onnx_export_', dir=str(fallback)))
+
     print(f'[export] scratch dir: {tmp}')
 
     def _cleanup() -> None:
@@ -206,8 +226,6 @@ def install_onnx_artefacts(tmp_dir: Path, output_dir: Path) -> None:
             onnx/
                 model.onnx          <- canonical path consumed by the backend
                 model.onnx.data     <- external weights (present if model > 2 GB)
-            model.onnx              <- hard-link alias for legacy loaders
-            model.onnx.data         <- hard-link alias
             config.json             ]
             tokenizer.json          ] already written by copy_tokenizer_files()
             …                       ]
@@ -236,7 +254,7 @@ def install_onnx_artefacts(tmp_dir: Path, output_dir: Path) -> None:
             for sub in item.iterdir():
                 if _move_if_onnx(sub):
                     moved_onnx = True
-                elif sub.is_file():
+                elif sub.is_file() and sub.name in TOKENIZER_FILES:
                     dst = output_dir / sub.name
                     if not dst.exists():
                         shutil.move(str(sub), str(dst))
@@ -250,25 +268,6 @@ def install_onnx_artefacts(tmp_dir: Path, output_dir: Path) -> None:
             '[error] no .onnx file found in transformers export output.\n'
             f'        Check {tmp_dir} for clues (it will be cleaned up on exit).'
         )
-
-    # Create aliases at the root level for loaders that don't look
-    # inside the `onnx/` sub-directory. For the external-data file
-    # (model.onnx.data) we must avoid creating extra hard links because
-    # ONNX will reject files with multiple hard links (potential
-    # hardlink attack). Copy the external-data file instead.
-    for fname in ('model.onnx', 'model.onnx.data'):
-        src = onnx_dir / fname
-        dst = output_dir / fname
-        if src.exists() and not dst.exists():
-            # Never create additional hard links for external data files.
-            if fname.endswith('.data'):
-                shutil.copy2(str(src), str(dst))
-            else:
-                try:
-                    os.link(src, dst)
-                except OSError:
-                    # Falls back to a copy if hard-linking fails (cross-device, etc.)
-                    shutil.copy2(str(src), str(dst))
 
     print(f'[export] ONNX artefacts installed to {onnx_dir}')
 
@@ -286,6 +285,7 @@ def quantize_onnx_model(input_path: Path, output_path: Path) -> None:
     if not input_path.exists():
         raise SystemExit(f'[error] input ONNX model not found: {input_path}')
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
         output_path.unlink()
 
@@ -296,6 +296,15 @@ def quantize_onnx_model(input_path: Path, output_path: Path) -> None:
         weight_type=QuantType.QInt8,
     )
     print(f'[export] quantized model written to {output_path}')
+
+
+def cleanup_canonical_onnx(output_dir: Path) -> None:
+    onnx_dir = output_dir / 'onnx'
+    for fname in ('model.onnx', 'model.onnx.data'):
+        path = onnx_dir / fname
+        if path.exists():
+            path.unlink()
+            print(f'[export] removed canonical file: {path}')
 
 
 # ---------------------------------------------------------------------------
@@ -340,16 +349,8 @@ def normalize_direct_output(output_dir: Path) -> None:
     if root_model.exists() and root_model != candidate_model:
         root_model.unlink()
 
-    if not root_model.exists():
-        try:
-            os.link(str(candidate_model), str(root_model))
-        except OSError:
-            shutil.copy2(str(candidate_model), str(root_model))
-
-    if (onnx_dir / 'model.onnx.data').exists() and not root_data.exists():
-        # Avoid hard-linking external data files; always copy to prevent
-        # onnx runtime validation errors about multiple hard links.
-        shutil.copy2(str(onnx_dir / 'model.onnx.data'), str(root_data))
+    if root_data.exists():
+        root_data.unlink()
 
     print(f'[export] direct output normalized in {output_dir}')
 
@@ -357,11 +358,19 @@ def normalize_direct_output(output_dir: Path) -> None:
 def main() -> None:
     args = parse_args()
     model_dir: Path = args.model_dir.resolve()
+    onnx_input: Path | None = args.onnx_input.resolve() if args.onnx_input else None
     output_dir: Path = args.output_dir.resolve()
 
     # ── Validate inputs ──────────────────────────────────────────────────────
-    if not model_dir.exists() or not model_dir.is_dir():
-        raise SystemExit(f'[error] model directory not found: {model_dir}')
+    if onnx_input is None:
+        if not model_dir.exists() or not model_dir.is_dir():
+            raise SystemExit(f'[error] model directory not found: {model_dir}')
+    else:
+        if not onnx_input.exists() or not onnx_input.is_file():
+            raise SystemExit(f'[error] ONNX input file not found: {onnx_input}')
+
+    if args.onnx_input and not args.quantize:
+        raise SystemExit('[error] --onnx-input is only supported when --quantize is enabled.')
 
     if args.direct_output and args.tmp_dir:
         raise SystemExit(
@@ -369,45 +378,82 @@ def main() -> None:
         )
 
     if output_dir.exists() and not args.force:
-        onnx_candidate = output_dir / 'onnx' / 'model.onnx'
-        if onnx_candidate.exists():
-            raise SystemExit(
-                f'[error] output already exists: {output_dir}\n'
-                '        Pass --force to overwrite.'
-            )
+        if args.onnx_input is None:
+            onnx_candidate = output_dir / 'onnx' / 'model.onnx'
+            if onnx_candidate.exists():
+                raise SystemExit(
+                    f'[error] output already exists: {output_dir}\n'
+                    '        Pass --force to overwrite.'
+                )
+
+    def cleanup_existing_output() -> None:
+        onnx_dir = output_dir / 'onnx'
+        if onnx_dir.exists():
+            shutil.rmtree(onnx_dir)
+        for fname in ('model.onnx', 'model.onnx.data', 'model_quantized.onnx'):
+            path = output_dir / fname
+            if path.exists():
+                path.unlink()
 
     if output_dir.exists() and args.force:
-        shutil.rmtree(output_dir)
+        cleanup_existing_output()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Dependencies ─────────────────────────────────────────────────────────
-    ensure_transformers()
+    if onnx_input is None:
+        ensure_transformers()
 
     # ── Tokenizer files ──────────────────────────────────────────────────────
-    copy_tokenizer_files(model_dir, output_dir)
+    if onnx_input is None:
+        copy_tokenizer_files(model_dir, output_dir)
 
-    if args.direct_output:
+    if onnx_input is not None:
+        tmp_parent = args.tmp_dir.resolve() if args.tmp_dir else None
+        quantize_tmp = make_tmp_dir(tmp_parent, fallback=output_dir)
+        purge_stale_tmp_dirs(quantize_tmp)
+        try:
+            quantize_onnx_model(onnx_input, quantize_tmp / 'model_quantized.onnx')
+            (output_dir / 'onnx').mkdir(parents=True, exist_ok=True)
+            shutil.move(str(quantize_tmp / 'model_quantized.onnx'), str(output_dir / 'onnx' / 'model_quantized.onnx'))
+            cleanup_canonical_onnx(output_dir)
+        finally:
+            shutil.rmtree(quantize_tmp, ignore_errors=True)
+    elif args.direct_output:
         export_path = output_dir / 'onnx' / 'model.onnx'
         try:
             run_transformers_export(model_dir, export_path, args.task, args.opset)
             normalize_direct_output(output_dir)
         except Exception:
             raise
+
+        if args.quantize:
+            quantize_tmp = make_tmp_dir(None, fallback=output_dir)
+            purge_stale_tmp_dirs(quantize_tmp)
+            try:
+                quantize_onnx_model(export_path, quantize_tmp / 'model_quantized.onnx')
+                final_quantized = output_dir / 'onnx' / 'model_quantized.onnx'
+                shutil.move(str(quantize_tmp / 'model_quantized.onnx'), str(final_quantized))
+                cleanup_canonical_onnx(output_dir)
+            finally:
+                shutil.rmtree(quantize_tmp, ignore_errors=True)
     else:
         tmp_parent = args.tmp_dir.resolve() if args.tmp_dir else None
-        tmp_dir = make_tmp_dir(tmp_parent)
+        tmp_dir = make_tmp_dir(tmp_parent, fallback=output_dir)
         purge_stale_tmp_dirs(tmp_dir)
 
         try:
             run_transformers_export(model_dir, tmp_dir / 'model.onnx', args.task, args.opset)
-            install_onnx_artefacts(tmp_dir, output_dir)
+            if args.quantize:
+                quantize_onnx_model(tmp_dir / 'model.onnx', tmp_dir / 'model_quantized.onnx')
+                (output_dir / 'onnx').mkdir(parents=True, exist_ok=True)
+                shutil.move(str(tmp_dir / 'model_quantized.onnx'), str(output_dir / 'onnx' / 'model_quantized.onnx'))
+            else:
+                install_onnx_artefacts(tmp_dir, output_dir)
         except Exception:
             raise  # atexit still cleans tmp_dir
 
-    if args.quantize:
-        model_path = output_dir / 'onnx' / 'model.onnx'
-        quantized_path = output_dir / 'onnx' / 'model_quantized.onnx'
-        quantize_onnx_model(model_path, quantized_path)
+    if args.quantize and not args.direct_output:
+        cleanup_canonical_onnx(output_dir)
 
     print('[done] ONNX export complete.')
 

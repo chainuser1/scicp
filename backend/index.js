@@ -3464,7 +3464,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   // ── RRF: merge all sources — list weights driven by per-intent learned weights ──
   // If an intent type is provided, use its learned weight vector; fall back to global.
   // W = [bm25, semantic, pagerank, cross_ref, cluster, dwell]
-  // Mapping: fts→bm25, phrase→bm25×3, summary→cross_ref, tg→cross_ref,
+  // Mapping: fts→bm25, phrase→bm25×3, summary→cross_ref,
   //          entity→pagerank, xref→cross_ref×5
   const W = (intentType && intentWeights.has(intentType))
     ? intentWeights.get(intentType)
@@ -3472,11 +3472,12 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const exactTopicalQuery = queryWordCount <= 2 && hasExactTopicMatch;
   const phraseWeight = exactTopicalQuery ? W[0] * 0.6 : W[0] * 3;
   const summaryWeight = shortTopicalQuery ? W[3] * 0.15 : W[3];
-  const topicalWeight = exactTopicalQuery ? W[3] * 3.5 : (shortTopicalQuery ? W[3] * 2.2 : W[3]);
+  // Topical guide (`tgRanked`) intentionally excluded from the main RRF fusion
+  // so topical-guide matches do not directly influence core search rankings.
   const rrfScores = reciprocalRankFusion(
-    [ftsRanked, phraseRanked, summaryRanked, tgRanked, entityRanked, xrefRanked],
+    [ftsRanked, phraseRanked, summaryRanked, entityRanked, xrefRanked],
     queryTopicSlugs,
-    [W[0], phraseWeight, summaryWeight, topicalWeight, W[2], W[3] * 5]
+    [W[0], phraseWeight, summaryWeight, W[2], W[3] * 5]
   );
 
   // ── Chapter aggregation: boost chapters with many verse hits ──
@@ -4152,7 +4153,8 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         if (row._directQueryMatch || row._anchorPhraseMatch) return true;
         if ((row._lexicalCoverage || 0) >= 0.44) return true;
         if ((row.similarity_score || 0) >= 0.32) return true;
-        return row._source === 'topical-guide' || row._source === 'cross-ref' || row._source === 'semantic-primary';
+        // Exclude topical-guide from PageRank seeds so topical hits don't seed PPR
+        return row._source === 'cross-ref' || row._source === 'semantic-primary';
       }).slice(0, propagationConfig.seedLimit)
       : [];
     const qpprScores = propagationConfig && qpprSeedRows.length >= 3
@@ -4609,6 +4611,37 @@ async function initEmbeddings() {
   // Helper: load the fine-tuned Scripture-MiniLM ONNX pipeline
   async function loadScripturePipeline() {
     const { pipeline, env } = await import('@xenova/transformers');
+    // Prefer the native Node ONNX runtime (onnxruntime-node) so the backend
+    // always executes the locally-built ONNX model instead of falling back
+    // to a web/WASM runtime. This avoids mixing runtime copies that caused
+    // "Tensor.location must be a string" errors.
+    try {
+      // Use require() so resolution follows the project's CommonJS tree
+      // and picks up the native `onnxruntime-node` package.
+      // `onnxruntime-node` re-exports `onnxruntime-common` and exposes `env`.
+      // eslint-disable-next-line global-require
+      const onnxNode = require('onnxruntime-node');
+      if (onnxNode && onnxNode.env) {
+        env.backends = env.backends || {};
+        env.backends.onnx = onnxNode.env;
+        fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-node (native) backend');
+      }
+    } catch (e) {
+      fastify.log.warn('[Embeddings] onnxruntime-node not available — using default Xenova ONNX backend:', e.message);
+    }
+    // Prefer the WebAssembly ONNX backend (onnxruntime-web) when available.
+    // This avoids runtime mismatches between different `onnxruntime-common`
+    // // copies that can surface as "Tensor.location must be a string" errors.
+    // try {
+    //   const onnxWeb = await import('onnxruntime-web');
+    //   if (onnxWeb && onnxWeb.env) {
+    //     env.backends = env.backends || {};
+    //     env.backends.onnx = onnxWeb.env;
+    //     fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-web (WASM) backend');
+    //   }
+    // } catch (e) {
+    //   fastify.log.warn('[Embeddings] onnxruntime-web not available — using default ONNX backend:', e.message);
+    // }
     const localModel = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL);
     const quantizedPath = path.join(localModel, 'onnx', 'model_quantized.onnx');
     const plainPath = path.join(localModel, 'onnx', 'model.onnx');
