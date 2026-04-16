@@ -23,6 +23,7 @@
     "better-sqlite3": "^12.6.2",
     "compromise": "^14.15.0",
     "fastify": "^5.8.2",
+    "onnxruntime-node": "^1.24.3",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
