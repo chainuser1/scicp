@@ -1,6 +1,6 @@
 {
   "name": "scriptures-in-view",
-  "version": "4.5.1",
+  "version": "4.5.2",
   "private": true,
   "description": "Scriptures in View — Desktop (Electron)",
   "main": "main.js",
