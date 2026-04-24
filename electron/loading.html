@@ -40,6 +40,26 @@
       color: #888;
       letter-spacing: 0.04em;
     }
+    .progress-container {
+      width: 200px;
+      height: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #c9a84c, #e8d8a0);
+      transition: width 0.3s ease;
+    }
+    .percentage {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #e8d8a0;
+      margin-top: 5px;
+    }
     .dots {
       display: flex;
       gap: 8px;
@@ -67,11 +87,10 @@
       <text x="36" y="48" text-anchor="middle" font-size="36" fill="#c9a84c" font-family="Georgia,serif">&#x2726;</text>
     </svg>
     <h1>Scriptures in View</h1>
-    <div class="dots">
-      <div class="dot"></div>
-      <div class="dot"></div>
-      <div class="dot"></div>
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar"></div>
     </div>
+    <div class="percentage" id="percentage">0%</div>
     <p id="status">Starting&hellip;</p>
   </div>
   <script>
@@ -79,9 +98,25 @@
     if (typeof window !== 'undefined') {
       try {
         const { ipcRenderer } = require('electron');
-        ipcRenderer.on('loading-status', (_e, msg) => {
-          const el = document.getElementById('status');
-          if (el) el.textContent = msg;
+        ipcRenderer.on('loading-status', (_e, data) => {
+          if (typeof data === 'object' && data.percentage !== undefined) {
+            // Handle progress updates with percentage
+            const percentageEl = document.getElementById('percentage');
+            const progressBarEl = document.getElementById('progressBar');
+            
+            if (percentageEl) percentageEl.textContent = data.percentage + '%';
+            if (progressBarEl) progressBarEl.style.width = data.percentage + '%';
+            
+            // Update status text if provided
+            if (data.message) {
+              const statusEl = document.getElementById('status');
+              if (statusEl) statusEl.textContent = data.message;
+            }
+          } else {
+            // Handle legacy string-only status updates
+            const el = document.getElementById('status');
+            if (el) el.textContent = data;
+          }
         });
       } catch (e) {
         // nodeIntegration disabled fallback — status stays static

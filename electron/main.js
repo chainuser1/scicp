@@ -716,9 +716,9 @@ function createSplashWindow() {
   return splash;
 }
 
-function setSplashStatus(splash, msg) {
+function setSplashStatus(splash, msg, percentage = 0) {
   if (splash && !splash.isDestroyed()) {
-    splash.webContents.send('loading-status', msg);
+    splash.webContents.send('loading-status', { message: msg, percentage });
   }
 }
 
@@ -727,13 +727,14 @@ app.whenReady().then(async () => {
 
   // Show loading screen immediately — before anything slow runs.
   const splash = createSplashWindow();
+  setSplashStatus(splash, 'Initializing application\u2026', 5);
 
   // Lazy-require the backend here so the splash is visible during
   // the synchronous module-level DB-open work in backend/index.js.
   setSplashStatus(splash, 'Opening databases\u2026');
   ({ startElectron } = require('../backend/index.js'));
 
-  setSplashStatus(splash, 'Starting local server\u2026');
+  setSplashStatus(splash, 'Starting local server\u2026', 30);
   const port = await findAvailablePort(3000, 3010);
   process.env.PORT = String(port);
   try {
@@ -769,12 +770,17 @@ app.whenReady().then(async () => {
     });
   });
 
-  setSplashStatus(splash, 'Loading search index\u2026');
+  setSplashStatus(splash, 'Loading search index\u2026', 60);
   waitForServer(async () => {
-    setSplashStatus(splash, 'Ready!');
-    // Small pause so the user sees "Ready!" before the splash closes
+    setSplashStatus(splash, 'Finalizing setup\u2026', 85);
+    // Small pause so the user sees progress to 100% before the splash closes
     await new Promise(r => setTimeout(r, 400));
-    selectedMode = await selectConnectionMode();
+    setSplashStatus(splash, 'Ready!', 100);
+    
+    // Default to offline mode instead of showing the mode selection dialog
+    // Users can switch modes later using the toggle in the Presenter window
+    selectedMode = { mode: 'offline' };
+    
     if (splash && !splash.isDestroyed()) splash.close();
     createWindows(selectedMode);
     setupTray();
