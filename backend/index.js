@@ -14,7 +14,7 @@ if (process.env.SENTRY_DSN) {
 
 const fastify = require('fastify')({ logger: true, bodyLimit: 1048576 });
 const { Server } = require("socket.io");
-const { AutoTokenizer } = require('@xenova/transformers');
+// const { AutoTokenizer } = require('@xenova/transformers');
 const ort = require('onnxruntime-node');
 const fs = require('fs');
 const path = require('path');
