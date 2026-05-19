@@ -98,6 +98,93 @@ const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptur
 const db_greek = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'), DB_OPTS);
 const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptures-sqlite.db'), DB_OPTS);
 
+
+// Direct ONNX Runtime session (replaces Xenova pipeline)
+let onnxSession = null;
+let onnxTokenizer = null;
+
+async function initOnnxSession() {
+    try {
+        const modelPath = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL, 'onnx', 'model_quantized.onnx');
+        
+        if (!fs.existsSync(modelPath)) {
+            fastify.log.warn(`[ONNX] Model not found at ${modelPath}, semantic search disabled`);
+            return false;
+        }
+        
+        onnxSession = await ort.InferenceSession.create(modelPath, {
+            executionProviders: ['cpu'],
+            graphOptimizationLevel: 'all',
+        });
+        
+        // Load tokenizer (use Xenova only for tokenization, not inference)
+        onnxTokenizer = await AutoTokenizer.from_pretrained(
+            path.join(__dirname, '../resources/models/scripture-bge'),
+            { trust_remote_code: true }
+        );
+        
+        fastify.log.info('[ONNX] Session initialized successfully');
+        return true;
+    } catch (err) {
+        fastify.log.warn('[ONNX] Failed to initialize:', err.message);
+        return false;
+    }
+}
+
+async function embedWithOnnx(text) {
+    if (!onnxSession || !onnxTokenizer) {
+        throw new Error('ONNX session not ready');
+    }
+    
+    const encoded = await onnxTokenizer(text, {
+        padding: true,
+        truncation: true,
+        max_length: 64,
+        return_tensors: 'np'
+    });
+    
+    const feeds = {
+        'input_ids': new ort.Tensor('int64', encoded.input_ids.reshape(-1), encoded.input_ids.shape),
+        'attention_mask': new ort.Tensor('int64', encoded.attention_mask.reshape(-1), encoded.attention_mask.shape)
+    };
+    
+    const results = await onnxSession.run(feeds);
+    const tokenEmbeddings = results['last_hidden_state'].data;
+    
+    // Mean pooling
+    const batchSize = encoded.input_ids.shape[0];
+    const seqLen = encoded.input_ids.shape[1];
+    const dim = tokenEmbeddings.length / (batchSize * seqLen);
+    const mask = encoded.attention_mask.reshape(-1);
+    const pooled = new Float32Array(batchSize * dim);
+    
+    for (let i = 0; i < batchSize; i++) {
+        let validCount = 0;
+        for (let j = 0; j < seqLen; j++) {
+            if (mask[i * seqLen + j] > 0) {
+                validCount++;
+                for (let d = 0; d < dim; d++) {
+                    pooled[i * dim + d] += tokenEmbeddings[(i * seqLen + j) * dim + d];
+                }
+            }
+        }
+        if (validCount > 0) {
+            for (let d = 0; d < dim; d++) pooled[i * dim + d] /= validCount;
+        }
+    }
+    
+    // L2 normalize
+    let norm = 0;
+    for (let i = 0; i < pooled.length; i++) norm += pooled[i] * pooled[i];
+    norm = Math.sqrt(norm);
+    if (norm > 1e-9) {
+        for (let i = 0; i < pooled.length; i++) pooled[i] /= norm;
+    }
+    
+    return pooled;
+}
+
+
 let db_japanese = null;
 try { db_japanese = require('better-sqlite3')(path.join(DB_DIR, 'japanese-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
 let db_ylt = null;
@@ -1482,6 +1569,34 @@ function getTermWeight(term, query = null) {
     return baseWeight;
 }
 
+// Pure statistical co-occurrence penalty - no assumptions, just math
+function getCooccurrenceWeight(verseText, queryTerms) {
+    if (queryTerms.length < 2) return 1.0;
+    
+    let presentCount = 0;
+    let totalCombinations = 0;
+    let cooccurCount = 0;
+    
+    for (let i = 0; i < queryTerms.length; i++) {
+        const term1 = queryTerms[i];
+        const hasTerm1 = verseText.includes(term1);
+        if (hasTerm1) presentCount++;
+        
+        for (let j = i + 1; j < queryTerms.length; j++) {
+            totalCombinations++;
+            const term2 = queryTerms[j];
+            if (hasTerm1 && verseText.includes(term2)) {
+                cooccurCount++;
+            }
+        }
+    }
+    
+    if (totalCombinations === 0) return 1.0;
+    
+    const observedCooccur = cooccurCount / totalCombinations;
+    return observedCooccur;
+}
+
 function queryTermWeights(query) {
     const terms = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
     const weights = new Map();
@@ -2397,6 +2512,23 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       ftsRanked.sort((a, b) => (a._bm25 || 0) - (b._bm25 || 0));
     }
   }
+
+    // No thresholds, no assumptions, just observed co-occurrence probability
+  if (ftsRanked.length > 0) {
+    const queryTermList = [...termWeights.keys()];
+    if (queryTermList.length >= 2) {
+      for (const row of ftsRanked) {
+        const verseText = (row.scripture_text || '').toLowerCase();
+        const cooccurWeight = getCooccurrenceWeight(verseText, queryTermList);
+        // Apply penalty: if terms don't appear together, score drops to near zero
+        row._bm25_rank = (row._bm25_rank || 0) * cooccurWeight;
+        row._bm25 = row._bm25_rank;
+      }
+      // Re-sort after penalty
+      ftsRanked.sort((a, b) => (a._bm25 || 0) - (b._bm25 || 0));
+    }
+  }
+
   if (queryWordCount >= 3 && ftsRanked.length > 1) {
     ftsRanked.sort((a, b) => Number(Boolean(b._directQueryMatch)) - Number(Boolean(a._directQueryMatch)) || (b._sequenceScore || 0) - (a._sequenceScore || 0) || (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0) || Number(Boolean(b._anchorPhraseMatch)) - Number(Boolean(a._anchorPhraseMatch)) || (b._lexicalCoverage || 0) - (a._lexicalCoverage || 0) || (a._bm25 || 0) - (b._bm25 || 0));
   }
@@ -2428,6 +2560,19 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       } catch {}
     }
     phraseRanked.push(...[...bestByVerse.values()].sort((a, b) => (b._phraseSignal || 0) - (a._phraseSignal || 0) || (a._bm25 || 0) - (b._bm25 || 0)));
+  }
+    // Apply co-occurrence penalty to phraseRanked as well
+  if (phraseRanked.length > 0) {
+    const queryTermList = [...termWeights.keys()];
+    if (queryTermList.length >= 2) {
+      for (const row of phraseRanked) {
+        const verseText = (row.scripture_text || '').toLowerCase();
+        const cooccurWeight = getCooccurrenceWeight(verseText, queryTermList);
+        row._bm25 = (row._bm25 || 0) * cooccurWeight;
+        if (row._phraseSignal) row._phraseSignal = row._phraseSignal * cooccurWeight;
+      }
+      phraseRanked.sort((a, b) => (b._phraseSignal || 0) - (a._phraseSignal || 0) || (a._bm25 || 0) - (b._bm25 || 0));
+    }
   }
   if (pmiExpandedQuery && pmiExpandedQuery !== query.toLowerCase()) {
     const expResult = searchScripture(pmiExpandedQuery, 0, 30, dba, fastify.log);
@@ -3076,10 +3221,22 @@ async function initEmbeddings() {
       fastify.log.info(`[Embeddings] ${existing}/${total} pre-stored — loading cache.`);
       buildEmbeddingCache();
       try {
-        fastify.log.info('[Embeddings] Loading pipeline for semantic search…');
-        embeddingPipe = await loadScripturePipeline();
-        fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.');
-      } catch (pipeErr) { fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message); }
+    fastify.log.info('[Embeddings] Initializing ONNX Runtime for semantic search…');
+    const onnxReady = await initOnnxSession();
+    if (onnxReady) {
+        // Create wrapper that matches the pipeline interface
+        embeddingPipe = async (text, opts) => {
+            const vec = await embedWithOnnx(text);
+            return { data: vec };
+        };
+        fastify.log.info('[Embeddings] ONNX Runtime ready — semantic search enabled.');
+    } else {
+        fastify.log.warn('[Embeddings] ONNX Runtime failed to initialize, semantic search disabled');
+    }
+} catch (pipeErr) {
+    fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
+}
+      
       return;
     }
     if (SKIP_RECOMPUTE) {
