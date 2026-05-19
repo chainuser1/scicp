@@ -20,6 +20,7 @@ MODEL_DIR=""
 SKIP_INSTALL=0
 SKIP_EXPORT=0
 SKIP_REBAKE=0
+REBAKE_USING_ONNX=0
 RESUME=0
 
 while [[ $# -gt 0 ]]; do
@@ -48,6 +49,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_REBAKE=1
       shift
       ;;
+    --rebake-using-onnx)
+      REBAKE_USING_ONNX=1
+      shift
+      ;;
     --resume)
       RESUME=1
       shift
@@ -66,6 +71,7 @@ Options:
   --skip-install      Reuse an already unpacked model directory.
   --skip-export       Skip ONNX export even if the model is installed.
   --skip-rebake       Skip embedding rebake even if the ONNX export succeeded.
+  --rebake-using-onnx Use the ONNX export as the source for rebaking embeddings, instead of the original model files.
   --resume            Resume from the last completed step when possible.
 EOF
       exit 0
@@ -249,17 +255,33 @@ else
 fi
 
 if [[ "$RESUME" -eq 1 && "$SKIP_REBAKE" -eq 0 ]] && embeddings_rebake_is_complete; then
-  if artifact_is_up_to_date "$REPO_ROOT/resources/db/verse-embeddings.db"; then
-    echo "[step] resume: existing embeddings DB is up to date, skipping rebake"
-    SKIP_REBAKE=1
+  if [[ "$REBAKE_USING_ONNX" -eq 1 ]]; then
+    # When using ONNX, check against the ONNX model timestamp
+    if artifact_is_up_to_date "$REPO_ROOT/resources/onnx/scripture-bge/onnx/model_quantized.onnx" || \
+       artifact_is_up_to_date "$REPO_ROOT/resources/onnx/scripture-bge/onnx/model.onnx"; then
+      echo "[step] resume: existing embeddings DB is up to date, skipping rebake"
+      SKIP_REBAKE=1
+    else
+      echo "[step] existing embeddings DB appears stale relative to ONNX model; rerunning rebake"
+    fi
   else
-    echo "[step] existing embeddings DB appears stale relative to current model; rerunning rebake"
+    if artifact_is_up_to_date "$REPO_ROOT/resources/db/verse-embeddings.db"; then
+      echo "[step] resume: existing embeddings DB is up to date, skipping rebake"
+      SKIP_REBAKE=1
+    else
+      echo "[step] existing embeddings DB appears stale relative to current model; rerunning rebake"
+    fi
   fi
 fi
 
 if [[ "$SKIP_REBAKE" -eq 0 ]]; then
-  echo "[step] rebaking embeddings"
-  SCRIPTURE_MODEL_DIR="$MODEL_DIR_ABS" python3 scripts/rebake-embeddings.py
+  if [[ "$REBAKE_USING_ONNX" -eq 1 ]]; then
+    echo "[step] rebaking embeddings using ONNX"
+    SCRIPTURE_ONNX_DIR="$REPO_ROOT/resources/onnx/scripture-bge/onnx" python3 scripts/rebake-embeddings-onnx.py
+  else
+    echo "[step] rebaking embeddings"
+    SCRIPTURE_MODEL_DIR="$MODEL_DIR_ABS" python3 scripts/rebake-embeddings.py
+  fi
 else
   echo "[step] skipping embedding rebake"
 fi

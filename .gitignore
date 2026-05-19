@@ -58,3 +58,6 @@ electron/backend-deps/
 artifacts/
 frontend/bundle-stats.html
 scripts/__pycache__/
+
+# python venv
+.venv/
