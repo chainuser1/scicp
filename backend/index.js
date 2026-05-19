@@ -2489,8 +2489,29 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   if (pmiTerms.length > 0) { const pmiWords = pmiTerms.map(t => t.term); pmiExpandedQuery = [...new Set([...expandedQuery.split(/\s+/), ...pmiWords])].join(' '); }
   const directMatchWords = normalizedQueryText.split(/\s+/).filter(Boolean);
   const directMatchEligible = directMatchWords.length >= 2;
-  const ftsResult = searchScripture(query, 0, 50, dba, fastify.log);
-  const ftsRanked = ftsResult.results.map(r => ({ ...r, _source: 'fts', _bm25: r._bm25_rank || 0, _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText), _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights), _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)), _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights), _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights) }));
+    // ── FTS DISABLED for multi-word queries ──
+  // Only use FTS for single-word queries where semantics are ambiguous
+  const queryWordCountForFTS = query.split(/\s+/).filter(Boolean).length;
+  let ftsRanked = [];
+  
+  if (queryWordCountForFTS === 1) {
+    const ftsResult = searchScripture(query, 0, 30, dba, fastify.log);
+    ftsRanked = ftsResult.results.map(r => ({
+      ...r,
+      _source: 'fts',
+      _bm25: r._bm25_rank || 0,
+      _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText),
+      _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights),
+      _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
+      _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights),
+      _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights),
+    }));
+  } else {
+    fastify.log.debug(`[FTS] Disabled for multi-word query: "${query}"`);
+  }
+
+
+
   if (db_tags && ftsRanked.length > 0) {
     const queryLower = query.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
     const queryWords = new Set(queryLower.split(/\s+/).filter(w => w.length > 2));
@@ -2670,7 +2691,23 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const exactTopicalQuery = queryWordCount <= 2 && hasExactTopicMatch;
   const phraseWeight = exactTopicalQuery ? W[0] * 0.6 : W[0] * 3;
   const summaryWeight = shortTopicalQuery ? W[3] * 0.15 : W[3];
-  const rrfScores = reciprocalRankFusion([ftsRanked, phraseRanked, summaryRanked, entityRanked, xrefRanked], queryTopicSlugs, [W[0], phraseWeight, summaryWeight, W[2], W[3] * 5]);
+  
+    // Build fusion sources array (FTS excluded for multi-word queries)
+  const fusionSources = [phraseRanked, summaryRanked, entityRanked, xrefRanked];
+  const fusionWeights = [phraseWeight, summaryWeight, W[2], W[3] * 5];
+  
+  // Only add FTS if it has results (single-word queries only)
+  if (ftsRanked.length > 0) {
+    fusionSources.unshift(ftsRanked);
+    fusionWeights.unshift(W[0]);
+  }
+  
+  const rrfScores = reciprocalRankFusion(
+    fusionSources,
+    queryTopicSlugs,
+    fusionWeights
+  );
+  
   const chapterScores = chapterAggregate(rrfScores);
   for (const ch of chapterScores.slice(0, 10)) {
     if (ch.verseCount >= 3 && ch.bestVerse && !rrfScores.has(ch.bestVerse)) {
