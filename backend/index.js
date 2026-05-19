@@ -3171,6 +3171,27 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     results = results.map(r => { const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _anchorPhraseMatch, _phraseSignal, _phraseCoverage, _qpprScore, _structurePrior, ...clean } = r; return clean; });
     total = results.length;
   }
+
+    // ── FALLBACK: if no semantic results, use plain FTS ──
+  if (total === 0 && lang === 'en') {
+    log.info(`[Fallback] No semantic results for "${query}" → using FTS`);
+    const ftsResult = searchScripture(query, 0, 200, dba, log);
+    if (ftsResult.results.length > 0) {
+      results = ftsResult.results;
+      total = ftsResult.total;
+      // Mark the meta so the client knows it's a fallback
+      pipelineMeta = {
+        intent: 'keyword-fallback',
+        display: 'Keyword (Fallback)',
+        confidence: 0,
+        fallback: true,
+      };
+      // Skip the rest of post‑processing (dwell, item2vec, session centroid)
+      // because those rely on embeddings which are not available.
+      searchCacheSet(cacheKey, results, total, pipelineMeta);
+      return { results, total, meta: pipelineMeta, fromCache: false, cacheKey };
+    }
+  }
   try {
     const topDwell = db_user.prepare(`SELECT verse_id, SUM(dwell_ms) AS total_dwell FROM reading_events WHERE event_type = 'read' AND dwell_ms > 3000 GROUP BY verse_id ORDER BY total_dwell DESC LIMIT 500`).all();
     if (topDwell.length > 0) {
