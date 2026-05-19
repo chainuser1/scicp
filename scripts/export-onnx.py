@@ -79,9 +79,8 @@ def export_to_onnx(model_dir: Path, output_path: Path, opset: int):
             opset_version=opset,
             input_names=input_names,
             output_names=["last_hidden_state"],
-            dynamic_axes=dynamic_axes,
-        )
-    
+            dynamic_axes=dynamic_axes,  
+        )   
     print(f'[export] Saved to {output_path}')
     
     # Clean up to free memory

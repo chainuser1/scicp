@@ -1,4 +1,3 @@
-// ── Sentry crash reporting (must be first) ──────────────────────────────────
 const Sentry = require('@sentry/node');
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -6,7 +5,6 @@ if (process.env.SENTRY_DSN) {
     environment: process.env.NODE_ENV || 'development',
     release: `scicp-backend@${require('./package.json').version}`,
     tracesSampleRate: 0.1,
-    // Don't send expected errors (4xx, validation, etc.)
     beforeSend(event) {
       if (event.exception?.values?.[0]?.type === 'FastifyError') return null;
       return event;
@@ -16,17 +14,19 @@ if (process.env.SENTRY_DSN) {
 
 const fastify = require('fastify')({ logger: true, bodyLimit: 1048576 });
 const { Server } = require("socket.io");
+const { AutoTokenizer } = require('@xenova/transformers');
+const ort = require('onnxruntime-node');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { BetterSqliteAdapter } = require('../shared/db-adapter');
 const engine = require('../shared/scripture-engine');
+const { batchPhraseMatch } = require('./phrase-matcher');
 const { replacements: kjvSpellingReplacements } = require('../shared/data/kjv-spellings.json');
 
 const DB_DIR = process.env.DB_DIR || path.resolve(__dirname, '../resources/db');
 const FRONTEND_DIST_DIR = process.env.FRONTEND_DIST_DIR || path.resolve(__dirname, '../frontend/dist');
-// ── SEO: per-route meta tags for server-side injection ──
-// Crawlers (Google, Facebook, Twitter) get correct meta without JS execution.
+
 const SEO_ROUTES = {
   '/': {
     title: 'Scriptures in View | Real-Time Scripture Presentation',
@@ -57,6 +57,7 @@ const SEO_ROUTES = {
     description: 'Terms for using Scriptures in View for non-commercial church and home use. Free scripture presentation for worship services.',
   },
 };
+
 let _indexHtmlCache = null;
 function getIndexHtml() {
   if (_indexHtmlCache) return _indexHtmlCache;
@@ -65,66 +66,53 @@ function getIndexHtml() {
   } catch { _indexHtmlCache = null; }
   return _indexHtmlCache;
 }
+
 function injectSeoMeta(html, routePath) {
   const seo = SEO_ROUTES[routePath];
   if (!seo) return html;
   const canon = `https://cap-teyyko.live${routePath === '/' ? '' : routePath}`;
-  // Replace title
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${seo.title}</title>`);
-  // Replace meta description
-  html = html.replace(
-    /<meta name="description" content="[^"]*"/,
-    `<meta name="description" content="${seo.description}"`
-  );
-  // Replace OG tags
+  html = html.replace(/<meta name="description" content="[^"]*"/, `<meta name="description" content="${seo.description}"`);
   html = html.replace(/<meta property="og:title" content="[^"]*"/, `<meta property="og:title" content="${seo.title}"`);
   html = html.replace(/<meta property="og:description" content="[^"]*"/, `<meta property="og:description" content="${seo.description}"`);
   html = html.replace(/<meta property="og:url" content="[^"]*"/, `<meta property="og:url" content="${canon}/"`);
-  // Replace Twitter tags
   html = html.replace(/<meta name="twitter:title" content="[^"]*"/, `<meta name="twitter:title" content="${seo.title}"`);
   html = html.replace(/<meta name="twitter:description" content="[^"]*"/, `<meta name="twitter:description" content="${seo.description}"`);
-  // Add canonical link if not present
   if (!html.includes('rel="canonical"')) {
     html = html.replace('</head>', `  <link rel="canonical" href="${canon}/" />\n  </head>`);
   }
   return html;
 }
+
 const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
 const ONNX_MODEL_DIR = path.resolve(__dirname, '../resources/onnx');
 const SCRIPTURE_MODEL = 'scripture-bge';
-// Inside Electron the DBs live in the read-only extraResources — open them
-// as readonly so SQLite never attempts filesystem mutations.
 const IS_ELECTRON_PKG = !!process.versions?.electron;
 const DB_OPTS = { fileMustExist: true };
-// In production and Electron, all FTS/embedding data is pre-built — skip any recomputation
 const SKIP_RECOMPUTE = IS_ELECTRON_PKG || process.env.NODE_ENV === 'production';
+
 const db = require('better-sqlite3')(path.join(DB_DIR, 'lds-scriptures-sqlite.db'), DB_OPTS);
-const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'),  DB_OPTS);
-const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'),  DB_OPTS);
-const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'),  DB_OPTS);
-const db_greek   = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'),    DB_OPTS);
-const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptures-sqlite.db'),  DB_OPTS);
-// Optional language databases (loaded when DB file exists; gracefully absent during scraping)
+const db_tagalog = require('better-sqlite3')(path.join(DB_DIR, 'tagalog-scriptures-sqlite.db'), DB_OPTS);
+const db_cebuano = require('better-sqlite3')(path.join(DB_DIR, 'cebuano-scriptures-sqlite.db'), DB_OPTS);
+const db_spanish = require('better-sqlite3')(path.join(DB_DIR, 'spanish-scriptures-sqlite.db'), DB_OPTS);
+const db_greek = require('better-sqlite3')(path.join(DB_DIR, 'greek-scriptures-sqlite.db'), DB_OPTS);
+const db_ilocano = require('better-sqlite3')(path.join(DB_DIR, 'ilocano-scriptures-sqlite.db'), DB_OPTS);
+
 let db_japanese = null;
 try { db_japanese = require('better-sqlite3')(path.join(DB_DIR, 'japanese-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
 let db_ylt = null;
-try { db_ylt      = require('better-sqlite3')(path.join(DB_DIR, 'ylt-scriptures-sqlite.db'),     DB_OPTS); } catch (_) {}
+try { db_ylt = require('better-sqlite3')(path.join(DB_DIR, 'ylt-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
 let db_waray = null;
-try { db_waray    = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'),    DB_OPTS); } catch (_) {}
+try { db_waray = require('better-sqlite3')(path.join(DB_DIR, 'waray-scriptures-sqlite.db'), DB_OPTS); } catch (_) {}
 
-// Topical Guide DB (optional — built by scripts/scrape-topical-guide.js)
 let db_tg = null;
 try { db_tg = require('better-sqlite3')(path.join(DB_DIR, 'topical-guide.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
 
-// Verse Embeddings DB — separate file so scripture DBs stay read-only.
-// Pre-computed locally and committed via git-lfs; Railway just loads, never recomputes.
 let db_embed = null;
 try {
   if (SKIP_RECOMPUTE) {
-    // Production/Electron: open read-only (pre-built, never write)
     db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'), { readonly: true, fileMustExist: true });
   } else {
-    // Development: writable so local re-bake script can store results
     db_embed = require('better-sqlite3')(path.join(DB_DIR, 'verse-embeddings.db'));
     db_embed.exec(`
       CREATE TABLE IF NOT EXISTS verse_embeddings (
@@ -137,32 +125,20 @@ try {
   fastify.log.warn('[Embeddings] Could not open verse-embeddings.db:', err.message);
 }
 
-// Verse Tags DB — entity, POV, and doctrine tags (pre-baked)
 let db_tags = null;
 let db_chsummary = null;
-let db_vsummary = null;   // verse-summaries.db (summary text)
-let db_vxref = null;      // verse-cross-refs.db (cross references)
-let db_graph = null;      // verse-graph.db (kNN, RWR, clusters)
-let db_footnotes = null;  // footnotes-lds-summaries.db (NABRE + NET scholarly footnotes)
-try {
-  db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-try {
-  db_chsummary = require('better-sqlite3')(path.join(DB_DIR, 'chapter-summaries-fts.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-try {
-  db_vsummary = require('better-sqlite3')(path.join(DB_DIR, 'verse-summaries.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-try {
-  db_vxref = require('better-sqlite3')(path.join(DB_DIR, 'verse-cross-refs.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-try {
-  db_graph = require('better-sqlite3')(path.join(DB_DIR, 'verse-graph.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-try {
-  db_footnotes = require('better-sqlite3')(path.join(DB_DIR, 'footnotes-lds-summaries.db'), { readonly: true, fileMustExist: true });
-} catch (_) {}
-// If not found (dev mode), create writable
+let db_vsummary = null;
+let db_vxref = null;
+let db_graph = null;
+let db_footnotes = null;
+
+try { db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+try { db_chsummary = require('better-sqlite3')(path.join(DB_DIR, 'chapter-summaries-fts.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+try { db_vsummary = require('better-sqlite3')(path.join(DB_DIR, 'verse-summaries.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+try { db_vxref = require('better-sqlite3')(path.join(DB_DIR, 'verse-cross-refs.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+try { db_graph = require('better-sqlite3')(path.join(DB_DIR, 'verse-graph.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+try { db_footnotes = require('better-sqlite3')(path.join(DB_DIR, 'footnotes-lds-summaries.db'), { readonly: true, fileMustExist: true }); } catch (_) {}
+
 if (!db_tags) {
   try {
     db_tags = require('better-sqlite3')(path.join(DB_DIR, 'verse-tags.db'));
@@ -189,22 +165,22 @@ if (!db_tags) {
   }
 }
 
-const dba          = new BetterSqliteAdapter(db);
-const dba_tagalog  = new BetterSqliteAdapter(db_tagalog);
-const dba_cebuano  = new BetterSqliteAdapter(db_cebuano);
-const dba_spanish  = new BetterSqliteAdapter(db_spanish);
-const dba_greek    = new BetterSqliteAdapter(db_greek);
-const dba_ilocano  = new BetterSqliteAdapter(db_ilocano);
-let dba_japanese   = db_japanese ? new BetterSqliteAdapter(db_japanese) : null;
-let dba_ylt        = db_ylt      ? new BetterSqliteAdapter(db_ylt)      : null;
-let dba_waray      = db_waray    ? new BetterSqliteAdapter(db_waray)    : null;
+const dba = new BetterSqliteAdapter(db);
+const dba_tagalog = new BetterSqliteAdapter(db_tagalog);
+const dba_cebuano = new BetterSqliteAdapter(db_cebuano);
+const dba_spanish = new BetterSqliteAdapter(db_spanish);
+const dba_greek = new BetterSqliteAdapter(db_greek);
+const dba_ilocano = new BetterSqliteAdapter(db_ilocano);
+let dba_japanese = db_japanese ? new BetterSqliteAdapter(db_japanese) : null;
+let dba_ylt = db_ylt ? new BetterSqliteAdapter(db_ylt) : null;
+let dba_waray = db_waray ? new BetterSqliteAdapter(db_waray) : null;
 
-// ── Script search configuration toggles ──
-const ENABLE_PMI = true;      // PMI can be used for single-word fallback if needed
+const ENABLE_PMI = true;
 
-// ── Concept embeddings DB (pre-baked by scripts/build-concept-index.js) ──
 let db_concepts = null;
-const conceptCache = []; // { phrase, source, vec: Float32Array(768) }
+const conceptCache = [];
+const wordEmbeddingCache = new Map();
+
 try {
   db_concepts = require('better-sqlite3')(path.join(DB_DIR, 'concept-embeddings.db'), { readonly: true, fileMustExist: true });
   const rows = db_concepts.prepare('SELECT phrase, source, embedding FROM concepts').all();
@@ -218,27 +194,34 @@ try {
   db_concepts.close();
   db_concepts = null;
   fastify.log.info(`[Concepts] Loaded ${conceptCache.length} concept embeddings`);
-} catch (_) {
-  // concept-embeddings.db not yet built — concept expansion disabled
+} catch (_) {}
+
+if (conceptCache && conceptCache.length) {
+  for (const concept of conceptCache) {
+    if (!concept.phrase.includes(' ') && concept.phrase.length > 2 && concept.vec) {
+      wordEmbeddingCache.set(concept.phrase.toLowerCase(), concept.vec);
+    }
+  }
+  fastify.log.info(`[PhraseMatcher] Loaded ${wordEmbeddingCache.size} word embeddings from conceptCache`);
+} else {
+  fastify.log.warn('[PhraseMatcher] conceptCache not available, phrase matcher will be limited');
 }
 
-// Resolve the correct adapter for a given language code
 function resolveDbAdapter(language) {
   switch (language) {
-    case 'ceb':    return dba_cebuano;
-    case 'tl':     return dba_tagalog;
-    case 'es':     return dba_spanish;
-    case 'el':     return dba_greek;
-    case 'ilo':    return dba_ilocano;
-    case 'ja':     return dba_japanese || dba;
-    case 'ylt':    return dba_ylt || dba;
-    case 'war':    return dba_waray || dba;
-    default:       return dba;
+    case 'ceb': return dba_cebuano;
+    case 'tl': return dba_tagalog;
+    case 'es': return dba_spanish;
+    case 'el': return dba_greek;
+    case 'ilo': return dba_ilocano;
+    case 'ja': return dba_japanese || dba;
+    case 'ylt': return dba_ylt || dba;
+    case 'war': return dba_waray || dba;
+    default: return dba;
   }
 }
 
 const fastifyStatic = require('@fastify/static');
-
 const hashPin = (pin) => crypto.createHash('sha256').update(String(pin)).digest('hex');
 
 fastify.register(require('@fastify/cors'), {
@@ -248,8 +231,8 @@ fastify.register(require('@fastify/cors'), {
 });
 
 fastify.register(require('@fastify/helmet'), {
-  contentSecurityPolicy: false,    // CSP conflicts with inline styles in React
-  crossOriginEmbedderPolicy: false, // COEP would block external background images (churchofjesuschrist.org etc.)
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
 });
 
 fastify.register(require('@fastify/rate-limit'), {
@@ -294,21 +277,12 @@ process.on('uncaughtException', (err) => {
   fastify.log.error(err, 'uncaughtException');
 });
 
-// ── /config — returns the canonical public origin so Client can build a correct
-//    QR code even when running behind a reverse proxy or Cloudflare Tunnel.
-//    Set PUBLIC_ORIGIN=https://your-domain.com in the environment; falls back
-//    to the request's Host header, which is usually correct on a LAN.
 fastify.get('/config', async (request) => {
   const proto = request.headers['x-forwarded-proto'] || request.protocol;
-  const publicOrigin =
-    process.env.PUBLIC_ORIGIN ||
-    `${proto}://${request.hostname}`;
+  const publicOrigin = process.env.PUBLIC_ORIGIN || `${proto}://${request.hostname}`;
   return { publicOrigin };
 });
 
-// ── /db/:filename — serve scripture DB files for on-demand language downloads.
-//    Only allows known .db files from the DB_DIR; prevents path traversal.
-//    Requires X-SCICP-Token header to prevent unauthorized scraping.
 const DOWNLOADABLE_DBS = new Set([
   'lds-scriptures-sqlite.db',
   'tagalog-scriptures-sqlite.db',
@@ -328,7 +302,9 @@ const DOWNLOADABLE_DBS = new Set([
   'footnotes-lds-summaries.db',
   'verse-embeddings.db',
 ]);
+
 const DB_DOWNLOAD_TOKEN = process.env.DB_DOWNLOAD_TOKEN || 'scicp-v2-db-access';
+
 fastify.get('/db/:filename', async (request, reply) => {
   const token = request.headers['x-scicp-token'];
   if (token !== DB_DOWNLOAD_TOKEN) {
@@ -352,7 +328,6 @@ fastify.get('/db/:filename', async (request, reply) => {
   }
 });
 
-// ── /models/:model/* — serve ONNX model files for browser/runtime transformers
 fastify.get('/models/:model/*', async (request, reply) => {
   const { model } = request.params;
   if (model !== SCRIPTURE_MODEL) return reply.code(404).send({ error: 'Not found' });
@@ -362,9 +337,7 @@ fastify.get('/models/:model/*', async (request, reply) => {
   try {
     const stat = fs.statSync(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    const ct = ext === '.onnx' ? 'application/octet-stream'
-      : ext === '.json' ? 'application/json'
-      : 'application/octet-stream';
+    const ct = ext === '.onnx' ? 'application/octet-stream' : ext === '.json' ? 'application/json' : 'application/octet-stream';
     return reply
       .header('Content-Type', ct)
       .header('Content-Length', stat.size)
@@ -399,8 +372,7 @@ fastify.put('/setlists/:id', async (request, reply) => {
   const { name, items } = request.body;
   if (!name) { reply.code(400); return { error: 'name is required' }; }
   try {
-    db_user.prepare('UPDATE setlists SET name = ?, items = ? WHERE id = ?')
-      .run(name, JSON.stringify(items || []), id);
+    db_user.prepare('UPDATE setlists SET name = ?, items = ? WHERE id = ?').run(name, JSON.stringify(items || []), id);
     return { id: Number(id), name, items: items || [] };
   } catch (err) {
     fastify.log.error(err);
@@ -421,7 +393,6 @@ fastify.delete('/setlists/:id', async (request, reply) => {
   }
 });
 
-// ── Reading Event (dwell time, session tracking, spaced repetition) ──────────
 fastify.post('/reading-event', async (request, reply) => {
   try {
     const { verse_id, book_id, chapter_id, book_title, chapter_number, verse_number,
@@ -435,12 +406,10 @@ fastify.post('/reading-event', async (request, reply) => {
            chapter_number || null, verse_number || null, language, session_id || null,
            Math.min(dwell_ms || 0, 300000), event_type);
 
-    // Update spaced review record (SM-2 algorithm)
     if (event_type === 'highlight' || event_type === 'bookmark' || (dwell_ms > 0 && dwell_ms >= 8000)) {
       const existing = db_user.prepare('SELECT * FROM spaced_reviews WHERE verse_id = ?').get(verse_id);
-      const quality = dwell_ms >= 20000 ? 5 : dwell_ms >= 12000 ? 4 : 3; // 0-5 scale
+      const quality = dwell_ms >= 20000 ? 5 : dwell_ms >= 12000 ? 4 : 3;
       if (!existing) {
-        // First encounter
         const interval = quality >= 4 ? 4 : 1;
         const nextReview = Date.now() + interval * 86400000;
         db_user.prepare(`
@@ -448,7 +417,6 @@ fastify.post('/reading-event', async (request, reply) => {
           VALUES (?, 2.5, ?, 1, ?, ?)
         `).run(verse_id, interval, nextReview, Date.now());
       } else {
-        // SM-2 update
         const newEase = Math.max(1.3, existing.easiness + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
         const newReps = existing.repetitions + 1;
         const newInterval = newReps === 1 ? 1 : newReps === 2 ? 6 : Math.round(existing.interval_days * newEase);
@@ -468,19 +436,16 @@ fastify.post('/reading-event', async (request, reply) => {
   }
 });
 
-// ── Reading Coverage (for coverage map visualization) ───────────────────────
 fastify.post('/search-feedback', async (request, reply) => {
   try {
     const { query, verse_id, rank_shown, source, intent } = request.body || {};
     if (!query || !verse_id) { reply.code(400); return { error: 'query and verse_id required' }; }
-    db_user.prepare(
-      'INSERT INTO search_feedback (query, verse_id, rank_shown, source, intent) VALUES (?, ?, ?, ?, ?)'
-    ).run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null, intent || null);
+    db_user.prepare('INSERT INTO search_feedback (query, verse_id, rank_shown, source, intent) VALUES (?, ?, ?, ?, ?)')
+      .run(String(query), Number(verse_id), Number(rank_shown) || 0, source || null, intent || null);
 
     if (request.body.tier != null && request.body.raw_score != null) {
-      db_user.prepare(
-        'INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, ?)'
-      ).run(Date.now(), Number(request.body.tier), Number(request.body.raw_score), 1);
+      db_user.prepare('INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, ?)')
+        .run(Date.now(), Number(request.body.tier), Number(request.body.raw_score), 1);
     }
 
     const count = db_user.prepare('SELECT COUNT(*) AS n FROM search_feedback WHERE ts > ?').get(Date.now() - 3600000).n;
@@ -497,7 +462,6 @@ fastify.post('/search-feedback', async (request, reply) => {
 
 fastify.get('/reading-coverage', async (request, reply) => {
   try {
-    // Return per-chapter read counts for all chapters ever visited
     const rows = db_user.prepare(`
       SELECT chapter_id, book_id, book_title, chapter_number,
              COUNT(*) AS read_count,
@@ -515,19 +479,17 @@ fastify.get('/reading-coverage', async (request, reply) => {
   }
 });
 
-// ── Spaced Review Queue (SM-2 scheduled verses) ─────────────────────────────
 fastify.get('/spaced-review', async (request, reply) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '10', 10)));
     const now = Date.now();
-    // Get due verses with their scripture text
     const due = db_user.prepare(`
       SELECT sr.verse_id, sr.easiness, sr.interval_days, sr.repetitions, sr.next_review, sr.last_review
       FROM spaced_reviews sr
       WHERE sr.next_review <= ?
       ORDER BY sr.next_review ASC
       LIMIT ?
-    `).all(now + 86400000, limit); // +1 day look-ahead
+    `).all(now + 86400000, limit);
 
     const results = [];
     for (const row of due) {
@@ -546,7 +508,6 @@ fastify.get('/spaced-review', async (request, reply) => {
   }
 });
 
-// ── Reading Stats (session co-occurrence for Item2Vec) ──────────────────────
 fastify.get('/reading-stats', async (request, reply) => {
   try {
     const recentSessions = db_user.prepare(`
@@ -558,7 +519,6 @@ fastify.get('/reading-stats', async (request, reply) => {
       LIMIT 200
     `).all();
 
-    // Also return top dwell verses (high engagement signal)
     const topDwell = db_user.prepare(`
       SELECT verse_id, COUNT(*) AS visits, AVG(dwell_ms) AS avg_dwell, SUM(dwell_ms) AS total_dwell
       FROM reading_events
@@ -618,7 +578,6 @@ fastify.get('/browse/verses', async (request, reply) => {
   }
 });
 
-// HTTP search endpoint used by the web reader/presenter search flows.
 fastify.get('/search', async (request, reply) => {
   const { q, language = 'en', page: pStr = '0', pageSize: psStr = '10', contextVerseId: cvidStr, cursor: cursorStr } = request.query;
   if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
@@ -634,11 +593,11 @@ fastify.get('/search', async (request, reply) => {
       if (decoded) {
         const cached = searchCacheGet(decoded.k);
         if (cached) {
-          offset          = decoded.o;
+          offset = decoded.o;
           pipelineResults = cached.results;
-          total           = cached.total;
-          pipelineMeta    = cached.meta;
-          cacheKey        = decoded.k;
+          total = cached.total;
+          pipelineMeta = cached.meta;
+          cacheKey = decoded.k;
         }
       }
       if (!pipelineResults) {
@@ -646,7 +605,6 @@ fastify.get('/search', async (request, reply) => {
         pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey; offset = 0;
       }
     } else {
-      // Legacy page= support
       const page = Math.max(0, parseInt(pStr, 10) || 0);
       const fresh = await runSearchPipeline(q.trim(), lang, contextVerseId, fastify.log);
       pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey;
@@ -654,10 +612,10 @@ fastify.get('/search', async (request, reply) => {
     }
 
     const pageResults = pipelineResults.slice(offset, offset + pageSize);
-    const nextOffset  = offset + pageResults.length;
-    const hasMore     = nextOffset < total;
-    const nextCursor  = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
-    const page        = Math.floor(offset / pageSize);
+    const nextOffset = offset + pageResults.length;
+    const hasMore = nextOffset < total;
+    const nextCursor = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
+    const page = Math.floor(offset / pageSize);
 
     return { results: pageResults, total, nextCursor, meta: pipelineMeta, page, pageSize, query: q, language: lang };
   } catch (err) {
@@ -667,32 +625,16 @@ fastify.get('/search', async (request, reply) => {
   }
 });
 
-// ── Search Suggestions (autocomplete) ────────────────────────────────────────
 fastify.get('/suggest', async (request, reply) => {
   const { q, limit: lStr = '8' } = request.query;
   if (!q || q.trim().length < 2) return { suggestions: [] };
   const limit = Math.min(15, Math.max(1, parseInt(lStr, 10) || 8));
-  const term  = q.trim().toLowerCase();
+  const term = q.trim().toLowerCase();
   try {
-    // 1. FTS vocab prefix match
-    const vocabRows = db.prepare(
-      `SELECT DISTINCT term FROM scriptures_fts_vocab
-       WHERE term LIKE ? AND length(term) > 2
-       ORDER BY doc DESC LIMIT ?`
-    ).all(`${term}%`, limit);
-
-    // 2. Book title match
-    const bookRows = db.prepare(
-      `SELECT book_title AS term FROM books
-       WHERE lower(book_title) LIKE ? LIMIT 5`
-    ).all(`%${term}%`);
-
+    const vocabRows = db.prepare(`SELECT DISTINCT term FROM scriptures_fts_vocab WHERE term LIKE ? AND length(term) > 2 ORDER BY doc DESC LIMIT ?`).all(`${term}%`, limit);
+    const bookRows = db.prepare(`SELECT book_title AS term FROM books WHERE lower(book_title) LIKE ? LIMIT 5`).all(`%${term}%`);
     const seen = new Set();
-    const suggestions = [...vocabRows, ...bookRows]
-      .map(r => r.term)
-      .filter(t => { if (seen.has(t)) return false; seen.add(t); return true; })
-      .slice(0, limit);
-
+    const suggestions = [...vocabRows, ...bookRows].map(r => r.term).filter(t => { if (seen.has(t)) return false; seen.add(t); return true; }).slice(0, limit);
     return { suggestions };
   } catch (err) {
     fastify.log.warn({ err }, '/suggest failed');
@@ -700,54 +642,24 @@ fastify.get('/suggest', async (request, reply) => {
   }
 });
 
-// ─── Service timing constants ─────────────────────────────────────────────────
-// These are tuned for a church / worship-service environment where:
-//   • WiFi in chapel buildings is often congested and unreliable
-//   • Sessions last 1–3 hours with long silent stretches (prayers, music)
-//   • A dropped socket during a sacrament prayer must not kill the session
-//   • The operator cannot be expected to notice and intervene quickly
 const SERVICE_CONFIG = {
-  // How long Socket.IO waits between heartbeat pings (ms).
-  // 25 s gives headroom over browser and cellular keep-alive timers (~30 s).
-  PING_INTERVAL_MS: 25_000,
-
-  // How long without a pong before the socket is considered dead (ms).
-  // 90 s tolerates a brief building WiFi hiccup or phone screen-lock.
-  PING_TIMEOUT_MS: 90_000,
-
-  // How long after the last socket leaves a session before its state is
-  // garbage-collected (ms).  4 hours covers multi-hour worship services,
-  // intermissions, and sessions where the presenting device goes to sleep.
+  PING_INTERVAL_MS: 25000,
+  PING_TIMEOUT_MS: 90000,
   SESSION_GRACE_MS: 4 * 60 * 60 * 1000,
-
-  // Shorter grace for sessions that never had a TV viewer (e.g. a presenter
-  // who opened the app but never connected a display, or a stale test session).
-  // These have no QR code displayed anywhere, so nobody is coming back for them.
   SESSION_NO_VIEWER_GRACE_MS: 2 * 60 * 1000,
-
-  // How long to wait before broadcasting presenter-left after a socket drop.
-  // Absorbs brief WiFi blips and phone screen-locks without the TV ever seeing
-  // the presenter as gone.  If the presenter reconnects and re-joins within this
-  // window the timer is cancelled and the TV display is never disturbed.
-  PRESENTER_LEFT_DEBOUNCE_MS: 5_000,
-
-  // Maximum number of concurrent named sessions (prevents memory exhaustion
-  // if the server is left running across multiple weeks of service).
+  PRESENTER_LEFT_DEBOUNCE_MS: 5000,
   MAX_SESSIONS: 50,
 };
 
 const io = new Server(fastify.server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production'
-      ? [process.env.PUBLIC_ORIGIN || 'https://cap-teyyko.live']
-      : '*',
+    origin: process.env.NODE_ENV === 'production' ? [process.env.PUBLIC_ORIGIN || 'https://cap-teyyko.live'] : '*',
   },
   pingInterval: SERVICE_CONFIG.PING_INTERVAL_MS,
-  pingTimeout:  SERVICE_CONFIG.PING_TIMEOUT_MS,
-  maxHttpBufferSize: 100 * 1024, // 100KB max per socket message
+  pingTimeout: SERVICE_CONFIG.PING_TIMEOUT_MS,
+  maxHttpBufferSize: 100 * 1024,
 });
 
-// Writable user-data DB for setlists (lives outside read-only resources)
 const db_user = require('better-sqlite3')(path.join(USER_DATA_DIR, 'user-data.db'));
 db_user.exec(`
   CREATE TABLE IF NOT EXISTS setlists (
@@ -774,7 +686,6 @@ db_user.exec(`
   CREATE INDEX IF NOT EXISTS idx_re_ts     ON reading_events(ts DESC);
   CREATE INDEX IF NOT EXISTS idx_re_session ON reading_events(session_id);
   CREATE INDEX IF NOT EXISTS idx_re_chapter ON reading_events(chapter_id);
-
   CREATE TABLE IF NOT EXISTS spaced_reviews (
     verse_id      INTEGER PRIMARY KEY,
     easiness      REAL    NOT NULL DEFAULT 2.5,
@@ -783,7 +694,6 @@ db_user.exec(`
     next_review   INTEGER NOT NULL DEFAULT 0,
     last_review   INTEGER NOT NULL DEFAULT 0
   );
-
   CREATE TABLE IF NOT EXISTS reading_sessions (
     id          TEXT PRIMARY KEY,
     started_at  INTEGER NOT NULL,
@@ -791,7 +701,6 @@ db_user.exec(`
     verse_count INTEGER NOT NULL DEFAULT 0,
     language    TEXT NOT NULL DEFAULT 'en'
   );
-
   CREATE TABLE IF NOT EXISTS search_feedback (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     query      TEXT NOT NULL,
@@ -804,15 +713,11 @@ db_user.exec(`
   CREATE INDEX IF NOT EXISTS idx_sf_query ON search_feedback(query);
   CREATE INDEX IF NOT EXISTS idx_sf_ts    ON search_feedback(ts DESC);
 `);
-// Migrate: add intent column if missing (for existing deployments)
 try { db_user.exec('ALTER TABLE search_feedback ADD COLUMN intent TEXT'); } catch {}
 
-// ── Learned Scoring Weights (updated from feedback) ──────────────────────────
-// Weights for: [bm25, semantic, pagerank, cross_ref, cluster, dwell]
 const DEFAULT_WEIGHTS = [1.0, 0.8, 0.3, 0.5, 0.3, 0.15];
 let learnedWeights = [...DEFAULT_WEIGHTS];
 
-// Load persisted weights if available
 try {
   db_user.exec(`
     CREATE TABLE IF NOT EXISTS learned_weights (
@@ -828,11 +733,10 @@ try {
   }
 } catch {}
 
-// ── Adam optimizer state for global learned weights ────────────────────────
 const ADAM_BETA1 = 0.9;
 const ADAM_BETA2 = 0.999;
-const ADAM_EPS   = 1e-8;
-const ADAM_LR    = 0.01;
+const ADAM_EPS = 1e-8;
+const ADAM_LR = 0.01;
 let adamM = new Float64Array(learnedWeights.length);
 let adamV = new Float64Array(learnedWeights.length);
 let adamT = 0;
@@ -846,25 +750,20 @@ try {
   if (tRow) adamT = parseInt(tRow.value, 10) || 0;
 } catch {}
 
-// ── Per-intent learned weight vectors ────────────────────────────────────────
-// Seeds encode strong prior knowledge (same as former hardcoded INTENT_WEIGHT_PRESETS).
-// Each intent type owns its own 6-dim weight vector [bm25,semantic,pagerank,cross_ref,cluster,dwell]
-// that is updated independently via Adam from user feedback.
-// Over time, weights drift toward what the data says they should be —
-// no human ever adjusts these again.
-// ─────────────────────────────────────────────────────────────────────────────
 const INTENT_WEIGHT_SEEDS = {
-  reference:   [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],
-  entity:      [0.8, 0.4, 0.9, 0.9, 0.1, 0.1 ],
-  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3 ],
-  conceptual:  [0.3, 1.4, 0.3, 0.6, 0.2, 0.2 ],
-  mixed:       [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],
-  keyword:     [1.0, 0.8, 0.3, 0.4, 0.2, 0.15],
+  reference: [1.4, 0.1, 0.0, 0.1, 0.0, 0.05],
+  entity: [0.8, 0.4, 0.9, 0.9, 0.1, 0.1],
+  situational: [0.5, 1.3, 0.2, 0.7, 0.3, 0.3],
+  conceptual: [0.3, 1.4, 0.3, 0.6, 0.2, 0.2],
+  mixed: [0.9, 0.9, 0.3, 0.5, 0.2, 0.15],
+  keyword: [1.0, 0.8, 0.3, 0.4, 0.2, 0.15],
 };
-const intentWeights  = new Map(); // intentType → Float64Array(6)
-const intentAdamM    = new Map();
-const intentAdamV    = new Map();
-const intentAdamT    = new Map();
+
+const intentWeights = new Map();
+const intentAdamM = new Map();
+const intentAdamV = new Map();
+const intentAdamT = new Map();
+
 for (const [type, seed] of Object.entries(INTENT_WEIGHT_SEEDS)) {
   intentWeights.set(type, new Float64Array(seed));
   intentAdamM.set(type, new Float64Array(6));
@@ -895,12 +794,10 @@ try {
   }
 } catch {}
 
-// Return per-intent weights, falling back to global learnedWeights if no intent-specific data
 function getIntentWeights(intentType) {
   return intentWeights.get(intentType) || new Float64Array(learnedWeights);
 }
 
-// ── Source → weight index mapping (shared by all Adam update paths) ───────────
 const SRC_WEIGHT_IDX = {
   'fts': 0, 'fts-phrase': 0, 'semantic': 1, 'semantic-primary': 1, 'knn-expand': 1,
   'pagerank': 2, 'entity-person': 2, 'entity-place': 2,
@@ -909,59 +806,27 @@ const SRC_WEIGHT_IDX = {
   'dwell': 5,
 };
 
-// ── Robust Weight Learner (Adam + noise rejection + per-intent) ───────────────
-//
-// Three-phase noise filter applied before any gradient step:
-//   ① Session velocity: >12 events in 90 s window → discard entire burst
-//   ② Validity gate: rank_shown must be [0, 49]; strips bot/test data
-//   ③ Z-score outlier rejection: per source-bucket, discard |rrk − μ| > 2.5σ
-//
-// IPS position-bias correction:
-//   Clicks at rank k are over-represented (position bias).
-//   Inverse-propensity weight ipw = √(rank + 1) upweights hard-to-find results.
-//
-// Stability guard:
-//   If a single update step would move a weight by >20 %, halve the step.
-//   Prevents pathological divergence from a single anomalous feedback burst.
-//
-// Per-intent update:
-//   After the global update, feedback rows that carry an intent label are
-//   grouped and run through independent Adam optimisers per intent type.
-//   Each intent therefore develops its own weight profile over time.
 function updateLearnedWeights() {
   try {
     const cutoff = Date.now() - 7 * 86400000;
-    const rawFeedback = db_user.prepare(
-      'SELECT query, verse_id, rank_shown, source, intent, ts FROM search_feedback WHERE ts > ? ORDER BY ts ASC LIMIT 1000'
-    ).all(cutoff);
-
+    const rawFeedback = db_user.prepare('SELECT query, verse_id, rank_shown, source, intent, ts FROM search_feedback WHERE ts > ? ORDER BY ts ASC LIMIT 1000').all(cutoff);
     if (rawFeedback.length < 10) return;
 
-    // ── Phase 0: Noise rejection ────────────────────────────────────────────
-
-    // 0a. Session velocity — identify burst windows (>12 events in 90 s)
-    const SPAM_WINDOW_MS   = 90_000;
-    const SPAM_MAX_EVENTS  = 12;
-    const spamTs           = new Set();
+    const SPAM_WINDOW_MS = 90000;
+    const SPAM_MAX_EVENTS = 12;
+    const spamTs = new Set();
     for (let i = 0; i < rawFeedback.length; i++) {
       let count = 0;
-      const t0  = rawFeedback[i].ts;
+      const t0 = rawFeedback[i].ts;
       for (let j = i; j < rawFeedback.length && rawFeedback[j].ts - t0 <= SPAM_WINDOW_MS; j++) count++;
       if (count > SPAM_MAX_EVENTS) {
-        for (let j = i; j < rawFeedback.length && rawFeedback[j].ts - t0 <= SPAM_WINDOW_MS; j++) {
-          spamTs.add(rawFeedback[j].ts);
-        }
+        for (let j = i; j < rawFeedback.length && rawFeedback[j].ts - t0 <= SPAM_WINDOW_MS; j++) spamTs.add(rawFeedback[j].ts);
       }
     }
 
-    // 0b. Validity gate + IPS weighting
-    const ipsWeighted = rawFeedback
-      .filter(fb => fb.rank_shown >= 0 && fb.rank_shown < 50 && !spamTs.has(fb.ts))
-      .map(fb => ({ ...fb, ipw: Math.sqrt(fb.rank_shown + 1) }));
-
+    const ipsWeighted = rawFeedback.filter(fb => fb.rank_shown >= 0 && fb.rank_shown < 50 && !spamTs.has(fb.ts)).map(fb => ({ ...fb, ipw: Math.sqrt(fb.rank_shown + 1) }));
     if (ipsWeighted.length < 5) return;
 
-    // 0c. Z-score outlier rejection per source bucket
     const srcBuckets = new Map();
     for (const fb of ipsWeighted) {
       const src = fb.source || 'fts';
@@ -970,8 +835,8 @@ function updateLearnedWeights() {
     }
     const srcStats = new Map();
     for (const [src, vals] of srcBuckets) {
-      const n   = vals.length;
-      const mu  = vals.reduce((a, b) => a + b, 0) / n;
+      const n = vals.length;
+      const mu = vals.reduce((a, b) => a + b, 0) / n;
       const sig = Math.sqrt(vals.reduce((s, v) => s + (v - mu) ** 2, 0) / n) || 1e-9;
       srcStats.set(src, { mu, sig });
     }
@@ -980,72 +845,65 @@ function updateLearnedWeights() {
       const rrk = fb.ipw / Math.max(1, fb.rank_shown + 1);
       return Math.abs(rrk - mu) <= 2.5 * sig;
     });
-
     if (cleanFeedback.length < 5) return;
 
-    // ── Phase 1: Global Adam update ─────────────────────────────────────────
-    const deltas   = new Float64Array(learnedWeights.length);
-    const ipwSums  = new Float64Array(learnedWeights.length);
+    const deltas = new Float64Array(learnedWeights.length);
+    const ipwSums = new Float64Array(learnedWeights.length);
     for (const fb of cleanFeedback) {
-      const wIdx  = SRC_WEIGHT_IDX[fb.source] ?? 0;
-      const rrk   = fb.ipw / Math.max(1, fb.rank_shown + 1);
-      deltas[wIdx]  += (rrk - 0.15) * 0.01 * fb.ipw;
+      const wIdx = SRC_WEIGHT_IDX[fb.source] ?? 0;
+      const rrk = fb.ipw / Math.max(1, fb.rank_shown + 1);
+      deltas[wIdx] += (rrk - 0.15) * 0.01 * fb.ipw;
       ipwSums[wIdx] += fb.ipw;
     }
     adamT++;
     for (let i = 0; i < learnedWeights.length; i++) {
       if (ipwSums[i] === 0) continue;
-      const g     = deltas[i] / ipwSums[i];
-      adamM[i]    = ADAM_BETA1 * adamM[i] + (1 - ADAM_BETA1) * g;
-      adamV[i]    = ADAM_BETA2 * adamV[i] + (1 - ADAM_BETA2) * g * g;
-      const mHat  = adamM[i] / (1 - Math.pow(ADAM_BETA1, adamT));
-      const vHat  = adamV[i] / (1 - Math.pow(ADAM_BETA2, adamT));
-      const step  = ADAM_LR * mHat / (Math.sqrt(vHat) + ADAM_EPS);
-      const damp  = Math.abs(step) > 0.2 * Math.abs(learnedWeights[i]) ? step * 0.5 : step;
+      const g = deltas[i] / ipwSums[i];
+      adamM[i] = ADAM_BETA1 * adamM[i] + (1 - ADAM_BETA1) * g;
+      adamV[i] = ADAM_BETA2 * adamV[i] + (1 - ADAM_BETA2) * g * g;
+      const mHat = adamM[i] / (1 - Math.pow(ADAM_BETA1, adamT));
+      const vHat = adamV[i] / (1 - Math.pow(ADAM_BETA2, adamT));
+      const step = ADAM_LR * mHat / (Math.sqrt(vHat) + ADAM_EPS);
+      const damp = Math.abs(step) > 0.2 * Math.abs(learnedWeights[i]) ? step * 0.5 : step;
       learnedWeights[i] = Math.max(0.05, Math.min(3.0, learnedWeights[i] + damp));
     }
 
-    // ── Phase 2: Per-intent Adam updates ────────────────────────────────────
     const intentBuckets = new Map();
     for (const fb of cleanFeedback) {
       if (!fb.intent) continue;
       if (!intentBuckets.has(fb.intent)) intentBuckets.set(fb.intent, []);
       intentBuckets.get(fb.intent).push(fb);
     }
-    const intentStmt = db_user.prepare(
-      'INSERT OR REPLACE INTO intent_weights (intent_type, weights, adam_m, adam_v, adam_t, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    );
+    const intentStmt = db_user.prepare('INSERT OR REPLACE INTO intent_weights (intent_type, weights, adam_m, adam_v, adam_t, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
     for (const [intentType, iFb] of intentBuckets) {
       if (iFb.length < 3 || !intentWeights.has(intentType)) continue;
-      const W  = intentWeights.get(intentType);
-      const M  = intentAdamM.get(intentType);
-      const V  = intentAdamV.get(intentType);
-      const T  = (intentAdamT.get(intentType) || 0) + 1;
+      const W = intentWeights.get(intentType);
+      const M = intentAdamM.get(intentType);
+      const V = intentAdamV.get(intentType);
+      const T = (intentAdamT.get(intentType) || 0) + 1;
       intentAdamT.set(intentType, T);
-      const iDeltas  = new Float64Array(6);
+      const iDeltas = new Float64Array(6);
       const iIpwSums = new Float64Array(6);
       for (const fb of iFb) {
-        const wIdx  = SRC_WEIGHT_IDX[fb.source] ?? 0;
-        const rrk   = fb.ipw / Math.max(1, fb.rank_shown + 1);
-        iDeltas[wIdx]  += (rrk - 0.15) * 0.01 * fb.ipw;
+        const wIdx = SRC_WEIGHT_IDX[fb.source] ?? 0;
+        const rrk = fb.ipw / Math.max(1, fb.rank_shown + 1);
+        iDeltas[wIdx] += (rrk - 0.15) * 0.01 * fb.ipw;
         iIpwSums[wIdx] += fb.ipw;
       }
       for (let i = 0; i < 6; i++) {
         if (iIpwSums[i] === 0) continue;
-        const g    = iDeltas[i] / iIpwSums[i];
-        M[i]       = ADAM_BETA1 * M[i] + (1 - ADAM_BETA1) * g;
-        V[i]       = ADAM_BETA2 * V[i] + (1 - ADAM_BETA2) * g * g;
-        const mH   = M[i] / (1 - Math.pow(ADAM_BETA1, T));
-        const vH   = V[i] / (1 - Math.pow(ADAM_BETA2, T));
+        const g = iDeltas[i] / iIpwSums[i];
+        M[i] = ADAM_BETA1 * M[i] + (1 - ADAM_BETA1) * g;
+        V[i] = ADAM_BETA2 * V[i] + (1 - ADAM_BETA2) * g * g;
+        const mH = M[i] / (1 - Math.pow(ADAM_BETA1, T));
+        const vH = V[i] / (1 - Math.pow(ADAM_BETA2, T));
         const step = ADAM_LR * mH / (Math.sqrt(vH) + ADAM_EPS);
         const damp = Math.abs(step) > 0.2 * Math.abs(W[i]) ? step * 0.5 : step;
-        W[i]       = Math.max(0.02, Math.min(4.0, W[i] + damp));
+        W[i] = Math.max(0.02, Math.min(4.0, W[i] + damp));
       }
-      intentStmt.run(intentType, JSON.stringify(Array.from(W)), JSON.stringify(Array.from(M)),
-        JSON.stringify(Array.from(V)), T, Date.now());
+      intentStmt.run(intentType, JSON.stringify(Array.from(W)), JSON.stringify(Array.from(M)), JSON.stringify(Array.from(V)), T, Date.now());
     }
 
-    // ── Persist global Adam state ────────────────────────────────────────────
     const stmt = db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)');
     db_user.transaction(() => {
       learnedWeights.forEach((w, i) => stmt.run(`w${i}`, w));
@@ -1054,72 +912,44 @@ function updateLearnedWeights() {
       stmt.run('adam_t', String(adamT));
     })();
 
-    fastify.log.info(
-      `[WeightLearning] t=${adamT} global=[${learnedWeights.map(w => w.toFixed(3)).join(',')}]` +
-      ` intents=[${[...intentBuckets.keys()].join(',')}]` +
-      ` clean=${cleanFeedback.length}/${rawFeedback.length}`
-    );
+    fastify.log.info(`[WeightLearning] t=${adamT} global=[${learnedWeights.map(w => w.toFixed(3)).join(',')}] intents=[${[...intentBuckets.keys()].join(',')}] clean=${cleanFeedback.length}/${rawFeedback.length}`);
   } catch (err) {
     fastify.log.warn({ err }, 'updateLearnedWeights failed');
   }
 }
 
-// Run weight update once at startup if we have enough data
 setImmediate(() => { try { updateLearnedWeights(); } catch {} });
 
-// ── Isotonic Regression: Pool Adjacent Violators (PAV) ──────────────────────
-// Calibrates raw scores → P(relevant | score, tier) so scores become comparable.
-// PAV guarantees monotonicity: higher raw score → higher calibrated probability.
-//
-// Fitted per-tier from (raw_score, was_clicked) data in search_feedback.
-// Stored as piecewise-linear lookup tables in learned_weights.
-let calibrationCurves = new Map(); // tier → [{x, y}] sorted by x
+let calibrationCurves = new Map();
 
 function pavCalibrate(points) {
   if (points.length < 5) return null;
-  // Sort by raw score ascending
   points.sort((a, b) => a.x - b.x);
-
-  // Pool Adjacent Violators: merge adjacent blocks that violate monotonicity
   const blocks = points.map(p => ({ sum: p.y, count: 1, minX: p.x, maxX: p.x }));
   let i = 0;
   while (i < blocks.length - 1) {
     const mean_i = blocks[i].sum / blocks[i].count;
     const mean_next = blocks[i + 1].sum / blocks[i + 1].count;
     if (mean_i > mean_next) {
-      // Merge: pool blocks[i] and blocks[i+1]
       blocks[i].sum += blocks[i + 1].sum;
       blocks[i].count += blocks[i + 1].count;
       blocks[i].maxX = blocks[i + 1].maxX;
       blocks.splice(i + 1, 1);
-      // Back up to re-check previous block
       if (i > 0) i--;
     } else {
       i++;
     }
   }
-
-  // Convert blocks to piecewise-linear lookup: [{x: midpoint, y: mean}]
-  return blocks.map(b => ({
-    x: (b.minX + b.maxX) / 2,
-    y: b.sum / b.count,
-  }));
+  return blocks.map(b => ({ x: (b.minX + b.maxX) / 2, y: b.sum / b.count }));
 }
 
 function calibrateScore(tier, rawScore) {
   const curve = calibrationCurves.get(tier);
   if (!curve || curve.length < 2) return rawScore;
-
-  // Guard: if the curve's output range is essentially zero (all-zero click data —
-  // no user feedback yet), applying it would collapse all scores to near-0 and
-  // destroy tier-based ordering. Return rawScore unchanged in that case.
   const maxY = curve.reduce((m, p) => Math.max(m, p.y), 0);
   if (maxY < 0.01) return rawScore;
-
-  // Piecewise linear interpolation
   if (rawScore <= curve[0].x) return curve[0].y;
   if (rawScore >= curve[curve.length - 1].x) return curve[curve.length - 1].y;
-
   for (let i = 0; i < curve.length - 1; i++) {
     if (rawScore >= curve[i].x && rawScore <= curve[i + 1].x) {
       const t = (rawScore - curve[i].x) / (curve[i + 1].x - curve[i].x);
@@ -1129,41 +959,29 @@ function calibrateScore(tier, rawScore) {
   return rawScore;
 }
 
-// Fit calibration curves from feedback data (called periodically)
 function fitCalibrationCurves() {
   try {
-    const cutoff = Date.now() - 14 * 86400000; // 14 days of data
-    const feedback = db_user.prepare(`
-      SELECT tier, raw_score, clicked FROM search_calibration WHERE ts > ? ORDER BY tier, raw_score
-    `).all(cutoff);
-
+    const cutoff = Date.now() - 14 * 86400000;
+    const feedback = db_user.prepare(`SELECT tier, raw_score, clicked FROM search_calibration WHERE ts > ? ORDER BY tier, raw_score`).all(cutoff);
     if (feedback.length < 20) return;
-
     const byTier = new Map();
     for (const f of feedback) {
       if (!byTier.has(f.tier)) byTier.set(f.tier, []);
       byTier.get(f.tier).push({ x: f.raw_score, y: f.clicked });
     }
-
     for (const [tier, points] of byTier) {
       const curve = pavCalibrate(points);
       if (curve) calibrationCurves.set(tier, curve);
     }
-
-    // Persist curves
     const curvesJson = {};
     for (const [tier, curve] of calibrationCurves) curvesJson[tier] = curve;
-    db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)').run(
-      'calibration_curves', JSON.stringify(curvesJson)
-    );
-
+    db_user.prepare('INSERT OR REPLACE INTO learned_weights (key, value) VALUES (?, ?)').run('calibration_curves', JSON.stringify(curvesJson));
     fastify.log.info(`[Calibration] Fitted PAV curves for ${calibrationCurves.size} tiers (${feedback.length} data points)`);
   } catch (err) {
     fastify.log.warn({ err }, 'fitCalibrationCurves failed');
   }
 }
 
-// Ensure calibration data table exists
 try {
   db_user.exec(`
     CREATE TABLE IF NOT EXISTS search_calibration (
@@ -1176,7 +994,6 @@ try {
   db_user.exec('CREATE INDEX IF NOT EXISTS idx_calibration_ts ON search_calibration(ts)');
 } catch {}
 
-// Restore saved curves
 try {
   const row = db_user.prepare("SELECT value FROM learned_weights WHERE key = 'calibration_curves'").get();
   if (row) {
@@ -1187,9 +1004,8 @@ try {
   }
 } catch {}
 
-// ── Item2Vec: Session-based verse embeddings ──────────────────────────────────
 const ITEM2VEC_DIM = 64;
-let item2vecVectors = new Map(); // verse_id → Float32Array(64)
+let item2vecVectors = new Map();
 let item2vecReady = false;
 
 function item2vecDot(a, b) {
@@ -1210,18 +1026,8 @@ function item2vecSimilarity(a, b) {
 
 function trainItem2Vec() {
   try {
-    // Collect session sequences from reading_events
-    const sessionRows = db_user.prepare(
-      `SELECT session_id, GROUP_CONCAT(verse_id) AS seq
-       FROM reading_events
-       WHERE event_type = 'read' AND session_id IS NOT NULL AND verse_id IS NOT NULL
-       GROUP BY session_id
-       HAVING COUNT(*) >= 3
-       ORDER BY MAX(ts) DESC LIMIT 500`
-    ).all();
-
-    // Build co-occurrence pairs (Skip-gram window=2)
-    const pairs = []; // [[center, context], ...]
+    const sessionRows = db_user.prepare(`SELECT session_id, GROUP_CONCAT(verse_id) AS seq FROM reading_events WHERE event_type = 'read' AND session_id IS NOT NULL AND verse_id IS NOT NULL GROUP BY session_id HAVING COUNT(*) >= 3 ORDER BY MAX(ts) DESC LIMIT 500`).all();
+    const pairs = [];
     for (const row of sessionRows) {
       const seq = row.seq.split(',').map(Number).filter(Boolean);
       for (let i = 0; i < seq.length; i++) {
@@ -1230,22 +1036,13 @@ function trainItem2Vec() {
         }
       }
     }
-
-    // If we have no real session data yet, warm-start from verse_knn co-occurrence
     if (pairs.length < 50 && db_graph) {
       fastify.log.info('[Item2Vec] No session data yet — warm-starting from verse_knn');
-      const knnSample = db_graph.prepare(
-        'SELECT verse_id, neighbor_id FROM verse_knn WHERE rank <= 3 ORDER BY RANDOM() LIMIT 5000'
-      ).all();
+      const knnSample = db_graph.prepare('SELECT verse_id, neighbor_id FROM verse_knn WHERE rank <= 3 ORDER BY RANDOM() LIMIT 5000').all();
       for (const r of knnSample) pairs.push([r.verse_id, r.neighbor_id]);
     }
-
     if (pairs.length === 0) return;
-
-    // Get unique verse ids
     const verseIds = [...new Set(pairs.flat())];
-
-    // Initialize random vectors (Xavier initialization)
     const scale = 1 / Math.sqrt(ITEM2VEC_DIM);
     const newVectors = new Map();
     for (const vid of verseIds) {
@@ -1253,24 +1050,17 @@ function trainItem2Vec() {
       for (let i = 0; i < ITEM2VEC_DIM; i++) v[i] = (Math.random() * 2 - 1) * scale;
       newVectors.set(vid, v);
     }
-
-    // Skip-gram training (1 epoch, lr=0.025, negative sampling k=5)
     const lr = 0.025;
-    const k = 5; // negative samples
+    const k = 5;
     const verseArray = verseIds;
-
-    // Shuffle pairs
     for (let i = pairs.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
     }
-
     for (const [center, context] of pairs) {
       const vc = newVectors.get(center);
       const vctx = newVectors.get(context);
       if (!vc || !vctx) continue;
-
-      // Positive sample gradient
       const dot = item2vecDot(vc, vctx);
       const sigmoid = 1 / (1 + Math.exp(-Math.max(-10, Math.min(10, dot))));
       const err = (1 - sigmoid) * lr;
@@ -1278,8 +1068,6 @@ function trainItem2Vec() {
         vc[i] += err * vctx[i];
         vctx[i] += err * vc[i];
       }
-
-      // Negative samples
       for (let n = 0; n < k; n++) {
         const negId = verseArray[Math.floor(Math.random() * verseArray.length)];
         if (negId === center || negId === context) continue;
@@ -1294,7 +1082,6 @@ function trainItem2Vec() {
         }
       }
     }
-
     item2vecVectors = newVectors;
     item2vecReady = true;
     fastify.log.info(`[Item2Vec] Trained on ${pairs.length} pairs, ${verseIds.length} verses`);
@@ -1303,72 +1090,57 @@ function trainItem2Vec() {
   }
 }
 
-// Train at startup (non-blocking via setImmediate) and re-train every 30 min
 setImmediate(() => trainItem2Vec());
 setInterval(() => trainItem2Vec(), 30 * 60 * 1000);
 
-// Build the FTS table once (or when explicitly forced) instead of rebuilding every startup.
-// Uses the shared engine's initializeFts via adapters.
 const { initializeFts, segmentVerseText, segmentVerseTextDual, parseScriptureReference,
         searchScripture, searchScriptureInDb, getAdjacentVerse, fetchVerseByCoords,
         getVersionCitation, getVerseOfTheDay, VOTD_POOL, phraseSearch,
         BIBLE_CITATIONS, TRIPLE_CITATIONS, LANGUAGE_NAMES } = engine;
 
 const REBUILD_EMBEDDINGS = process.env.REBUILD_EMBEDDINGS === 'true';
-const EMBED_BATCH_SIZE   = 50;
+const EMBED_BATCH_SIZE = 50;
 
-let embeddingsReady     = false;
-let embeddingPipe       = null;  // transformer pipeline (loaded in dev; null in production)
-const embeddingCache    = new Map(); // verse_id → Float32Array(768)
+let embeddingsReady = false;
+let embeddingPipe = null;
+const embeddingCache = new Map();
 let searchWarmupPromise = null;
 
-// ZCA whitening transform: v_white = W · (v - μ), then L2-normalize
-// Loaded from embedding_whitening table (prebaked by scripts/prebake-whitening.js)
-let whiteningW    = null; // Float32Array(768*768) — row-major ZCA matrix
-let whiteningMean = null; // Float32Array(768) — corpus mean vector
-const EMBED_DIM   = 768;
-const entityCentroidCache = new Map(); // entity_id → Float32Array(768)
-const verseMetaCache    = new Map(); // verse_id → { chapter_id, scripture_text }
+let whiteningW = null;
+let whiteningMean = null;
+const EMBED_DIM = 768;
+const entityCentroidCache = new Map();
+const verseMetaCache = new Map();
 
-// Spectral graph embeddings (50D, from verse_spectral table in verse-graph.db)
-const spectralCache     = new Map(); // verse_id → Float32Array(50)
-let spectralReady       = false;
-const SPECTRAL_DIM      = 50;
-const SPECTRAL_BLEND    = 0.15; // blend weight: combinedSim = (1-w)·cosine + w·spectral
+const spectralCache = new Map();
+let spectralReady = false;
+const SPECTRAL_DIM = 50;
+const SPECTRAL_BLEND = 0.15;
 
-// Topical Guide caches (populated at startup if topical-guide.db is present)
-const verseTopicCache  = new Map(); // verse_id → Set<topic_slug>
-const topicVerseIndex  = new Map(); // topic_slug → Set<verse_id>  (reverse index)
-const topicNameMap     = new Map(); // topic_slug → topic_name (display)
-const pageRankCache    = new Map(); // verse_id → PageRank score
-let pageRankP95        = 1;
+const verseTopicCache = new Map();
+const topicVerseIndex = new Map();
+const topicNameMap = new Map();
+const pageRankCache = new Map();
+let pageRankP95 = 1;
 let topicalGuideReady = false;
 
 function buildTopicalGuideCache() {
   if (!db_tg) return;
   try {
-    // Try pre-baked topic indexes first
     const hasPreBaked = db_tg.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='topic_verse_index'").get()?.n > 0;
     if (hasPreBaked) {
-      // Load topic names
       const topics = db_tg.prepare('SELECT id, slug, name FROM topics').all();
       for (const t of topics) topicNameMap.set(t.slug, t.name);
-
-      // Load pre-baked verse → topics from verse_topics table
       const vtRows = db_tg.prepare('SELECT verse_id, topic_slugs FROM verse_topics').all();
       for (const r of vtRows) {
         const slugs = JSON.parse(r.topic_slugs);
         verseTopicCache.set(r.verse_id, new Set(slugs));
       }
-
-      // Load pre-baked topic → verses from topic_verse_index
       const tiRows = db_tg.prepare('SELECT topic_slug, verse_id FROM topic_verse_index').all();
       for (const r of tiRows) {
         if (!topicVerseIndex.has(r.topic_slug)) topicVerseIndex.set(r.topic_slug, new Set());
         topicVerseIndex.get(r.topic_slug).add(r.verse_id);
       }
-
-      // Load PageRank scores if available
       try {
         const prRows = db_tg.prepare('SELECT verse_id, pagerank FROM verse_pagerank').all();
         const prValues = [];
@@ -1382,13 +1154,11 @@ function buildTopicalGuideCache() {
         }
         fastify.log.info(`[PageRank] Loaded ${pageRankCache.size} scores`);
       } catch {}
-
       topicalGuideReady = true;
       fastify.log.info(`[TG] Pre-baked: ${topicNameMap.size} topics, ${verseTopicCache.size} verses`);
       return;
     }
   } catch {}
-  // Fallback: runtime build
   try {
     const tcount = db_tg.prepare('SELECT COUNT(*) AS c FROM topical_guide WHERE verse_id IS NOT NULL AND verse_id != -1').get().c;
     if (tcount === 0) return;
@@ -1427,7 +1197,6 @@ function cosineSimilarity(a, b) {
   return sum;
 }
 
-// Apply ZCA whitening to a raw embedding: v_white = W · (v - μ), then L2-normalize
 function whitenVector(raw) {
   if (!whiteningW || !whiteningMean) return raw;
   const centered = new Float32Array(EMBED_DIM);
@@ -1446,24 +1215,13 @@ function whitenVector(raw) {
   return w;
 }
 
-// ── Sinkhorn Optimal Transport (Word Mover's Distance approximation) ─────
-// For multi-concept queries like "faith and repentance", a single average vector
-// loses information. WMD measures the minimum-cost transport between two
-// word-weight distributions. Sinkhorn regularization (ε) makes it differentiable
-// and computable in O(n²·iterations) instead of O(n³ LP).
-//
-// queryTokenVecs: [{vec: Float32Array(384), weight: number}]
-// verseTokenVecs: [{vec: Float32Array(384), weight: number}]
-// Returns: WMD score (lower = more similar)
 const SINKHORN_ITER = 15;
-const SINKHORN_EPS  = 0.1; // entropic regularization
+const SINKHORN_EPS = 0.1;
 
 function sinkhornWMD(queryTokens, verseTokens) {
   const m = queryTokens.length;
   const n = verseTokens.length;
   if (m === 0 || n === 0) return 1.0;
-
-  // Normalize weights to sum to 1
   const a = new Float64Array(m);
   const b = new Float64Array(n);
   let aSum = 0, bSum = 0;
@@ -1472,40 +1230,31 @@ function sinkhornWMD(queryTokens, verseTokens) {
   if (aSum <= 0 || bSum <= 0) return 1.0;
   for (let i = 0; i < m; i++) a[i] /= aSum;
   for (let j = 0; j < n; j++) b[j] /= bSum;
-
-  // Cost matrix: C[i][j] = 1 - cosine(q_i, v_j)
-  const K = new Float64Array(m * n); // Gibbs kernel: K = exp(-C/ε)
+  const K = new Float64Array(m * n);
   for (let i = 0; i < m; i++) {
     const qv = queryTokens[i].vec;
     for (let j = 0; j < n; j++) {
       const vv = verseTokens[j].vec;
       let dot = 0;
       for (let d = 0; d < qv.length; d++) dot += qv[d] * vv[d];
-      const cost = 1.0 - dot; // cosine distance (vecs are L2-normalized)
+      const cost = 1.0 - dot;
       K[i * n + j] = Math.exp(-cost / SINKHORN_EPS);
     }
   }
-
-  // Sinkhorn iterations: alternating row/column scaling
   const u = new Float64Array(m).fill(1.0 / m);
   const v = new Float64Array(n).fill(1.0 / n);
-
   for (let iter = 0; iter < SINKHORN_ITER; iter++) {
-    // Update u: u_i = a_i / (K * v)_i
     for (let i = 0; i < m; i++) {
       let kv = 0;
       for (let j = 0; j < n; j++) kv += K[i * n + j] * v[j];
       u[i] = kv > 1e-30 ? a[i] / kv : a[i];
     }
-    // Update v: v_j = b_j / (K^T * u)_j
     for (let j = 0; j < n; j++) {
       let ku = 0;
       for (let i = 0; i < m; i++) ku += K[i * n + j] * u[i];
       v[j] = ku > 1e-30 ? b[j] / ku : b[j];
     }
   }
-
-  // Compute transport cost: <P, C> where P = diag(u)·K·diag(v)
   let wmd = 0;
   for (let i = 0; i < m; i++) {
     const qv = queryTokens[i].vec;
@@ -1518,19 +1267,15 @@ function sinkhornWMD(queryTokens, verseTokens) {
       wmd += transport * cost;
     }
   }
-
   return Math.max(0, Math.min(1.0, wmd));
 }
 
-// Tokenize text into word-level embeddings using the corpus IDF weights
-// Returns: [{word, vec, weight}] or empty array
 function tokenizeForWMD(text, idfLookup) {
   if (!text || !embeddingsReady) return [];
   const words = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, '').split(/\s+/).filter(w => w.length > 1);
   const unique = [...new Set(words)];
   const tokens = [];
   for (const w of unique) {
-    // Look up IDF weight; skip very common words (IDF < 1.0)
     const idf = idfLookup ? (idfLookup.get(w) || 3.0) : 1.0;
     if (idf < 1.0) continue;
     tokens.push({ word: w, weight: idf });
@@ -1538,97 +1283,60 @@ function tokenizeForWMD(text, idfLookup) {
   return tokens;
 }
 
-// ── Entity Disambiguation Scorer ──────────────────────────────────────────
-// Combines cosine similarity, Bayesian prior, and spatial proximity using
-// polynomial feature interactions to capture nonlinear relationships.
-//
-// Features: [cos, prior, prox, cos·prox, cos·prior, cos², prox²]
-// The cross-terms capture interactions:
-//   cos·prox  → "embedding-confirmed + spatially close = very strong"
-//   cos·prior → "similar embedding + frequent entity = reinforced"
-//   cos²      → rewards high-confidence embedding matches
-//   prox²     → rewards very close spatial proximity
-//
-const ENTITY_WEIGHTS = [0.40, 0.10, 0.20, 0.15, 0.05, 0.05, 0.05]; // 7 polynomial features
+const ENTITY_WEIGHTS = [0.40, 0.10, 0.20, 0.15, 0.05, 0.05, 0.05];
 const ENTITY_DECAY_LAMBDA = 3.0;
 
 function scoreEntityCandidates(candidates, verseId, verseEmbedding) {
   if (candidates.length <= 1) return candidates;
-
-  // N_max for normalisation
   const nMax = Math.max(...candidates.map(c => c.verse_count), 1);
-
-  // Get verse IDs in the chapter for proximity scoring
   let chapterVerseIds = null;
   try {
     const chRow = dba.prepare('SELECT chapter_id FROM scriptures WHERE verse_id = ?').get(verseId);
     if (chRow) {
-      chapterVerseIds = dba.prepare('SELECT verse_id FROM scriptures WHERE chapter_id = ? ORDER BY verse_id')
-        .all(chRow.chapter_id).map(r => r.verse_id);
+      chapterVerseIds = dba.prepare('SELECT verse_id FROM scriptures WHERE chapter_id = ? ORDER BY verse_id').all(chRow.chapter_id).map(r => r.verse_id);
     }
-  } catch { /* ignore */ }
-
+  } catch { }
   for (const c of candidates) {
     let cosScore = 0, priorScore = 0, proxScore = 0;
-
-    // ── Cosine similarity: cos(θ) between verse embedding and entity centroid ──
     if (verseEmbedding) {
       const centroid = entityCentroidCache.get(c.entity_id);
       if (centroid) {
         cosScore = cosineSimilarity(verseEmbedding, centroid);
-        // Clamp to [0,1] (already normalised vectors, but just in case)
         cosScore = Math.max(0, Math.min(1, (cosScore + 1) / 2));
       }
     }
-
-    // ── Bayesian prior: log-normalised verse frequency ──
     priorScore = Math.log(1 + c.verse_count) / Math.log(1 + nMax);
-
-    // ── Spatial proximity: exponential decay by distance to nearest mapped verse ──
     if (chapterVerseIds && verseId) {
       const entityVids = db_tags
-        ? db_tags.prepare('SELECT verse_id FROM ai_entity_verse_map WHERE entity_id = ? AND verse_id BETWEEN ? AND ?')
-            .all(c.entity_id, chapterVerseIds[0], chapterVerseIds[chapterVerseIds.length - 1])
-            .map(r => r.verse_id)
+        ? db_tags.prepare('SELECT verse_id FROM ai_entity_verse_map WHERE entity_id = ? AND verse_id BETWEEN ? AND ?').all(c.entity_id, chapterVerseIds[0], chapterVerseIds[chapterVerseIds.length - 1]).map(r => r.verse_id)
         : [];
       if (entityVids.length > 0) {
         const minDist = Math.min(...entityVids.map(v => Math.abs(v - verseId)));
         const dMax = Math.max(chapterVerseIds.length, 1);
-        // e^(-λ · |d|/D_max) — decays smoothly from 1.0 (same verse) to ~0.05 (chapter edge)
         proxScore = Math.exp(-ENTITY_DECAY_LAMBDA * minDist / dMax);
       }
     }
-
-    // Polynomial feature interaction scoring
     const features = [
-      cosScore,                 // linear: cosine similarity
-      priorScore,               // linear: Bayesian prior
-      proxScore,                // linear: spatial proximity
-      cosScore * proxScore,     // interaction: embedding + proximity
-      cosScore * priorScore,    // interaction: embedding + frequency
-      cosScore * cosScore,      // quadratic: high-confidence embedding
-      proxScore * proxScore,    // quadratic: very close proximity
+      cosScore,
+      priorScore,
+      proxScore,
+      cosScore * proxScore,
+      cosScore * priorScore,
+      cosScore * cosScore,
+      proxScore * proxScore,
     ];
     let score = 0;
     for (let f = 0; f < ENTITY_WEIGHTS.length; f++) score += ENTITY_WEIGHTS[f] * features[f];
     c._score = score;
     c._cosine = cosScore;
-    c._prior  = priorScore;
-    c._prox   = proxScore;
+    c._prior = priorScore;
+    c._prox = proxScore;
   }
-
   candidates.sort((a, b) => b._score - a._score);
   return candidates;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  MATHEMATICAL SEARCH ENGINE
-//  Uses: RRF, Sigmoid confidence, IDF weighting, MMR diversity,
-//        chapter aggregation, Bayesian topic scoring
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ── IDF / LLR table (Statistics): term importance weights ──
-const TOTAL_DOCS = 41995;     // total English verses
+const TOTAL_DOCS = 41995;
 let idfStmt = null;
 let llrStmt = null;
 let pmiStmt = null;
@@ -1638,7 +1346,6 @@ const IDF_DEFAULT = Math.log(TOTAL_DOCS / 100);
 
 function initIdfLookup() {
   const rawDb = dba.raw || dba._db;
-  // LLR table (preferred over IDF — statistically rigorous term importance)
   try {
     const llrCount = rawDb.prepare('SELECT COUNT(*) AS n FROM term_llr').get().n;
     llrStmt = rawDb.prepare('SELECT llr, idf, burstiness FROM term_llr WHERE term = ?');
@@ -1646,7 +1353,6 @@ function initIdfLookup() {
   } catch {
     fastify.log.info('[LLR] Table not found, will use IDF only');
   }
-  // IDF table
   try {
     const count = rawDb.prepare('SELECT COUNT(*) AS n FROM term_idf').get().n;
     idfStmt = rawDb.prepare('SELECT idf FROM term_idf WHERE term = ?');
@@ -1661,7 +1367,6 @@ function initIdfLookup() {
       fastify.log.info(`[IDF] Fallback table built: ${idfFallback.size} terms`);
     } catch {}
   }
-  // PMI query expansion table
   try {
     const pmiCount = rawDb.prepare('SELECT COUNT(*) AS n FROM term_pmi').get().n;
     pmiStmt = rawDb.prepare('SELECT assoc, pmi, cooccur FROM term_pmi WHERE term = ? ORDER BY pmi DESC LIMIT 5');
@@ -1672,7 +1377,6 @@ function initIdfLookup() {
 }
 
 function initPprLookup() {
-  // Topic-Personalized PageRank
   if (!db_tg) return;
   try {
     const pprCount = db_tg.prepare('SELECT COUNT(*) AS n FROM topic_ppr').get().n;
@@ -1684,7 +1388,6 @@ function initPprLookup() {
 }
 
 function initRwrLookup() {
-  // Random Walk with Restart related verses (from verse-graph.db)
   if (!db_graph) return;
   try {
     const rwrCount = db_graph.prepare('SELECT COUNT(*) AS n FROM verse_rwr').get().n;
@@ -1695,9 +1398,7 @@ function initRwrLookup() {
   }
 }
 
-// ── Cluster label cache: cluster_id → { terms[], rep_verse_id, member_count, centroid } ──
 const clusterLabelCache = new Map();
-// Flat array of { cluster_id, centroid: Float32Array } for fast nearest-cluster scan
 let clusterCentroidIndex = [];
 
 function initClusterLabels() {
@@ -1705,15 +1406,11 @@ function initClusterLabels() {
   try {
     const count = db_graph.prepare('SELECT COUNT(*) AS n FROM cluster_labels').get()?.n;
     if (!count) return;
-    const rows = db_graph.prepare(
-      'SELECT cluster_id, label_terms, rep_verse_id, member_count, centroid FROM cluster_labels'
-    ).all();
+    const rows = db_graph.prepare('SELECT cluster_id, label_terms, rep_verse_id, member_count, centroid FROM cluster_labels').all();
     for (const row of rows) {
-      const terms    = JSON.parse(row.label_terms || '[]');
+      const terms = JSON.parse(row.label_terms || '[]');
       const centroid = new Float32Array(row.centroid.buffer, row.centroid.byteOffset, row.centroid.byteLength / 4);
-      clusterLabelCache.set(row.cluster_id, {
-        terms, rep_verse_id: row.rep_verse_id, member_count: row.member_count, centroid,
-      });
+      clusterLabelCache.set(row.cluster_id, { terms, rep_verse_id: row.rep_verse_id, member_count: row.member_count, centroid });
       clusterCentroidIndex.push({ cluster_id: row.cluster_id, centroid });
     }
     fastify.log.info(`[Clusters] Loaded ${clusterLabelCache.size} cluster labels`);
@@ -1722,14 +1419,9 @@ function initClusterLabels() {
   }
 }
 
-// Find the N clusters whose centroids are closest to a query vector.
-// Returns [{ cluster_id, terms, rep_verse_id, member_count, similarity }]
 function nearestClusters(qvec, topN = 3) {
   if (!clusterCentroidIndex.length || !qvec) return [];
-  const scored = clusterCentroidIndex.map(({ cluster_id, centroid }) => ({
-    cluster_id,
-    similarity: cosineSimilarity(qvec, centroid),
-  }));
+  const scored = clusterCentroidIndex.map(({ cluster_id, centroid }) => ({ cluster_id, similarity: cosineSimilarity(qvec, centroid) }));
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, topN).map(({ cluster_id, similarity }) => {
     const info = clusterLabelCache.get(cluster_id);
@@ -1743,38 +1435,66 @@ function getIdf(term) {
   const row = idfStmt.get(term.toLowerCase());
   return row?.idf ?? IDF_DEFAULT;
 }
-
-// LLR-weighted term importance: combines LLR surprise + burstiness
-// Returns composite weight that's better than IDF alone
-function getTermWeight(term) {
-  const t = term.toLowerCase();
-  if (llrStmt) {
-    const row = llrStmt.get(t);
-    if (row) {
-      // Combine: log(LLR+1) for surprise, burstiness for topical concentration
-      // Normalize LLR to roughly same scale as IDF (IDF ∈ [1, 11])
-      const llrNorm = Math.log(row.llr + 1) / 2;  // ~0-6 range
-      const burstBonus = Math.min(row.burstiness, 5) * 0.3; // topical terms get extra
-      return llrNorm + burstBonus + row.idf * 0.5;
+// Damp rare terms that don't belong with their query partners
+function dampRareTerm(query, term) {
+    if (!pmiStmt) return 1.0;
+    const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (words.length < 2) return 1.0;
+    
+    let totalPmi = 0;
+    for (const other of words) {
+        if (other === term) continue;
+        try {
+            const rows = pmiStmt.all(term);
+            const match = rows.find(r => r.assoc === other);
+            if (match && match.pmi > 0) totalPmi += match.pmi;
+        } catch {}
     }
-  }
-  return getIdf(t);
+    const avgPmi = totalPmi / (words.length - 1);
+    // Coherence = sigmoid(PMI - 2). PMI > 3 → no damping, PMI < 1 → heavy damping
+    const coherence = 1 / (1 + Math.exp(-(avgPmi - 2)));
+    return Math.max(0.15, coherence);
 }
 
-// LLR-weighted query importance: returns Map<term, weight> normalized to sum=1
+function getTermWeight(term, query = null) {
+    const t = term.toLowerCase();
+    let baseWeight = 0;
+    
+    if (llrStmt) {
+        const row = llrStmt.get(t);
+        if (row) {
+            const llrNorm = Math.log(row.llr + 1) / 2;
+            const burstBonus = Math.min(row.burstiness, 5) * 0.3;
+            baseWeight = llrNorm + burstBonus + row.idf * 0.5;
+        } else {
+            baseWeight = getIdf(t);
+        }
+    } else {
+        baseWeight = getIdf(t);
+    }
+    
+    // Apply damping if query is provided
+    if (query) {
+        const damp = dampRareTerm(query, t);
+        baseWeight = baseWeight * damp;
+    }
+    
+    return baseWeight;
+}
+
 function queryTermWeights(query) {
-  const terms = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
-  const weights = new Map();
-  let total = 0;
-  for (const t of terms) {
-    const w = getTermWeight(t);
-    weights.set(t, w);
-    total += w;
-  }
-  if (total > 0) {
-    for (const [t, w] of weights) weights.set(t, w / total);
-  }
-  return weights;
+    const terms = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
+    const weights = new Map();
+    let total = 0;
+    for (const t of terms) {
+        const w = getTermWeight(t, query);  // Pass query for damping
+        weights.set(t, w);
+        total += w;
+    }
+    if (total > 0) {
+        for (const [t, w] of weights) weights.set(t, w / total);
+    }
+    return weights;
 }
 
 function buildSalientAnchorPhrases(words, termWeights) {
@@ -1782,14 +1502,12 @@ function buildSalientAnchorPhrases(words, termWeights) {
   const seen = new Set();
   const meanWeight = termWeights.size > 0 ? 1 / termWeights.size : 0;
   const salientThreshold = Math.max(0.11, meanWeight * 1.15);
-
   for (let start = 0; start < words.length; start++) {
     for (let len = 2; len <= 4 && start + len <= words.length; len++) {
       const slice = words.slice(start, start + len);
       const phrase = slice.join(' ');
       if (seen.has(phrase)) continue;
       seen.add(phrase);
-
       let weightSum = 0;
       let maxWeight = 0;
       let hasDigits = false;
@@ -1805,50 +1523,26 @@ function buildSalientAnchorPhrases(words, termWeights) {
           salientWeights.push(weight);
         }
       }
-
       const avgWeight = weightSum / Math.max(1, slice.length);
       salientWeights.sort((a, b) => b - a);
       const coreWeight = salientWeights.slice(0, 2).reduce((sum, weight) => sum + weight, 0);
       const phraseScore = coreWeight + avgWeight * 0.35 + maxWeight * 0.25 + Math.max(0, len - 2) * 0.04;
-      // Keep only windows with concentrated query evidence; connective scaffolding
-      // rarely contains 2+ salient terms, while "ten thousand each" and
-      // "work and glory" do.
       if (!hasDigits && salientTermCount < 2) continue;
       if (weightSum < 0.22 && avgWeight < 0.12 && !hasDigits) continue;
-
-      phrases.push({
-        phrase,
-        score: phraseScore,
-        len,
-        start,
-        anchor: true,
-        structural: hasDigits,
-        salientTermCount,
-        avgWeight,
-        maxWeight,
-      });
+      phrases.push({ phrase, score: phraseScore, len, start, anchor: true, structural: hasDigits, salientTermCount, avgWeight, maxWeight });
     }
   }
-
   return phrases;
 }
 
 function extractAnchorPhrases(query, termWeights, maxPhrases = 8) {
-  const words = query
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1);
-
+  const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
   if (words.length < 3) return [];
-
   const scored = buildSalientAnchorPhrases(words, termWeights);
   if (scored.length === 0) return [];
-
   const chosen = [];
   const seen = new Set();
   scored.sort((a, b) => b.score - a.score || b.len - a.len || a.start - b.start);
-
   const overlapRatio = (left, right) => {
     const leftEnd = left.start + left.len - 1;
     const rightEnd = right.start + right.len - 1;
@@ -1856,7 +1550,6 @@ function extractAnchorPhrases(query, termWeights, maxPhrases = 8) {
     if (overlap <= 0) return 0;
     return overlap / Math.min(left.len, right.len);
   };
-
   for (const item of scored) {
     if (seen.has(item.phrase)) continue;
     const overlapsStrongly = chosen.some(existing => overlapRatio(existing, item) > 0.55);
@@ -1865,7 +1558,6 @@ function extractAnchorPhrases(query, termWeights, maxPhrases = 8) {
     chosen.push(item);
     if (chosen.length >= maxPhrases) break;
   }
-
   if (chosen.length < maxPhrases) {
     for (const item of scored) {
       if (seen.has(item.phrase)) continue;
@@ -1879,54 +1571,24 @@ function extractAnchorPhrases(query, termWeights, maxPhrases = 8) {
 
 function buildFocusedAnchorQuery(candidate, termWeights) {
   if (!candidate || !candidate.phrase) return '';
-  const tokens = String(candidate.phrase)
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(t => t.length > 1)
-    .map((term, index) => ({ term, index, weight: termWeights.get(term) || 0 }))
-    .filter(({ term }, idx, arr) => arr.findIndex(item => item.term === term) === idx);
+  const tokens = String(candidate.phrase).toLowerCase().split(/\s+/).filter(t => t.length > 1).map((term, index) => ({ term, index, weight: termWeights.get(term) || 0 })).filter(({ term }, idx, arr) => arr.findIndex(item => item.term === term) === idx);
   if (tokens.length < 2) return '';
-
   const maxWeight = tokens.reduce((best, item) => Math.max(best, item.weight), 0);
-  const selected = tokens
-    .filter(item => item.weight >= maxWeight * 0.55)
-    .sort((a, b) => a.index - b.index)
-    .slice(0, 3);
-
+  const selected = tokens.filter(item => item.weight >= maxWeight * 0.55).sort((a, b) => a.index - b.index).slice(0, 3);
   if (selected.length < 2) {
-    return tokens
-      .sort((a, b) => b.weight - a.weight || a.index - b.index)
-      .slice(0, 2)
-      .sort((a, b) => a.index - b.index)
-      .map(item => item.term)
-      .join(' ');
+    return tokens.sort((a, b) => b.weight - a.weight || a.index - b.index).slice(0, 2).sort((a, b) => a.index - b.index).map(item => item.term).join(' ');
   }
-
   return selected.map(item => item.term).join(' ');
 }
 
 const STRONG_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and', 'prefix', 'content-and']);
 const SHORT_QUERY_PHRASE_MATCH_TYPES = new Set(['phrase', 'near']);
-// 'content-and' excluded: matching top-K IDF terms in any order is too broad for Tier 2
-// phrase-hit promotion; those results remain in pool via FTS lane at Tier 5.
 const LONG_QUERY_PHRASE_MATCH_TYPES = new Set(['phrase', 'near', 'and']);
-const PHRASE_MATCH_STRENGTH = {
-  phrase: 1.0,
-  near: 0.92,
-  and: 0.84,
-  prefix: 0.6,
-};
+const PHRASE_MATCH_STRENGTH = { phrase: 1.0, near: 0.92, and: 0.84, prefix: 0.6 };
 
 function weightedLexicalCoverage(query, row, termWeights) {
   if (!row || !row.scripture_text) return 0;
-  const verseTerms = new Set(
-    String(row.scripture_text)
-      .toLowerCase()
-      .replace(/[^a-z0-9\-\s]/g, ' ')
-      .split(/\s+/)
-      .filter(t => t.length > 1)
-  );
-
+  const verseTerms = new Set(String(row.scripture_text).toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(t => t.length > 1));
   let matched = 0;
   let total = 0;
   for (const [term, weight] of termWeights) {
@@ -1938,21 +1600,12 @@ function weightedLexicalCoverage(query, row, termWeights) {
 
 function anchorWindowScore(text, anchorPhrases, termWeights) {
   if (!text || !anchorPhrases || anchorPhrases.length === 0) return 0;
-  const textTerms = String(text)
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1);
+  const textTerms = String(text).toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
   if (textTerms.length === 0) return 0;
-
   let best = 0;
   for (const candidate of anchorPhrases) {
-    const phraseTerms = String(candidate.phrase || '')
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(t => t.length > 1);
+    const phraseTerms = String(candidate.phrase || '').toLowerCase().split(/\s+/).filter(t => t.length > 1);
     if (phraseTerms.length < 2) continue;
-
     let first = -1;
     let prev = -1;
     let matched = 0;
@@ -1967,7 +1620,6 @@ function anchorWindowScore(text, anchorPhrases, termWeights) {
       matched += 1;
     }
     if (matched !== phraseTerms.length || first === -1 || prev === -1) continue;
-
     const span = Math.max(1, prev - first + 1);
     const compactness = matched / span;
     const weightSum = phraseTerms.reduce((sum, term) => sum + (termWeights.get(term) || 0), 0);
@@ -1975,30 +1627,19 @@ function anchorWindowScore(text, anchorPhrases, termWeights) {
     const score = compactness * (0.55 + salience * 0.45);
     if (score > best) best = score;
   }
-
   return best;
 }
 
 function querySequenceScore(query, text, termWeights) {
   if (!query || !text) return 0;
-  const queryTerms = String(query)
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1);
-  const textTerms = String(text)
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 1);
+  const queryTerms = String(query).toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
+  const textTerms = String(text).toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
   if (queryTerms.length < 3 || textTerms.length === 0) return 0;
-
   let first = -1;
   let prev = -1;
   let matchedTerms = 0;
   let matchedWeight = 0;
   let totalWeight = 0;
-
   for (const term of queryTerms) {
     const weight = termWeights.get(term) || 0;
     totalWeight += weight;
@@ -2009,7 +1650,6 @@ function querySequenceScore(query, text, termWeights) {
     matchedTerms += 1;
     matchedWeight += weight;
   }
-
   if (matchedTerms < 2 || matchedWeight <= 0 || first === -1 || prev === -1) return 0;
   const span = Math.max(1, prev - first + 1);
   const compactness = matchedTerms / span;
@@ -2031,11 +1671,7 @@ function lexicalSignalQuality(query, ftsRows, termWeights) {
 }
 
 function isStructuredMultiWordQuery(query, anchorPhrases = []) {
-  const words = String(query || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
+  const words = String(query || '').toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').split(/\s+/).filter(Boolean);
   if (words.length < 4) return false;
   return anchorPhrases.length > 0 || words.length >= 5;
 }
@@ -2051,9 +1687,7 @@ function median(values) {
   if (!values || values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
 function interquartileRange(values) {
@@ -2070,7 +1704,6 @@ function sigmoid(value) {
 
 function computeRelevanceProbability(row, intentType = null, confidence = 0) {
   if (!row) return 0;
-
   const specificityScore = row._specificity_score || 0;
   const tier = row._tier ?? 5;
   const semantic = Math.max(0, row.similarity_score || 0);
@@ -2089,33 +1722,10 @@ function computeRelevanceProbability(row, intentType = null, confidence = 0) {
   const lexicalDominanceBoost = lexical >= 0.72 ? (lexical - 0.72) * 1.9 : 0;
   const sequenceBoost = sequence >= 0.28 ? (sequence - 0.28) * 1.1 : 0;
   const specificityFloorBoost = specificityScore >= 1.55 ? (specificityScore - 1.55) * 0.9 : 0;
-
   let intentBias = 0;
   if (intentType === 'reference' || intentType === 'phrase') intentBias += 0.18;
-  if (intentType === 'conceptual' || intentType === 'situational' || intentType === 'mixed') {
-    intentBias += 0.1;
-  }
-
-  const logit =
-    -4.7
-    + specificityScore * 1.18
-    + tierSignal * 0.38
-    + semantic * 2.05
-    + lexical * 2.0
-    + anchor * 1.0
-    + sequence * 1.15
-    + phraseCoverage * 0.55
-    + graphPropagation * 0.42
-    + structurePrior * 4.5
-    + sourceBonus
-    + phraseBoost
-    + topicalBoost
-    + confidenceBoost
-    + lexicalDominanceBoost
-    + sequenceBoost
-    + specificityFloorBoost
-    + intentBias;
-
+  if (intentType === 'conceptual' || intentType === 'situational' || intentType === 'mixed') intentBias += 0.1;
+  const logit = -4.7 + specificityScore * 1.18 + tierSignal * 0.38 + semantic * 2.05 + lexical * 2.0 + anchor * 1.0 + sequence * 1.15 + phraseCoverage * 0.55 + graphPropagation * 0.42 + structurePrior * 4.5 + sourceBonus + phraseBoost + topicalBoost + confidenceBoost + lexicalDominanceBoost + sequenceBoost + specificityFloorBoost + intentBias;
   return +sigmoid(logit).toFixed(4);
 }
 
@@ -2132,13 +1742,11 @@ function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0)
   const strongestTier = results[0]?._tier ?? 5;
   if (strongestTier > 3) return null;
   if (intentType === 'reference' || intentType === 'phrase') return null;
-
   const capped = results.slice(0, Math.min(results.length, 24));
   const scores = capped.map(r => r._specificity_score || 0);
   const gaps = [];
   for (let i = 0; i < scores.length - 1; i++) gaps.push(scores[i] - scores[i + 1]);
   if (gaps.length < 3) return null;
-
   const medianGap = median(gaps);
   const gapMad = median(gaps.map(g => Math.abs(g - medianGap)));
   const gapSigma = Math.max(gapMad * 1.4826, 0.02);
@@ -2147,7 +1755,6 @@ function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0)
   const maxScore = scores[0];
   const expScores = scores.map(score => Math.exp((score - maxScore) / softmaxTemp));
   const totalMass = expScores.reduce((sum, value) => sum + value, 0) || 1;
-
   let cumulativeMass = 0;
   let best = null;
   for (let i = 0; i < gaps.length; i++) {
@@ -2155,7 +1762,6 @@ function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0)
     const keepCount = i + 1;
     const remaining = capped.length - keepCount;
     if (keepCount < 2 || remaining < 3) continue;
-
     const gap = gaps[i];
     const gapZ = (gap - medianGap) / gapSigma;
     const head = capped.slice(0, keepCount);
@@ -2166,36 +1772,20 @@ function computeAdaptiveResultCutoff(results, intentType = null, confidence = 0)
     const semanticMargin = headMeaning - tailMeaning;
     const confidenceFactor = 0.8 + Math.min(0.2, Math.max(0, confidence) * 0.2);
     const support = gapZ * (1 - tailMass) * Math.max(semanticMargin, 0) * confidenceFactor;
-
     if (gapZ < 2.5 || tailMass > 0.35 || semanticMargin < 0.18) continue;
     if (!best || support > best.support) {
-      best = {
-        keepCount,
-        gap,
-        gapZ: +gapZ.toFixed(3),
-        tailMass: +tailMass.toFixed(3),
-        headMeaning: +headMeaning.toFixed(3),
-        tailMeaning: +tailMeaning.toFixed(3),
-        support: +support.toFixed(3),
-      };
+      best = { keepCount, gap, gapZ: +gapZ.toFixed(3), tailMass: +tailMass.toFixed(3), headMeaning: +headMeaning.toFixed(3), tailMeaning: +tailMeaning.toFixed(3), support: +support.toFixed(3) };
     }
   }
-
   if (!best || best.support < 0.9) return null;
   return best;
 }
 
-// Detect significant phrases in query using pre-baked bigram LLR scores.
-// Chains overlapping significant bigrams into longer phrases (trigrams, 4-grams, etc.)
-// e.g., "thou art" + "art my" + "my son" → "thou art my son"
-// Also includes the full query as a candidate if 3+ words.
 function detectSignificantPhrases(query) {
   if (!llrStmt) return [];
   const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
   if (words.length < 2) return [];
-
-  // Step 1: find which adjacent bigrams are significant
-  const sigBigrams = []; // array of booleans: sigBigrams[i] = true if words[i]+words[i+1] is significant
+  const sigBigrams = [];
   for (let i = 0; i < words.length - 1; i++) {
     const bigram = words[i] + ' ' + words[i + 1];
     let sig = false;
@@ -2205,9 +1795,6 @@ function detectSignificantPhrases(query) {
     } catch {}
     sigBigrams.push(sig);
   }
-
-  // Step 2: chain overlapping significant bigrams into longer phrases
-  // If bigrams at positions [0,1,2] are all significant → words[0..3] form a 4-gram
   const phrases = [];
   let chainStart = -1;
   for (let i = 0; i <= sigBigrams.length; i++) {
@@ -2215,42 +1802,20 @@ function detectSignificantPhrases(query) {
       if (chainStart === -1) chainStart = i;
     } else {
       if (chainStart !== -1) {
-        const chainEnd = i; // last significant bigram was at i-1, covering words[i-1..i]
+        const chainEnd = i;
         const phrase = words.slice(chainStart, chainEnd + 1).join(' ');
-        // Also include sub-bigrams for shorter phrase matching
-        if (chainEnd - chainStart >= 2) {
-          // This is a 3+ word phrase — add it
-          phrases.push({ phrase, llr: 0, len: chainEnd - chainStart + 1 });
-        }
-        // Add constituent bigrams too
-        for (let j = chainStart; j < chainEnd; j++) {
-          phrases.push({ phrase: words[j] + ' ' + words[j + 1], llr: 0, len: 2 });
-        }
+        if (chainEnd - chainStart >= 2) phrases.push({ phrase, llr: 0, len: chainEnd - chainStart + 1 });
+        for (let j = chainStart; j < chainEnd; j++) phrases.push({ phrase: words[j] + ' ' + words[j + 1], llr: 0, len: 2 });
         chainStart = -1;
       }
     }
   }
-
-  // Step 3: always try the full query as an exact phrase for 2+ word queries
   const fullPhrase = words.join(' ');
-  if (!phrases.some(p => p.phrase === fullPhrase)) {
-    phrases.push({ phrase: fullPhrase, llr: 0, len: words.length });
-  }
-
-  // Deduplicate and sort: longer phrases first (more specific)
+  if (!phrases.some(p => p.phrase === fullPhrase)) phrases.push({ phrase: fullPhrase, llr: 0, len: words.length });
   const seen = new Set();
-  return phrases.filter(p => {
-    if (seen.has(p.phrase)) return false;
-    seen.add(p.phrase);
-    return true;
-  }).sort((a, b) => b.len - a.len);
+  return phrases.filter(p => { if (seen.has(p.phrase)) return false; seen.add(p.phrase); return true; }).sort((a, b) => b.len - a.len);
 }
 
-// Bias-free query normalisation — identity pass-through.
-// This function deliberately does NOT expand or substitute vocabulary.
-// Keyword/synonym steering is done exclusively by the pre-baked PMI and
-// concept-embedding tables so that no handwritten theological lexicon ever
-// touches the search path.
 function normalizeQueryTokens(query) {
   if (query == null) return [''];
   const normalized = String(query).trim().toLowerCase();
@@ -2258,14 +1823,10 @@ function normalizeQueryTokens(query) {
   return [normalized];
 }
 
-// PMI-based query expansion: find statistically associated terms
-// Now handles both unigrams AND bigrams (phrase-aware)
 function expandWithPmi(query) {
   if (!pmiStmt) return [];
   const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
-  const expansions = new Map(); // term → max PMI score
-
-  // Expand individual words
+  const expansions = new Map();
   for (const w of words) {
     try {
       const rows = pmiStmt.all(w);
@@ -2277,141 +1838,61 @@ function expandWithPmi(query) {
       }
     } catch {}
   }
-
-  // Expand detected bigrams (phrase-aware expansion)
   for (let i = 0; i < words.length - 1; i++) {
     const bigram = words[i] + ' ' + words[i + 1];
     try {
       const rows = pmiStmt.all(bigram);
       for (const r of rows) {
         if (r.cooccur >= 3 && r.pmi > 0.10) {
-          // Bigram associations are higher quality — slightly lower threshold
           const existing = expansions.get(r.assoc) || 0;
           if (r.pmi > existing) expansions.set(r.assoc, r.pmi);
         }
       }
     } catch {}
   }
-
-  // Return sorted by PMI, excluding original query terms
   const querySet = new Set(words);
-  return [...expansions.entries()]
-    .filter(([t]) => !querySet.has(t))
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([t, pmi]) => ({ term: t, pmi }));
+  return [...expansions.entries()].filter(([t]) => !querySet.has(t)).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, pmi]) => ({ term: t, pmi }));
 }
 
-// ── Sigmoid / Softmax confidence gate (Calculus) ──
-// σ(x) = 1 / (1 + e^(-α(x - θ)))
-// Returns [0,1]: how confident we are that FTS results are sufficient
 function sigmoidConfidence(topBm25Score, resultCount) {
-  // BM25 scores are negative in SQLite (lower = better); normalize to positive
   const normalizedScore = topBm25Score ? Math.abs(topBm25Score) : 0;
-  // Score component: high absolute BM25 → high confidence
   const scoreConf = 1 / (1 + Math.exp(-2 * (normalizedScore - 5)));
-  // Count component: many results → high confidence
   const countConf = 1 / (1 + Math.exp(-0.15 * (resultCount - 15)));
-  // Combined: geometric mean
   return Math.sqrt(scoreConf * countConf);
 }
 
-// ── Multi-dimensional query intent classification ─────────────────────────────
-// Returns { type, subtype, entityMatch, display }
-//
-//  type        display       when
-//  ─────────────────────────────────────────────────────────────────────────────
-//  reference   Reference     parseScriptureReference succeeded (caller sets this)
-//  entity      Person/Place  query contains a known person or place name
-// ─────────────────────────────────────────────────────────────────────────────
-// Pure-geometric query intent classification
-//
-// Intent types and their meanings:
-//   reference   Scripture reference (e.g. "John 3:16") — detected before this func
-//   entity      A named person or place found in the corpus entity index
-//   conceptual  Query vector sits close to a well-defined semantic cluster
-//   situational Moderate cluster affinity + multi-word → navigating topic space
-//   keyword     Strong BM25 signal — corpus can answer directly
-//   mixed       Ambiguous: balanced BM25 + semantic
-//
-// Classification uses ONLY:
-//   (a) confidence      — BM25 sigmoid score (pure corpus statistics)
-//   (b) topClusterSim   — cosine distance from nearest cluster centroid
-//   (c) clusterGap      — separation between top-2 cluster sims (ambiguity signal)
-//   (d) wordCount       — query length (structural, not vocabulary-dependent)
-//   (e) entity indexes  — pre-built geometric nearest-neighbour structures
-//
-// No topic keywords. No handwritten theological synonym steering.
-// ─────────────────────────────────────────────────────────────────────────────
 function classifyQueryIntent(query, confidence, qvec) {
   const words = query.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length > 1);
   const wordCount = words.length;
-
-  // ── Step 1: Entity detection (embedding-space nearest-neighbour lookup) ──
-  // Long phrase-fragment queries should not be hijacked by incidental noun matches
-  // such as "foundation" or "glory" appearing in person/place indexes.
   if (entitiesReady && wordCount <= 2) {
-    for (const w of words) {
-      if (entityPersonIndex.has(w))
-        return { type: 'entity', subtype: 'person', entityMatch: w, display: 'Person' };
-    }
-    for (let i = 0; i < words.length - 1; i++) {
-      const bigram = `${words[i]} ${words[i + 1]}`;
-      if (entityPersonIndex.has(bigram))
-        return { type: 'entity', subtype: 'person', entityMatch: bigram, display: 'Person' };
-    }
-    for (const w of words) {
-      if (entityPlaceIndex.has(w))
-        return { type: 'entity', subtype: 'place', entityMatch: w, display: 'Place' };
-    }
+    for (const w of words) { if (entityPersonIndex.has(w)) return { type: 'entity', subtype: 'person', entityMatch: w, display: 'Person' }; }
+    for (let i = 0; i < words.length - 1; i++) { const bigram = `${words[i]} ${words[i + 1]}`; if (entityPersonIndex.has(bigram)) return { type: 'entity', subtype: 'person', entityMatch: bigram, display: 'Person' }; }
+    for (const w of words) { if (entityPlaceIndex.has(w)) return { type: 'entity', subtype: 'place', entityMatch: w, display: 'Place' }; }
   }
-
-  // ── Step 2: Query geometry in embedding space ──
   if (qvec) {
-    const topClusters    = clusterCentroidIndex.length ? nearestClusters(qvec, 2) : [];
-    const topClusterSim  = topClusters[0]?.similarity ?? 0;
-    const secondSim      = topClusters[1]?.similarity ?? 0;
-    // clusterGap: large → query points clearly at one concept; small → ambiguous boundary
-    const clusterGap     = topClusterSim - secondSim;
-
-    // Strong BM25 confidence → corpus text matches well → keyword routing
-    if (confidence >= 0.70)
-      return { type: 'keyword', subtype: 'bm25', entityMatch: null, display: 'Keyword' };
-
-    // Clear cluster membership + low BM25 → pure semantic/conceptual
-    if (topClusterSim > 0.55 && clusterGap > 0.07 && confidence < 0.60)
-      return { type: 'conceptual', subtype: 'cluster', entityMatch: null, display: 'Semantic' };
-
-    // Moderate cluster affinity + multi-word → situational/topical navigation
-    if (topClusterSim > 0.38 && wordCount >= 2 && confidence < 0.55)
-      return { type: 'situational', subtype: 'topical', entityMatch: null, display: 'Situational' };
-
-    // Balanced confidence → mixed signal
-    if (confidence >= 0.40)
-      return { type: 'mixed', subtype: 'hybrid', entityMatch: null, display: 'Expanded' };
-
-    // Weak confidence, some cluster presence → conceptual/embedding
-    if (topClusterSim > 0.28 || confidence < 0.30)
-      return { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic' };
+    const topClusters = clusterCentroidIndex.length ? nearestClusters(qvec, 2) : [];
+    const topClusterSim = topClusters[0]?.similarity ?? 0;
+    const secondSim = topClusters[1]?.similarity ?? 0;
+    const clusterGap = topClusterSim - secondSim;
+    if (confidence >= 0.70) return { type: 'keyword', subtype: 'bm25', entityMatch: null, display: 'Keyword' };
+    if (topClusterSim > 0.55 && clusterGap > 0.07 && confidence < 0.60) return { type: 'conceptual', subtype: 'cluster', entityMatch: null, display: 'Semantic' };
+    if (topClusterSim > 0.38 && wordCount >= 2 && confidence < 0.55) return { type: 'situational', subtype: 'topical', entityMatch: null, display: 'Situational' };
+    if (confidence >= 0.40) return { type: 'mixed', subtype: 'hybrid', entityMatch: null, display: 'Expanded' };
+    if (topClusterSim > 0.28 || confidence < 0.30) return { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic' };
   }
-
-  // ── Step 3: Confidence-only fallback (embedding pipeline not yet ready) ──
-  if (confidence >= 0.60) return { type: 'keyword',    subtype: 'bm25',      entityMatch: null, display: 'Keyword'    };
-  if (confidence >= 0.30) return { type: 'mixed',      subtype: 'hybrid',    entityMatch: null, display: 'Expanded'   };
-  return                         { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic'   };
+  if (confidence >= 0.60) return { type: 'keyword', subtype: 'bm25', entityMatch: null, display: 'Keyword' };
+  if (confidence >= 0.30) return { type: 'mixed', subtype: 'hybrid', entityMatch: null, display: 'Expanded' };
+  return { type: 'conceptual', subtype: 'embedding', entityMatch: null, display: 'Semantic' };
 }
 
 function refineIntentWithTopicSignals(intentClass, queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch) {
   if (!intentClass) return intentClass;
-
   if (hasExactTopicMatch && queryWordCount <= 2 && (intentClass.type === 'keyword' || intentClass.type === 'mixed')) {
     return { type: 'conceptual', subtype: 'topical-guide-exact', entityMatch: null, display: 'Semantic' };
   }
-
   if (topicGuideHitCount > 0 && queryWordCount <= 3 && lexicalQuality < 0.6 && (intentClass.type === 'keyword' || intentClass.type === 'mixed')) {
     return { type: 'situational', subtype: 'topical-guide-probe', entityMatch: null, display: 'Situational' };
   }
-
   return intentClass;
 }
 
@@ -2430,23 +1911,20 @@ function shouldUseWeakStructurePrior(intentType, queryWordCount, lexicalQuality)
 function computeWeakStructurePrior(row, intentType, queryWordCount, lexicalQuality) {
   if (!row || !shouldUseWeakStructurePrior(intentType, queryWordCount, lexicalQuality)) return 0;
   if (row._directQueryMatch || row._anchorPhraseMatch) return 0;
-
   const pagerank = normalizedPageRankScore(row.verse_id);
   const graphConsensus = Math.min(1, Math.max(0, (row._sourceCount || 1) - 1) / 3);
   const topical = Math.min(1, Math.max(0, row._topicSignal || 0));
   const qppr = Math.min(1, Math.max(0, row._qpprScore || 0));
   const spectral = Math.min(1, Math.max(0, row._spectralSim || 0));
-
   const blended = pagerank * 0.45 + graphConsensus * 0.2 + topical * 0.15 + qppr * 0.12 + spectral * 0.08;
   const maxPrior = intentType === 'conceptual' ? 0.07 : 0.05;
   return Math.min(maxPrior, blended * maxPrior);
 }
 
-// ── Reciprocal Rank Fusion (Algebra): merge ranked lists without weight tuning ──
-// score(d) = Σ_source 1/(k + rank_in_source)   k=60 (Cormack et al. 2009)
 const RRF_K = 60;
+
 function reciprocalRankFusion(rankedLists, queryTopicSlugs = [], listWeights = null) {
-  const scores = new Map(); // verse_id → { rrfScore, row, sources: Set }
+  const scores = new Map();
   for (let li = 0; li < rankedLists.length; li++) {
     const list = rankedLists[li];
     const w = (listWeights && listWeights[li]) || 1;
@@ -2459,21 +1937,13 @@ function reciprocalRankFusion(rankedLists, queryTopicSlugs = [], listWeights = n
         entry.rrfScore += rrf;
         entry.sources.add(item._source || 'unknown');
       } else {
-        scores.set(vid, {
-          rrfScore: rrf,
-          row: item,
-          sources: new Set([item._source || 'unknown']),
-        });
+        scores.set(vid, { rrfScore: rrf, row: item, sources: new Set([item._source || 'unknown']) });
       }
     }
   }
-  // Multi-source bonus: verses found in 2+ sources get a boost (cross-validation signal)
   for (const [vid, entry] of scores) {
     if (entry.sources.size >= 3) entry.rrfScore *= 1.4;
     else if (entry.sources.size >= 2) entry.rrfScore *= 1.2;
-
-    // Topic-Personalized PageRank boost (query-aware authority)
-    // PPR values ~0.001-0.04; RRF scores ~0.01-0.05; use as gentle re-rank signal
     if (pprStmt && queryTopicSlugs.length > 0) {
       let bestPpr = 0;
       for (const slug of queryTopicSlugs) {
@@ -2482,42 +1952,23 @@ function reciprocalRankFusion(rankedLists, queryTopicSlugs = [], listWeights = n
           if (row && row.ppr > bestPpr) bestPpr = row.ppr;
         } catch {}
       }
-      if (bestPpr > 0) entry.rrfScore += bestPpr * 0.5; // ~0.0005-0.02 boost
+      if (bestPpr > 0) entry.rrfScore += bestPpr * 0.5;
     }
   }
   return scores;
 }
 
-// ── Maximal Marginal Relevance with Adaptive λ (Entropy-Driven) ─────────────
-// MMR(d) = λ·sim(d,q) − (1−λ)·max_j(sim(d, d_j_selected))
-//
-// λ adapts based on query entropy H of the similarity distribution:
-//   H = −Σ p_i · ln(p_i)   where p_i = max(0, sim_i) / Σ max(0, sim_j)
-//   High H → many similar results → lower λ → more diversity
-//   Low H  → one clear match   → higher λ → trust relevance
-//   λ = 0.5 + 0.4 · σ(−2·(H − H_MEDIAN))
 const MMR_H_MEDIAN = 3.0;
 
 function mmrRerank(candidates, qvec, lambdaOverride = null, limit = 50) {
   if (!qvec || !embeddingsReady || candidates.length <= 1) return candidates;
-
-  // Pre-limit to top candidates by RRF score for performance
   const topN = Math.min(candidates.length, Math.max(limit * 2, 100));
   const pool = candidates.slice(0, topN).map(c => {
     const vec = embeddingCache.get(c.verse_id);
     let sim = vec ? cosineSimilarity(qvec, vec) : (c.similarity_score || 0);
-    // Blend spectral graph similarity if available
-    if (spectralReady && c._spectralSim != null) {
-      sim = (1 - SPECTRAL_BLEND) * sim + SPECTRAL_BLEND * c._spectralSim;
-    }
-    return {
-      ...c,
-      _vec: vec || null,
-      simToQuery: sim,
-    };
+    if (spectralReady && c._spectralSim != null) sim = (1 - SPECTRAL_BLEND) * sim + SPECTRAL_BLEND * c._spectralSim;
+    return { ...c, _vec: vec || null, simToQuery: sim };
   });
-
-  // Compute adaptive λ from similarity distribution entropy
   let lambda;
   if (lambdaOverride !== null) {
     lambda = lambdaOverride;
@@ -2530,24 +1981,19 @@ function mmrRerank(candidates, qvec, lambdaOverride = null, limit = 50) {
         const p = s / simSum;
         if (p > 1e-12) H -= p * Math.log(p);
       }
-      // Sigmoid mapping: H high → λ low (more diversity), H low → λ high (relevance)
       lambda = 0.5 + 0.4 / (1.0 + Math.exp(2.0 * (H - MMR_H_MEDIAN)));
     } else {
-      lambda = 0.9; // few results → trust relevance
+      lambda = 0.9;
     }
   }
-
   const selected = [];
-  const selVecs = []; // cache selected vectors
-
+  const selVecs = [];
   while (selected.length < limit && pool.length > 0) {
     let bestIdx = -1;
     let bestMmr = -Infinity;
-
     for (let i = 0; i < pool.length; i++) {
       const cand = pool[i];
       let maxSimToSelected = 0;
-      // Only compare against recent selections (last 8) for speed
       if (cand._vec && selVecs.length > 0) {
         const checkLen = Math.min(selVecs.length, 8);
         for (let j = selVecs.length - checkLen; j < selVecs.length; j++) {
@@ -2559,12 +2005,8 @@ function mmrRerank(candidates, qvec, lambdaOverride = null, limit = 50) {
       }
       const mmr = lambda * cand.simToQuery - (1 - lambda) * maxSimToSelected;
       const combined = mmr + (cand._rrfScore || 0) * 2.0;
-      if (combined > bestMmr) {
-        bestMmr = combined;
-        bestIdx = i;
-      }
+      if (combined > bestMmr) { bestMmr = combined; bestIdx = i; }
     }
-
     if (bestIdx >= 0) {
       const chosen = pool.splice(bestIdx, 1)[0];
       selVecs.push(chosen._vec);
@@ -2574,26 +2016,18 @@ function mmrRerank(candidates, qvec, lambdaOverride = null, limit = 50) {
   return selected;
 }
 
-// ── Chapter aggregation (Statistics): surface hidden gems via chapter-level scoring ──
-// chapterScore = Σ verseScores / √n (Luhn normalization)
 function chapterAggregate(verseScores) {
-  const chapters = new Map(); // chapter_id → { verses: [], totalScore, bestVerse }
+  const chapters = new Map();
   for (const [vid, entry] of verseScores) {
     const meta = verseMetaCache.get(vid);
     if (!meta) continue;
     const chId = meta.chapter_id;
-    if (!chapters.has(chId)) {
-      chapters.set(chId, { verses: [], totalScore: 0, bestVerse: null, bestScore: 0 });
-    }
+    if (!chapters.has(chId)) chapters.set(chId, { verses: [], totalScore: 0, bestVerse: null, bestScore: 0 });
     const ch = chapters.get(chId);
     ch.verses.push(vid);
     ch.totalScore += entry.rrfScore;
-    if (entry.rrfScore > ch.bestScore) {
-      ch.bestScore = entry.rrfScore;
-      ch.bestVerse = vid;
-    }
+    if (entry.rrfScore > ch.bestScore) { ch.bestScore = entry.rrfScore; ch.bestVerse = vid; }
   }
-  // Normalize by √n to avoid bias toward long chapters
   const chapterScores = [];
   for (const [chId, ch] of chapters) {
     const normalized = ch.totalScore / Math.sqrt(ch.verses.length);
@@ -2603,19 +2037,6 @@ function chapterAggregate(verseScores) {
   return chapterScores;
 }
 
-// ── Query-Personalized PageRank (QPPR) ──────────────────────────────────────
-// Seeds a random walk from the top-K hits of the current query and propagates
-// authority through the kNN graph.  Only the local 2-hop subgraph (~1 000 nodes)
-// is touched at query time — the walk is O(seeds × fan-out × iters).
-//
-// Math:  r_{t+1} = α · A · r_t + (1-α) · seeds
-//   α = restart probability (0.85)
-//   A = row-normalised weighted adjacency (edge weight = cosine similarity)
-//   seeds = uniform over seed verse IDs
-//
-// Returns a Map<verse_id, normalised_score> for every node in the local subgraph.
-// Verses that are both semantically near the query AND structurally central to the
-// top results receive the highest scores.
 function queryPPR(seedRows, options = {}) {
   if (!db_graph || !seedRows || seedRows.length === 0) return new Map();
   try {
@@ -2626,79 +2047,46 @@ function queryPPR(seedRows, options = {}) {
     const crossRefLimit = options.crossRefLimit ?? 6;
     const topicEdgeLimit = options.topicEdgeLimit ?? 4;
     const queryTopicSlugs = Array.isArray(options.queryTopicSlugs) ? options.queryTopicSlugs : [];
-    const knnQ = db_graph.prepare(
-      `SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT ${knnLimit}`
-    );
-    const xrefQ = db_vxref
-      ? db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?')
-      : null;
+    const knnQ = db_graph.prepare(`SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT ${knnLimit}`);
+    const xrefQ = db_vxref ? db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?') : null;
     const topicRowsBySlug = new Map();
-
-    const seedEntries = seedRows
-      .map((seed) => {
-        if (typeof seed === 'number') return { verse_id: seed, weight: 1 };
-        if (!seed || !seed.verse_id) return null;
-        const lexical = Math.max(0, seed._lexicalCoverage || seed._phraseCoverage || 0);
-        const semantic = Math.max(0, seed.similarity_score || 0);
-        const phraseEvidence = seed._directQueryMatch || seed._anchorPhraseMatch ? 0.45 : 0;
-        const anchorEvidence = Math.max(0, seed._anchorWindowScore || 0) * 0.18;
-        const sequenceEvidence = Math.max(0, seed._sequenceScore || 0) * 0.16;
-        const sourceTrust = {
-          'fts-phrase': 0.38,
-          'fts': 0.32,
-          'semantic': 0.28,
-          'semantic-primary': 0.3,
-          'topical-guide': 0.24,
-          'cross-ref': 0.24,
-          'knn-expand': 0.18,
-          'rwr': 0.18,
-        }[seed._source] || 0.14;
-        const weight = 0.12 + lexical * 0.34 + semantic * 0.24 + phraseEvidence + anchorEvidence + sequenceEvidence + sourceTrust;
-        return { verse_id: seed.verse_id, weight };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, options.seedLimit || 8);
-
+    const seedEntries = seedRows.map((seed) => {
+      if (typeof seed === 'number') return { verse_id: seed, weight: 1 };
+      if (!seed || !seed.verse_id) return null;
+      const lexical = Math.max(0, seed._lexicalCoverage || seed._phraseCoverage || 0);
+      const semantic = Math.max(0, seed.similarity_score || 0);
+      const phraseEvidence = seed._directQueryMatch || seed._anchorPhraseMatch ? 0.45 : 0;
+      const anchorEvidence = Math.max(0, seed._anchorWindowScore || 0) * 0.18;
+      const sequenceEvidence = Math.max(0, seed._sequenceScore || 0) * 0.16;
+      const sourceTrust = { 'fts-phrase': 0.38, 'fts': 0.32, 'semantic': 0.28, 'semantic-primary': 0.3, 'topical-guide': 0.24, 'cross-ref': 0.24, 'knn-expand': 0.18, 'rwr': 0.18 }[seed._source] || 0.14;
+      const weight = 0.12 + lexical * 0.34 + semantic * 0.24 + phraseEvidence + anchorEvidence + sequenceEvidence + sourceTrust;
+      return { verse_id: seed.verse_id, weight };
+    }).filter(Boolean).sort((a, b) => b.weight - a.weight).slice(0, options.seedLimit || 8);
     if (seedEntries.length === 0) return new Map();
-
     const seedWeightSum = seedEntries.reduce((sum, seed) => sum + seed.weight, 0) || 1;
     const seedWeights = new Map(seedEntries.map((seed) => [seed.verse_id, seed.weight / seedWeightSum]));
     const seedIds = seedEntries.map((seed) => seed.verse_id);
-
-    const addEdge = (targetMap, neighborId, weight) => {
-      if (!neighborId || weight <= 0) return;
-      targetMap.set(neighborId, Math.max(targetMap.get(neighborId) || 0, weight));
-    };
-
+    const addEdge = (targetMap, neighborId, weight) => { if (!neighborId || weight <= 0) return; targetMap.set(neighborId, Math.max(targetMap.get(neighborId) || 0, weight)); };
     const collectNeighbors = (verseId) => {
       const merged = new Map();
-
       const knnRows = knnQ.all(verseId);
       for (let idx = 0; idx < knnRows.length; idx++) {
         const row = knnRows[idx];
         addEdge(merged, row.neighbor_id, Math.max(0, row.similarity) * Math.exp(-idx * 0.1));
       }
-
       if (xrefQ) {
         try {
           const xrRow = xrefQ.get(verseId);
           const refs = xrRow ? JSON.parse(xrRow.cross_references || '[]') : [];
-          for (let idx = 0; idx < Math.min(refs.length, crossRefLimit); idx++) {
-            addEdge(merged, refs[idx], 0.74 * Math.exp(-idx * 0.12));
-          }
+          for (let idx = 0; idx < Math.min(refs.length, crossRefLimit); idx++) addEdge(merged, refs[idx], 0.74 * Math.exp(-idx * 0.12));
         } catch {}
       }
-
       if (queryTopicSlugs.length > 0 && pprStmt && verseTopicCache.has(verseId)) {
         const verseTopics = verseTopicCache.get(verseId);
         for (const slug of queryTopicSlugs) {
           if (!verseTopics.has(slug)) continue;
           let rows = topicRowsBySlug.get(slug);
-          if (!rows) {
-            rows = pprStmt.all(slug).slice(0, Math.max(topicEdgeLimit * 2, 8));
-            topicRowsBySlug.set(slug, rows);
-          }
+          if (!rows) { rows = pprStmt.all(slug).slice(0, Math.max(topicEdgeLimit * 2, 8)); topicRowsBySlug.set(slug, rows); }
           let taken = 0;
           for (const row of rows) {
             if (row.verse_id === verseId) continue;
@@ -2708,34 +2096,23 @@ function queryPPR(seedRows, options = {}) {
           }
         }
       }
-
       return [...merged.entries()].map(([neighborId, weight]) => ({ n: neighborId, w: weight }));
     };
-
-    // BFS: collect local subgraph up to `hops` hops from seeds
-    const adjOut  = new Map(); // verse_id → [{n: neighbor_id, w: similarity}]
+    const adjOut = new Map();
     const visited = new Set(seedIds);
-    let frontier  = [...seedIds];
-
+    let frontier = [...seedIds];
     for (let hop = 0; hop < hops; hop++) {
       const next = [];
       for (const vid of frontier) {
         if (adjOut.has(vid)) continue;
         const rows = collectNeighbors(vid);
         adjOut.set(vid, rows);
-        for (const r of rows) {
-          if (!visited.has(r.n)) { visited.add(r.n); next.push(r.n); }
-        }
+        for (const r of rows) { if (!visited.has(r.n)) { visited.add(r.n); next.push(r.n); } }
       }
       frontier = next;
     }
-
-    // Initialise scores: seed nodes start with query-conditioned weights
-    const seedSet    = new Set(seedIds);
-    const scores     = new Map();
+    const scores = new Map();
     for (const vid of visited) scores.set(vid, seedWeights.get(vid) || 0);
-
-    // Power iteration
     for (let iter = 0; iter < iters; iter++) {
       const next = new Map();
       for (const vid of visited) next.set(vid, (1 - alpha) * (seedWeights.get(vid) || 0));
@@ -2743,39 +2120,24 @@ function queryPPR(seedRows, options = {}) {
         const r = scores.get(vid) || 0;
         if (r === 0) continue;
         const wSum = neighbors.reduce((s, nb) => s + nb.w, 0) || 1;
-        for (const nb of neighbors) {
-          next.set(nb.n, (next.get(nb.n) || 0) + alpha * r * (nb.w / wSum));
-        }
+        for (const nb of neighbors) next.set(nb.n, (next.get(nb.n) || 0) + alpha * r * (nb.w / wSum));
       }
       for (const [k, v] of next) scores.set(k, v);
     }
-
-    // Normalise: max → 1.0
     let maxScore = 0;
     for (const v of scores.values()) if (v > maxScore) maxScore = v;
     if (maxScore > 0) for (const [k, v] of scores) scores.set(k, v / maxScore);
-
     return scores;
   } catch { return new Map(); }
 }
 
-// ── Session centroid: EWMA of live verse embeddings ──────────────────────────
-// Exponentially Weighted Moving Average: recent verses carry more weight than
-// older ones, so the centroid adapts quickly when the service theme changes.
-//
-// Weight for verse at position i (0=most recent): α·(1-α)^i
-// α=0.4 means ~67% of signal comes from the last 2 verses.
-//
-// Returns a normalized Float32Array(768), or null if unavailable.
 const EWMA_ALPHA = 0.4;
 
 function sessionCentroid(liveHistory) {
   if (!embeddingsReady || !liveHistory || liveHistory.length === 0) return null;
   const dims = EMBED_DIM;
-  const acc  = new Float32Array(dims);
-  let   wSum = 0;
-
-  // liveHistory[0] is most recent
+  const acc = new Float32Array(dims);
+  let wSum = 0;
   for (let h = 0; h < liveHistory.length; h++) {
     const vec = embeddingCache.get(liveHistory[h]);
     if (!vec) continue;
@@ -2784,8 +2146,6 @@ function sessionCentroid(liveHistory) {
     wSum += w;
   }
   if (wSum === 0) return null;
-
-  // Normalize: divide by weight sum, then L2-normalize to unit sphere
   let mag = 0;
   for (let i = 0; i < dims; i++) { acc[i] /= wSum; mag += acc[i] * acc[i]; }
   mag = Math.sqrt(mag);
@@ -2793,60 +2153,37 @@ function sessionCentroid(liveHistory) {
   return acc;
 }
 
-// ── Semantic search: embed query text → cosine similarity against all verses ──
 async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new Set(), qvec = null) {
   if (!embeddingsReady || !embeddingPipe) return null;
   try {
     if (!qvec) {
       const out = await embeddingPipe(query, { pooling: 'mean', normalize: true });
-      // Use raw vectors — embeddingCache stores raw (ZCA whitening disabled)
       qvec = new Float32Array(out.data);
     }
-
     let hits = [];
     if (hnswIndex) {
-      // HNSW score = 1 − L2_dist (L2 is Euclidean distance between unit vectors).
-      // For unit-normalized vectors: cos_sim = 1 − L2² / 2
-      // So: cos_sim = 1 − (1 − score)² / 2
-      //
-      // The old filter `score <= 0` incorrectly treated cos_sim < 0.5 as irrelevant
-      // because score = 0 ↔ L2 = 1 ↔ cos_sim = 0.5, NOT cos_sim = 0.
-      // That silently dropped ALL results for paraphrase queries where the finest
-      // matching verse only reaches cosine ≈ 0.3–0.4 (perfectly relevant range).
-      // Fix: convert to actual cosine similarity and filter at a meaningful semantic floor.
       const seen = new Set();
-      const SEM_SEARCH_FLOOR = 0.05; // allow anything better than ~random (raw cosine ≈0.25 baseline)
-      hits = hnswIndex.query(qvec, 200, 150)
-        .filter((h) => {
-          // Convert L2-based score to cosine similarity
-          const cosSim = 1 - (1 - h.score) * (1 - h.score) / 2;
-          h.score = cosSim; // rewrite score to cosine for downstream correctness
-          if (cosSim < SEM_SEARCH_FLOOR || excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
-          seen.add(h.verse_id);
-          return true;
-        });
+      const SEM_SEARCH_FLOOR = 0.05;
+      hits = hnswIndex.query(qvec, 200, 150).filter((h) => {
+        const cosSim = 1 - (1 - h.score) * (1 - h.score) / 2;
+        h.score = cosSim;
+        if (cosSim < SEM_SEARCH_FLOOR || excludeIds.has(h.verse_id) || seen.has(h.verse_id)) return false;
+        seen.add(h.verse_id);
+        return true;
+      });
     } else {
       const scores = [];
       for (const [vid, vvec] of embeddingCache) {
         if (excludeIds.has(vid)) continue;
         const s = cosineSimilarity(qvec, vvec);
-        if (s <= 0) continue; // skip anti-correlated verses
+        if (s <= 0) continue;
         scores.push({ verse_id: vid, score: s });
       }
       scores.sort((a, b) => b.score - a.score);
       hits = scores.slice(0, 200);
     }
-
-    const stmtVerse = dba.prepare(`
-      SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
-      FROM scriptures WHERE verse_id = ?
-    `);
-
-    const results = hits.slice(page * pageSize, (page + 1) * pageSize).map(({ verse_id, score }) => {
-      const row = stmtVerse.get(verse_id);
-      return row ? { ...row, similarity_score: +score.toFixed(4), _source: 'semantic' } : null;
-    }).filter(Boolean);
-
+    const stmtVerse = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
+    const results = hits.slice(page * pageSize, (page + 1) * pageSize).map(({ verse_id, score }) => { const row = stmtVerse.get(verse_id); return row ? { ...row, similarity_score: +score.toFixed(4), _source: 'semantic' } : null; }).filter(Boolean);
     return { results, total: Math.min(hits.length, 200), page, pageSize, semantic: true };
   } catch (err) {
     fastify.log.warn('[SemanticSearch] failed:', err.message);
@@ -2854,9 +2191,6 @@ async function semanticSearch(query, page = 0, pageSize = 10, excludeIds = new S
   }
 }
 
-
-
-// ── HNSW approximate nearest neighbors index for quick semantic retrieval ──
 let hnswIndex = null;
 
 class HNSWIndex {
@@ -2869,21 +2203,11 @@ class HNSWIndex {
     this.maxLevel = -1;
     this.levelMultiplier = 1 / Math.log(1.0 * M);
   }
-
-  _dist(a, b) {
-    let sum = 0;
-    for (let i = 0; i < this.dims; i++) {
-      const d = a[i] - b[i];
-      sum += d * d;
-    }
-    return Math.sqrt(sum);
-  }
-
+  _dist(a, b) { let sum = 0; for (let i = 0; i < this.dims; i++) { const d = a[i] - b[i]; sum += d * d; } return Math.sqrt(sum); }
   _searchLayer(qvec, entryDist, entryIdx, ef, level) {
     const visited = new Set();
     const results = [[entryDist, entryIdx]];
     let candidates = [[entryDist, entryIdx]];
-
     while (candidates.length > 0) {
       candidates.sort((a, b) => a[0] - b[0]);
       const [dist, idx] = candidates.shift();
@@ -2903,29 +2227,15 @@ class HNSWIndex {
     }
     return results;
   }
-
   insert(id, vec) {
     const node = { id, vec, neighbors: new Map() };
     this.nodes.push(node);
     const idx = this.nodes.length - 1;
     const level = Math.floor(-Math.log(Math.random()) * this.levelMultiplier);
-
-    if (this.entryPoint === -1) {
-      this.entryPoint = idx;
-      this.maxLevel = level;
-      return;
-    }
-
+    if (this.entryPoint === -1) { this.entryPoint = idx; this.maxLevel = level; return; }
     let ep = this.entryPoint;
     let epDist = this._dist(vec, this.nodes[ep].vec);
-    for (let lc = this.maxLevel; lc > level; lc--) {
-      const layerResult = this._searchLayer(vec, epDist, ep, 1, lc);
-      if (layerResult.length > 0) {
-        ep = layerResult[0][1];
-        epDist = layerResult[0][0];
-      }
-    }
-
+    for (let lc = this.maxLevel; lc > level; lc--) { const layerResult = this._searchLayer(vec, epDist, ep, 1, lc); if (layerResult.length > 0) { ep = layerResult[0][1]; epDist = layerResult[0][0]; } }
     for (let lc = Math.min(level, this.maxLevel); lc >= 0; lc--) {
       const neighbors = this._searchLayer(vec, epDist, ep, this.ef, lc).slice(0, this.M);
       const ev = neighbors.map(([d, i]) => [d, i]);
@@ -2934,155 +2244,84 @@ class HNSWIndex {
         if (!this.nodes[nIdx].neighbors.has(lc)) this.nodes[nIdx].neighbors.set(lc, []);
         const nList = this.nodes[nIdx].neighbors.get(lc);
         nList.push(idx);
-        if (nList.length > this.M) {
-          nList.sort((a, b) => this._dist(this.nodes[nIdx].vec, this.nodes[a].vec) - this._dist(this.nodes[nIdx].vec, this.nodes[b].vec));
-          this.nodes[nIdx].neighbors.set(lc, nList.slice(0, this.M));
-        }
+        if (nList.length > this.M) { nList.sort((a, b) => this._dist(this.nodes[nIdx].vec, this.nodes[a].vec) - this._dist(this.nodes[nIdx].vec, this.nodes[b].vec)); this.nodes[nIdx].neighbors.set(lc, nList.slice(0, this.M)); }
       }
-      if (neighbors.length > 0) {
-        ep = neighbors[0][1];
-        epDist = neighbors[0][0];
-      }
+      if (neighbors.length > 0) { ep = neighbors[0][1]; epDist = neighbors[0][0]; }
     }
-
-    if (level > this.maxLevel) {
-      this.maxLevel = level;
-      this.entryPoint = idx;
-    }
+    if (level > this.maxLevel) { this.maxLevel = level; this.entryPoint = idx; }
   }
-
   query(qvec, k = 30, ef = 100) {
     if (this.entryPoint === -1) return [];
     let ep = this.entryPoint;
     let epDist = this._dist(qvec, this.nodes[ep].vec);
-    for (let lc = this.maxLevel; lc > 0; lc--) {
-      const res = this._searchLayer(qvec, epDist, ep, 1, lc);
-      if (res.length > 0) {
-        ep = res[0][1];
-        epDist = res[0][0];
-      }
-    }
+    for (let lc = this.maxLevel; lc > 0; lc--) { const res = this._searchLayer(qvec, epDist, ep, 1, lc); if (res.length > 0) { ep = res[0][1]; epDist = res[0][0]; } }
     const finalRes = this._searchLayer(qvec, epDist, ep, ef, 0);
     finalRes.sort((a, b) => a[0] - b[0]);
     return finalRes.slice(0, k).map(([dist, idx]) => ({ verse_id: this.nodes[idx].id, score: 1 - dist }));
   }
-
-  // ── Serialization ─────────────────────────────────────────────────────────
-  // Binary layout (little-endian):
-  //   Header (24 bytes):
-  //     Uint32  version      = 1
-  //     Uint32  dims
-  //     Uint32  M
-  //     Int32   entryPoint   (-1 if empty)
-  //     Int32   maxLevel
-  //     Uint32  nodeCount
-  //   Per node (variable):
-  //     Int32   id           (verse_id)
-  //     Uint8   levelCount   (number of levels this node participates in)
-  //     Per level:
-  //       Uint8  level
-  //       Uint8  neighborCount
-  //       Int32[neighborCount]  neighbor indices
-  //   Vecs section (after all nodes):
-  //     Float32[dims] per node, in node order
-  //
-  // Vecs are separated so the header+graph can be read without allocating
-  // all float data; and so the BLOB stays compact (~41k × 16 × 4 bytes ≈ 2.6 MB).
   serialize() {
     const N = this.nodes.length;
-    // Pass 1: compute total size for neighbor lists
     let neighborBytes = 0;
-    for (const node of this.nodes) {
-      for (const [, nbrs] of node.neighbors) {
-        neighborBytes += 2 + nbrs.length * 4; // level(1) + count(1) + ids(4 each)
-      }
-      neighborBytes += 1; // levelCount byte
-    }
-    const headerBytes  = 24;
-    const nodeIdBytes  = N * 4;            // Int32 id per node
-    const vecBytes     = N * this.dims * 4; // Float32 vecs
-
+    for (const node of this.nodes) { for (const [, nbrs] of node.neighbors) neighborBytes += 2 + nbrs.length * 4; neighborBytes += 1; }
+    const headerBytes = 24;
+    const nodeIdBytes = N * 4;
+    const vecBytes = N * this.dims * 4;
     const totalBytes = headerBytes + nodeIdBytes + neighborBytes + vecBytes;
     const buf = Buffer.allocUnsafe(totalBytes);
     let off = 0;
-
-    // Header
-    buf.writeUInt32LE(1,              off); off += 4; // version
-    buf.writeUInt32LE(this.dims,      off); off += 4;
-    buf.writeUInt32LE(this.M,         off); off += 4;
+    buf.writeUInt32LE(1, off); off += 4;
+    buf.writeUInt32LE(this.dims, off); off += 4;
+    buf.writeUInt32LE(this.M, off); off += 4;
     buf.writeInt32LE(this.entryPoint, off); off += 4;
-    buf.writeInt32LE(this.maxLevel,   off); off += 4;
-    buf.writeUInt32LE(N,              off); off += 4;
-
-    // Nodes: id + neighbor lists
+    buf.writeInt32LE(this.maxLevel, off); off += 4;
+    buf.writeUInt32LE(N, off); off += 4;
     for (const node of this.nodes) {
       buf.writeInt32LE(node.id, off); off += 4;
       const levels = [...node.neighbors.entries()];
       buf.writeUInt8(levels.length, off); off += 1;
-      for (const [lvl, nbrs] of levels) {
-        buf.writeUInt8(lvl,          off); off += 1;
-        buf.writeUInt8(nbrs.length,  off); off += 1;
-        for (const nid of nbrs) { buf.writeInt32LE(nid, off); off += 4; }
-      }
+      for (const [lvl, nbrs] of levels) { buf.writeUInt8(lvl, off); off += 1; buf.writeUInt8(nbrs.length, off); off += 1; for (const nid of nbrs) { buf.writeInt32LE(nid, off); off += 4; } }
     }
-
-    // Vecs (Float32, node order)
-    for (const node of this.nodes) {
-      for (let d = 0; d < this.dims; d++) {
-        buf.writeFloatLE(node.vec[d], off); off += 4;
-      }
-    }
-
+    for (const node of this.nodes) { for (let d = 0; d < this.dims; d++) { buf.writeFloatLE(node.vec[d], off); off += 4; } }
     return buf;
   }
-
   static deserialize(buf) {
     let off = 0;
-    const version    = buf.readUInt32LE(off); off += 4;
+    const version = buf.readUInt32LE(off); off += 4;
     if (version !== 1) throw new Error(`[HNSW] Unknown serialization version: ${version}`);
-    const dims       = buf.readUInt32LE(off); off += 4;
-    const M          = buf.readUInt32LE(off); off += 4;
-    const entryPoint = buf.readInt32LE(off);  off += 4;
-    const maxLevel   = buf.readInt32LE(off);  off += 4;
-    const N          = buf.readUInt32LE(off); off += 4;
-
+    const dims = buf.readUInt32LE(off); off += 4;
+    const M = buf.readUInt32LE(off); off += 4;
+    const entryPoint = buf.readInt32LE(off); off += 4;
+    const maxLevel = buf.readInt32LE(off); off += 4;
+    const N = buf.readUInt32LE(off); off += 4;
     const idx = new HNSWIndex(dims, M);
     idx.entryPoint = entryPoint;
-    idx.maxLevel   = maxLevel;
-
-    // Read ids + neighbor lists (vecs come later)
-    const ids      = new Int32Array(N);
-    const allNbrs  = new Array(N); // Array<Map<level, number[]>>
+    idx.maxLevel = maxLevel;
+    const ids = new Int32Array(N);
+    const allNbrs = new Array(N);
     for (let i = 0; i < N; i++) {
       ids[i] = buf.readInt32LE(off); off += 4;
       const levelCount = buf.readUInt8(off); off += 1;
       const nbrsMap = new Map();
       for (let l = 0; l < levelCount; l++) {
-        const lvl   = buf.readUInt8(off); off += 1;
-        const cnt   = buf.readUInt8(off); off += 1;
+        const lvl = buf.readUInt8(off); off += 1;
+        const cnt = buf.readUInt8(off); off += 1;
         const nList = [];
         for (let n = 0; n < cnt; n++) { nList.push(buf.readInt32LE(off)); off += 4; }
         nbrsMap.set(lvl, nList);
       }
       allNbrs[i] = nbrsMap;
     }
-
-    // Read vecs and assemble nodes
     for (let i = 0; i < N; i++) {
       const vec = new Float32Array(dims);
       for (let d = 0; d < dims; d++) { vec[d] = buf.readFloatLE(off); off += 4; }
       idx.nodes.push({ id: ids[i], vec, neighbors: allNbrs[i] });
     }
-
     return idx;
   }
 }
 
 function buildHNSWIndex() {
   if (!embeddingsReady || embeddingCache.size === 0) return;
-
-  // Fast path: load pre-baked HNSW blob from verse-embeddings.db
-  // Written by scripts/prebake-hnsw.js — eliminates ~3-8 s build at every startup.
   if (db_embed) {
     try {
       const row = db_embed.prepare("SELECT data FROM hnsw_index WHERE key = 'hnsw_v1'").get();
@@ -3091,22 +2330,15 @@ function buildHNSWIndex() {
         fastify.log.info(`[HNSW] Loaded pre-baked index (${hnswIndex.nodes.length} nodes) from DB.`);
         return;
       }
-    } catch (err) {
-      fastify.log.warn('[HNSW] Could not load pre-baked index, rebuilding:', err.message);
-    }
+    } catch (err) { fastify.log.warn('[HNSW] Could not load pre-baked index, rebuilding:', err.message); }
   }
-
-  // Slow path: build from scratch (first run or after embeddings change)
   fastify.log.info('[HNSW] Building index from scratch…');
   const t0 = Date.now();
   hnswIndex = new HNSWIndex(EMBED_DIM, 16, 200);
-  for (const [verse_id, vec] of embeddingCache) {
-    hnswIndex.insert(verse_id, vec);
-  }
+  for (const [verse_id, vec] of embeddingCache) hnswIndex.insert(verse_id, vec);
   fastify.log.info(`[HNSW] Built in ${Date.now() - t0} ms (${hnswIndex.nodes.length} nodes). Run scripts/prebake-hnsw.js to cache this.`);
 }
 
-// ── #3 Concept expansion via scripture_minilm: find nearest pre-embedded concepts ──
 async function expandWithConcepts(query, topN = 5, qvec = null) {
   if (!embeddingPipe || !conceptCache.length) return [];
   try {
@@ -3114,84 +2346,36 @@ async function expandWithConcepts(query, topN = 5, qvec = null) {
       const out = await embeddingPipe(query, { pooling: 'mean', normalize: true });
       qvec = new Float32Array(out.data);
     }
-    const scored = conceptCache.map(c => ({
-      phrase: c.phrase,
-      source: c.source,
-      score: cosineSimilarity(qvec, c.vec),
-    }));
+    const scored = conceptCache.map(c => ({ phrase: c.phrase, source: c.source, score: cosineSimilarity(qvec, c.vec) }));
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, topN).filter(s => s.score > 0.4);
   } catch { return []; }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  MULTI-SOURCE FUSION with RRF + IDF + Chapter Aggregation
-// ═══════════════════════════════════════════════════════════════════════════
 function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
-  const stmtVerse = dba.prepare(`
-    SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
-    FROM scriptures WHERE verse_id = ?
-  `);
+  const stmtVerse = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
   const termWeights = queryTermWeights(query);
   const normalizedQueryText = normalizeSearchText(query);
   const queryWordCount = query.split(/\s+/).filter(Boolean).length;
-  const anchorPhrases = queryWordCount >= 5
-    ? extractAnchorPhrases(query, termWeights, 4)
-    : [];
+  const anchorPhrases = queryWordCount >= 5 ? extractAnchorPhrases(query, termWeights, 4) : [];
   const anchorTexts = anchorPhrases.map(p => p.phrase.toLowerCase());
   const structuredMultiWordQuery = isStructuredMultiWordQuery(query, anchorPhrases);
-
-  // ── Detect significant phrases in query ──
-  // For long queries (5+ words), skip sub-phrase decomposition — sub-bigrams create
-  // false positives (e.g. "prepared before the" matching Luke 2:31).
   const detectedPhrases = (() => {
     const raw = detectSignificantPhrases(query);
     if (!raw || raw.length === 0) return raw;
     const words = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
-    if (words.length >= 5) {
-      const fullPhrase = words.join(' ');
-      return raw.filter(p => p.phrase === fullPhrase);
-    }
-    if (words.length >= 3) {
-      const fullPhrase = words.join(' ');
-      return raw.filter(p => p.phrase === fullPhrase);
-    }
+    if (words.length >= 5) { const fullPhrase = words.join(' '); return raw.filter(p => p.phrase === fullPhrase); }
+    if (words.length >= 3) { const fullPhrase = words.join(' '); return raw.filter(p => p.phrase === fullPhrase); }
     return raw;
   })();
-
-  // ── PMI expansion: only for single-word queries ──
-  // Multi-word queries already express intent. PMI on "more powerful than the sword"
-  // expands "more"→"than","no" and "sword"→"edg","pestilence" — noise that triggers
-  // OR fallback matches on unrelated verses (Genesis 1 problem).
   const _pmiWords = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').split(/\s+/).filter(t => t.length > 1);
   const pmiTerms = _pmiWords.length <= 1 ? expandWithPmi(query) : [];
   let pmiExpandedQuery = expandedQuery;
-  if (pmiTerms.length > 0) {
-    const pmiWords = pmiTerms.map(t => t.term);
-    pmiExpandedQuery = [...new Set([...expandedQuery.split(/\s+/), ...pmiWords])].join(' ');
-  }
-
-  // ── Source A: Scripture FTS (BM25) — primary keyword source ──
-  // Only flag a direct substring match when the query has 2+ meaningful words.
-  // Single-word queries (e.g. "mercy") would otherwise mark every FTS hit as a
-  // direct match, pumping the entire result set into tier-2 and letting BM25 pick
-  // the winner there instead of the topical/semantic signals.
+  if (pmiTerms.length > 0) { const pmiWords = pmiTerms.map(t => t.term); pmiExpandedQuery = [...new Set([...expandedQuery.split(/\s+/), ...pmiWords])].join(' '); }
   const directMatchWords = normalizedQueryText.split(/\s+/).filter(Boolean);
   const directMatchEligible = directMatchWords.length >= 2;
-
   const ftsResult = searchScripture(query, 0, 50, dba, fastify.log);
-  const ftsRanked = ftsResult.results.map(r => ({
-    ...r,
-    _source: 'fts',
-    _bm25: r._bm25_rank || 0,
-    _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText),
-    _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights),
-    _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
-    _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights),
-    _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights),
-  }));
-
-  // BM25F: boost verses whose doctrine tags or speaker match the query
+  const ftsRanked = ftsResult.results.map(r => ({ ...r, _source: 'fts', _bm25: r._bm25_rank || 0, _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText), _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights), _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)), _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights), _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights) }));
   if (db_tags && ftsRanked.length > 0) {
     const queryLower = query.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
     const queryWords = new Set(queryLower.split(/\s+/).filter(w => w.length > 2));
@@ -3204,10 +2388,7 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
             const labels = JSON.parse(tagRow.labels_json || '[]');
             const labelText = labels.join(' ').toLowerCase();
             const speakerText = (tagRow.speaker || '').toLowerCase();
-            for (const w of queryWords) {
-              if (labelText.includes(w)) fieldBoost += 0.3;
-              if (speakerText.includes(w)) fieldBoost += 0.2;
-            }
+            for (const w of queryWords) { if (labelText.includes(w)) fieldBoost += 0.3; if (speakerText.includes(w)) fieldBoost += 0.2; }
           }
         } catch {}
         row._bm25_rank = (row._bm25_rank || 0) * fieldBoost;
@@ -3216,121 +2397,53 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       ftsRanked.sort((a, b) => (a._bm25 || 0) - (b._bm25 || 0));
     }
   }
-
   if (queryWordCount >= 3 && ftsRanked.length > 1) {
-    ftsRanked.sort((a, b) =>
-      Number(Boolean(b._directQueryMatch)) - Number(Boolean(a._directQueryMatch))
-      ||
-      (b._sequenceScore || 0) - (a._sequenceScore || 0)
-      ||
-      (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0)
-      ||
-      Number(Boolean(b._anchorPhraseMatch)) - Number(Boolean(a._anchorPhraseMatch))
-      || (b._lexicalCoverage || 0) - (a._lexicalCoverage || 0)
-      || (a._bm25 || 0) - (b._bm25 || 0)
-    );
+    ftsRanked.sort((a, b) => Number(Boolean(b._directQueryMatch)) - Number(Boolean(a._directQueryMatch)) || (b._sequenceScore || 0) - (a._sequenceScore || 0) || (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0) || Number(Boolean(b._anchorPhraseMatch)) - Number(Boolean(a._anchorPhraseMatch)) || (b._lexicalCoverage || 0) - (a._lexicalCoverage || 0) || (a._bm25 || 0) - (b._bm25 || 0));
   }
-
-  // ── FTS matchType-driven phrase evidence ──────────────────────────────────────
-  // FTS5 `matchType` reflects the quality of the match the porter-stemming engine
-  // confirmed, ordered from strongest to weakest:
-  //   'phrase'  — all query tokens matched sequentially (stem-normalised).  This is
-  //               stricter than normalizedTextIncludes() which compares raw strings.
-  //   'near'    — all tokens matched within a proximity window (NEAR/5 or similar).
-  // Both signal genuine phrase-level co-occurrence in the verse, regardless of whether
-  // the exact surface forms (e.g. "gathering" vs "gather", "woods" vs "wood") survive
-  // the direct-string check.  Promote these rows to _directQueryMatch so the tier-2
-  // scorer awards the 0.92 base and density/lexical/probability signals rank them.
-  if (directMatchEligible && (ftsResult.matchType === 'phrase' || ftsResult.matchType === 'near')) {
-    for (const row of ftsRanked) {
-      row._directQueryMatch = true;
-    }
-  }
-
-  // ── Source A2: Exact phrase FTS — separate RRF lane for phrase matches ──
-  const phraseCandidates = [...detectedPhrases, ...anchorPhrases]
-    .filter(Boolean)
-    .sort((a, b) => (b.score || 0) - (a.score || 0) || (b.len || 0) - (a.len || 0));
-
+  if (directMatchEligible && (ftsResult.matchType === 'phrase' || ftsResult.matchType === 'near')) { for (const row of ftsRanked) row._directQueryMatch = true; }
+  const phraseCandidates = [...detectedPhrases, ...anchorPhrases].filter(Boolean).sort((a, b) => (b.score || 0) - (a.score || 0) || (b.len || 0) - (a.len || 0));
   const phraseRanked = [];
   if (phraseCandidates.length > 0) {
     const bestByVerse = new Map();
     for (const candidate of phraseCandidates) {
       const { phrase } = candidate;
       try {
-        const phraseQueries = candidate.anchor
-          ? [...new Set(['"' + phrase + '"', phrase, buildFocusedAnchorQuery(candidate, termWeights)].filter(Boolean))]
-          : ['"' + phrase + '"'];
+        const phraseQueries = candidate.anchor ? [...new Set(['"' + phrase + '"', phrase, buildFocusedAnchorQuery(candidate, termWeights)].filter(Boolean))] : ['"' + phrase + '"'];
         const phraseLimit = candidate.anchor ? 100 : 30;
-
         for (const phraseQuery of phraseQueries) {
           const phraseResult = searchScripture(phraseQuery, 0, phraseLimit, dba, fastify.log);
           if (!STRONG_PHRASE_MATCH_TYPES.has(phraseResult.matchType)) continue;
-          if (queryWordCount >= 5 && phraseResult.matchType !== 'phrase') {
-            if (!(candidate.anchor && (phraseResult.matchType === 'near' || phraseResult.matchType === 'and'))) continue;
-          }
+          if (queryWordCount >= 5 && phraseResult.matchType !== 'phrase') { if (!(candidate.anchor && (phraseResult.matchType === 'near' || phraseResult.matchType === 'and'))) continue; }
           for (const r of phraseResult.results) {
             const coverage = weightedLexicalCoverage(query, r, termWeights);
             const minCoverage = phraseResult.matchType === 'and' ? 0.34 : 0.24;
             if (queryWordCount >= 5 && coverage < minCoverage) continue;
             const matchStrength = PHRASE_MATCH_STRENGTH[phraseResult.matchType] || 0.5;
-            const anchorStrength = candidate.anchor
-              ? Math.min(1, (candidate.score || 0) + (candidate.salientTermCount || 0) * 0.08)
-              : 0;
+            const anchorStrength = candidate.anchor ? Math.min(1, (candidate.score || 0) + (candidate.salientTermCount || 0) * 0.08) : 0;
             const phraseSignal = matchStrength + coverage * 0.45 + anchorStrength * 0.35;
             const existing = bestByVerse.get(r.verse_id);
-            if (!existing || phraseSignal > existing._phraseSignal) {
-              bestByVerse.set(r.verse_id, {
-                ...r,
-                _source: 'fts-phrase',
-                _bm25: r._bm25_rank || 0,
-                _anchorPhraseMatch: phraseResult.matchType === 'phrase' || phraseResult.matchType === 'near',
-                _phraseSignal: phraseSignal,
-                _phraseCoverage: coverage,
-                _anchorStrength: anchorStrength,
-              });
-            }
+            if (!existing || phraseSignal > existing._phraseSignal) { bestByVerse.set(r.verse_id, { ...r, _source: 'fts-phrase', _bm25: r._bm25_rank || 0, _anchorPhraseMatch: phraseResult.matchType === 'phrase' || phraseResult.matchType === 'near', _phraseSignal: phraseSignal, _phraseCoverage: coverage, _anchorStrength: anchorStrength }); }
           }
         }
       } catch {}
     }
-    phraseRanked.push(
-      ...[...bestByVerse.values()].sort((a, b) =>
-        (b._phraseSignal || 0) - (a._phraseSignal || 0)
-        || (a._bm25 || 0) - (b._bm25 || 0)
-      )
-    );
+    phraseRanked.push(...[...bestByVerse.values()].sort((a, b) => (b._phraseSignal || 0) - (a._phraseSignal || 0) || (a._bm25 || 0) - (b._bm25 || 0)));
   }
-
-  // Also search with corpus-derived PMI expansions when available
   if (pmiExpandedQuery && pmiExpandedQuery !== query.toLowerCase()) {
     const expResult = searchScripture(pmiExpandedQuery, 0, 30, dba, fastify.log);
     const seen = new Set(ftsRanked.map(r => r.verse_id));
-    for (const r of expResult.results) {
-      if (!seen.has(r.verse_id)) {
-        ftsRanked.push({ ...r, _source: 'fts', _bm25: r._bm25_rank || 0 });
-        seen.add(r.verse_id);
-      }
-    }
+    for (const r of expResult.results) { if (!seen.has(r.verse_id)) { ftsRanked.push({ ...r, _source: 'fts', _bm25: r._bm25_rank || 0 }); seen.add(r.verse_id); } }
   }
-
-  // ── Identify matched topic slugs for topical retrieval and PPR boost ──
-  // Phrase-aware: try full query and bigrams first, then fall back to single words.
   let queryTopicSlugs = [];
   let hasExactTopicMatch = false;
   if (topicalGuideReady) {
     const normQuery = query.toLowerCase().replace(/[^a-z0-9\-\s]/g, '').trim();
     const normWords = normQuery.split(/\s+/).filter(t => t.length > 1);
     const querySlugified = normQuery.replace(/\s+/g, '-');
-
     for (const [slug, name] of topicNameMap) {
       const slugNorm = slug.replace(/-/g, ' ');
-      if (slugNorm === normQuery || name.toLowerCase() === normQuery || slug === querySlugified) {
-        queryTopicSlugs.push(slug);
-        hasExactTopicMatch = true;
-      }
+      if (slugNorm === normQuery || name.toLowerCase() === normQuery || slug === querySlugified) { queryTopicSlugs.push(slug); hasExactTopicMatch = true; }
     }
-
     if (!structuredMultiWordQuery && normWords.length >= 2 && normWords.length <= 4) {
       for (let i = 0; i < normWords.length - 1; i++) {
         const bigram = normWords[i] + ' ' + normWords[i + 1];
@@ -3338,31 +2451,20 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
         for (const [slug, name] of topicNameMap) {
           if (queryTopicSlugs.includes(slug)) continue;
           const slugNorm = slug.replace(/-/g, ' ');
-          if (slugNorm.includes(bigram) || name.toLowerCase().includes(bigram) || slug.includes(bigramSlug)) {
-            queryTopicSlugs.push(slug);
-          }
+          if (slugNorm.includes(bigram) || name.toLowerCase().includes(bigram) || slug.includes(bigramSlug)) queryTopicSlugs.push(slug);
         }
         if (queryTopicSlugs.length >= 10) break;
       }
     }
-
     if (!structuredMultiWordQuery && queryTopicSlugs.length === 0 && normWords.length <= 3) {
       for (const [slug, name] of topicNameMap) {
         const slugNorm = slug.replace(/-/g, ' ');
-        for (const w of normWords) {
-          if (slugNorm.includes(w) || name.toLowerCase().includes(w)) {
-            queryTopicSlugs.push(slug);
-            break;
-          }
-        }
+        for (const w of normWords) { if (slugNorm.includes(w) || name.toLowerCase().includes(w)) { queryTopicSlugs.push(slug); break; } }
         if (queryTopicSlugs.length >= 10) break;
       }
     }
-
     queryTopicSlugs = [...new Set(queryTopicSlugs)].slice(0, 10);
   }
-
-  // ── Source B: Chapter summaries FTS — finds chapters thematically about the topic ──
   const summaryRanked = [];
   const shortTopicalQuery = queryWordCount <= 3 && queryTopicSlugs.length > 0;
   const longStructuredQuery = structuredMultiWordQuery || detectedPhrases.length > 0;
@@ -3371,28 +2473,14 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       const cleanQ = query.replace(/[^a-zA-Z0-9\-\s]/g, ' ').trim();
       const terms = cleanQ.split(/\s+/).filter(t => t.length > 1).map(t => `${t}*`).join(' OR ');
       if (terms) {
-        const sumRows = db_chsummary.prepare(`
-          SELECT cs.chapter_id, cs.book_id, cs.chapter_num, fts.rank
-          FROM chapter_summaries_fts fts
-          JOIN chapter_summaries cs ON cs.rowid = fts.rowid
-          WHERE chapter_summaries_fts MATCH ?
-          ORDER BY fts.rank LIMIT 15
-        `).all(terms);
+        const sumRows = db_chsummary.prepare(`SELECT cs.chapter_id, cs.book_id, cs.chapter_num, fts.rank FROM chapter_summaries_fts fts JOIN chapter_summaries cs ON cs.rowid = fts.rowid WHERE chapter_summaries_fts MATCH ? ORDER BY fts.rank LIMIT 15`).all(terms);
         for (const sr of sumRows) {
-          // Get all verses from matching chapter (for chapter aggregation later)
-          const verses = dba.prepare(`
-            SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
-            FROM scriptures WHERE chapter_id = ? ORDER BY verse_number
-          `).all(sr.chapter_id);
-          for (const v of verses.slice(0, 5)) { // top 5 per chapter
-            summaryRanked.push({ ...v, _source: 'summary' });
-          }
+          const verses = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE chapter_id = ? ORDER BY verse_number`).all(sr.chapter_id);
+          for (const v of verses.slice(0, 5)) summaryRanked.push({ ...v, _source: 'summary' });
         }
       }
     } catch {}
   }
-
-  // ── Source C: Topical Guide — curated theological connections ──
   const tgRanked = [];
   if (topicalGuideReady && topicallyEligible(queryWordCount, longStructuredQuery, hasExactTopicMatch, queryTopicSlugs)) {
     const bestByVerse = new Map();
@@ -3403,43 +2491,19 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
       if (!tg?.results?.length) continue;
       for (let rank = 0; rank < tg.results.length; rank++) {
         const row = tg.results[rank];
-        const topicSignal = 1
-          + (hasExactTopicMatch && slugIndex === 0 ? 0.35 : 0)
-          + Math.max(0, 0.18 - slugIndex * 0.04)
-          - rank * 0.015;
+        const topicSignal = 1 + (hasExactTopicMatch && slugIndex === 0 ? 0.35 : 0) + Math.max(0, 0.18 - slugIndex * 0.04) - rank * 0.015;
         const existing = bestByVerse.get(row.verse_id);
-        if (!existing || topicSignal > existing._topicSignal) {
-          bestByVerse.set(row.verse_id, {
-            ...row,
-            _source: 'topical-guide',
-            _topicSignal: +topicSignal.toFixed(4),
-            _matchedTopicSlug: topicSlug,
-          });
-        }
+        if (!existing || topicSignal > existing._topicSignal) bestByVerse.set(row.verse_id, { ...row, _source: 'topical-guide', _topicSignal: +topicSignal.toFixed(4), _matchedTopicSlug: topicSlug });
       }
     }
-    tgRanked.push(
-      ...[...bestByVerse.values()].sort((a, b) =>
-        (b._topicSignal || 0) - (a._topicSignal || 0)
-        || String(a.verse_title || '').localeCompare(String(b.verse_title || ''))
-      )
-    );
+    tgRanked.push(...[...bestByVerse.values()].sort((a, b) => (b._topicSignal || 0) - (a._topicSignal || 0) || String(a.verse_title || '').localeCompare(String(b.verse_title || ''))));
   }
-
-  // ── Source D: Entity index — people and places ──
   const entityRanked = [];
   const normQ = query.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
   for (const [idx, label] of [[entityPersonIndex, 'entity-person'], [entityPlaceIndex, 'entity-place']]) {
     const verseIds = idx.get(normQ);
-    if (verseIds) {
-      for (const vid of [...verseIds].slice(0, 15)) {
-        const row = stmtVerse.get(vid);
-        if (row) entityRanked.push({ ...row, _source: label });
-      }
-    }
+    if (verseIds) { for (const vid of [...verseIds].slice(0, 15)) { const row = stmtVerse.get(vid); if (row) entityRanked.push({ ...row, _source: label }); } }
   }
-
-  // ── Source E: Cross-reference graph — highest-weight theological signal ──
   const xrefRanked = [];
   if (db_vxref) {
     const seen = new Set(ftsRanked.map(r => r.verse_id));
@@ -3452,95 +2516,32 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
         for (const refId of refs.slice(0, 8)) {
           if (seen.has(refId)) continue;
           const row = stmtVerse.get(refId);
-          if (row) {
-            xrefRanked.push({ ...row, _source: 'cross-ref', _xref_from: ftsVerse.verse_id });
-            seen.add(refId);
-          }
+          if (row) { xrefRanked.push({ ...row, _source: 'cross-ref', _xref_from: ftsVerse.verse_id }); seen.add(refId); }
         }
       } catch {}
     }
   }
-
-  // ── RRF: merge all sources — list weights driven by per-intent learned weights ──
-  // If an intent type is provided, use its learned weight vector; fall back to global.
-  // W = [bm25, semantic, pagerank, cross_ref, cluster, dwell]
-  // Mapping: fts→bm25, phrase→bm25×3, summary→cross_ref,
-  //          entity→pagerank, xref→cross_ref×5
-  const W = (intentType && intentWeights.has(intentType))
-    ? intentWeights.get(intentType)
-    : learnedWeights;
+  const W = (intentType && intentWeights.has(intentType)) ? intentWeights.get(intentType) : learnedWeights;
   const exactTopicalQuery = queryWordCount <= 2 && hasExactTopicMatch;
   const phraseWeight = exactTopicalQuery ? W[0] * 0.6 : W[0] * 3;
   const summaryWeight = shortTopicalQuery ? W[3] * 0.15 : W[3];
-  // Topical guide (`tgRanked`) intentionally excluded from the main RRF fusion
-  // so topical-guide matches do not directly influence core search rankings.
-  const rrfScores = reciprocalRankFusion(
-    [ftsRanked, phraseRanked, summaryRanked, entityRanked, xrefRanked],
-    queryTopicSlugs,
-    [W[0], phraseWeight, summaryWeight, W[2], W[3] * 5]
-  );
-
-  // ── Chapter aggregation: boost chapters with many verse hits ──
+  const rrfScores = reciprocalRankFusion([ftsRanked, phraseRanked, summaryRanked, entityRanked, xrefRanked], queryTopicSlugs, [W[0], phraseWeight, summaryWeight, W[2], W[3] * 5]);
   const chapterScores = chapterAggregate(rrfScores);
-  // Inject top chapter representative verses that might be missing
   for (const ch of chapterScores.slice(0, 10)) {
     if (ch.verseCount >= 3 && ch.bestVerse && !rrfScores.has(ch.bestVerse)) {
-      // Chapter has 3+ hits but best verse isn't in results — add it
       const row = stmtVerse.get(ch.bestVerse);
-      if (row) {
-        rrfScores.set(ch.bestVerse, {
-          rrfScore: ch.score * 0.8,
-          row: { ...row, _source: 'chapter-agg' },
-          sources: new Set(['chapter-agg']),
-        });
-      }
+      if (row) rrfScores.set(ch.bestVerse, { rrfScore: ch.score * 0.8, row: { ...row, _source: 'chapter-agg' }, sources: new Set(['chapter-agg']) });
     }
-    // Boost existing entries from high-scoring chapters
     for (const [vid, entry] of rrfScores) {
       const meta = verseMetaCache.get(vid);
-      if (meta && meta.chapter_id === ch.chapterId) {
-        entry.rrfScore += ch.score * 0.3 / Math.sqrt(ch.verseCount);
-      }
+      if (meta && meta.chapter_id === ch.chapterId) entry.rrfScore += ch.score * 0.3 / Math.sqrt(ch.verseCount);
     }
   }
-
-  const ftsMetaByVerse = new Map(ftsRanked.map(row => [row.verse_id, {
-    _directQueryMatch: row._directQueryMatch,
-    _lexicalCoverage: row._lexicalCoverage,
-    _anchorPhraseMatch: row._anchorPhraseMatch,
-    _anchorWindowScore: row._anchorWindowScore,
-    _sequenceScore: row._sequenceScore,
-  }]));
-
-  // Build final sorted list
-  const sorted = [...rrfScores.entries()]
-    .map(([vid, entry]) => ({
-      ...entry.row,
-      ...(ftsMetaByVerse.get(vid) || {}),
-      verse_id: vid,
-      _rrfScore: entry.rrfScore,
-      _sourceCount: entry.sources.size,
-    }))
-    .sort((a, b) => b._rrfScore - a._rrfScore);
-
-  return {
-    results: sorted,
-    total: sorted.length,
-    diagnostics: {
-      lexicalSignalQuality: lexicalSignalQuality(query, ftsRanked, termWeights),
-      topFtsCount: ftsRanked.length,
-      hasExactTopicMatch,
-      queryTopicSlugs,
-      topicGuideHitCount: tgRanked.length,
-    },
-  };
+  const ftsMetaByVerse = new Map(ftsRanked.map(row => [row.verse_id, { _directQueryMatch: row._directQueryMatch, _lexicalCoverage: row._lexicalCoverage, _anchorPhraseMatch: row._anchorPhraseMatch, _anchorWindowScore: row._anchorWindowScore, _sequenceScore: row._sequenceScore }]));
+  const sorted = [...rrfScores.entries()].map(([vid, entry]) => ({ ...entry.row, ...(ftsMetaByVerse.get(vid) || {}), verse_id: vid, _rrfScore: entry.rrfScore, _sourceCount: entry.sources.size })).sort((a, b) => b._rrfScore - a._rrfScore);
+  return { results: sorted, total: sorted.length, diagnostics: { lexicalSignalQuality: lexicalSignalQuality(query, ftsRanked, termWeights), topFtsCount: ftsRanked.length, hasExactTopicMatch, queryTopicSlugs, topicGuideHitCount: tgRanked.length } };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  RELATED VERSES ENGINE (Bayesian + MMR + Topic Graph)
-// ═══════════════════════════════════════════════════════════════════════════
-
-// Jaccard similarity for topic sets: |A∩B| / |A∪B|
 function jaccardSimilarity(setA, setB) {
   if (!setA || !setB || setA.size === 0 || setB.size === 0) return 0;
   let intersection = 0;
@@ -3548,64 +2549,38 @@ function jaccardSimilarity(setA, setB) {
   return intersection / (setA.size + setB.size - intersection);
 }
 
-// Bayesian topic relevance: P(related | shared_topics, embedding_sim)
-// Prior: embedding similarity. Likelihood: topic overlap. Posterior ∝ prior × likelihood
 function bayesianRelevance(embeddingSim, topicJaccard, sharedTopicCount) {
-  const prior = embeddingSim;  // P(related) from embeddings
-  // Likelihood: each shared topic increases probability multiplicatively
+  const prior = embeddingSim;
   const likelihood = 1 + sharedTopicCount * 0.3 + topicJaccard * 2.0;
-  // Posterior (unnormalized): Bayes' theorem
   return prior * likelihood;
 }
 
-// ── Context-aware boosting with exponential distance decay ──
 function contextBoost(results, contextVerseId) {
   if (!contextVerseId) return results;
   const meta = verseMetaCache.get(contextVerseId);
   if (!meta) return results;
-
   const contextTopics = verseTopicCache.get(contextVerseId);
   const contextBookId = db.prepare('SELECT book_id FROM chapters WHERE id = ?').get(meta.chapter_id)?.book_id;
-  const contextVolId  = contextBookId ? db.prepare('SELECT volume_id FROM books WHERE id = ?').get(contextBookId)?.volume_id : null;
-
+  const contextVolId = contextBookId ? db.prepare('SELECT volume_id FROM books WHERE id = ?').get(contextBookId)?.volume_id : null;
   return results.map(r => {
     let boost = 0;
-    if (contextVolId && r.book_id) {
-      const rVol = db.prepare('SELECT volume_id FROM books WHERE id = ?').get(r.book_id)?.volume_id;
-      if (rVol === contextVolId) boost += 0.05;
-    }
-    if (contextTopics && r.verse_id) {
-      const rTopics = verseTopicCache.get(r.verse_id);
-      if (rTopics) {
-        let shared = 0;
-        for (const t of contextTopics) if (rTopics.has(t)) shared++;
-        boost += shared * 0.08; // proportional to shared topics
-      }
-    }
+    if (contextVolId && r.book_id) { const rVol = db.prepare('SELECT volume_id FROM books WHERE id = ?').get(r.book_id)?.volume_id; if (rVol === contextVolId) boost += 0.05; }
+    if (contextTopics && r.verse_id) { const rTopics = verseTopicCache.get(r.verse_id); if (rTopics) { let shared = 0; for (const t of contextTopics) if (rTopics.has(t)) shared++; boost += shared * 0.08; } }
     return { ...r, similarity_score: +((r.similarity_score || 0) + boost).toFixed(4) };
   });
 }
 
-// ── Search Result Cache (LRU + adaptive TTL) ─────────────────────────────────
-// Popular queries (hit ≥ 3 times) get 30-minute TTL instead of 5 min —
-// self-speeding: the more a query is used, the faster it becomes.
-const SEARCH_CACHE_TTL_MS         = 5  * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const SEARCH_CACHE_POPULAR_TTL_MS = 30 * 60 * 1000;
-const SEARCH_CACHE_POPULAR_MIN    = 3;
-const SEARCH_CACHE_MAX            = 300;
-const searchResultsCache          = new Map();
+const SEARCH_CACHE_POPULAR_MIN = 3;
+const SEARCH_CACHE_MAX = 300;
+const searchResultsCache = new Map();
 
 function searchCacheGet(key) {
   const entry = searchResultsCache.get(key);
   if (!entry) return null;
-  const ttl = (entry.hitCount || 0) >= SEARCH_CACHE_POPULAR_MIN
-    ? SEARCH_CACHE_POPULAR_TTL_MS
-    : SEARCH_CACHE_TTL_MS;
-  if (Date.now() - entry.ts > ttl) {
-    searchResultsCache.delete(key);
-    return null;
-  }
-  // LRU: move to end; bump hit counter for TTL promotion
+  const ttl = (entry.hitCount || 0) >= SEARCH_CACHE_POPULAR_MIN ? SEARCH_CACHE_POPULAR_TTL_MS : SEARCH_CACHE_TTL_MS;
+  if (Date.now() - entry.ts > ttl) { searchResultsCache.delete(key); return null; }
   entry.hitCount = (entry.hitCount || 0) + 1;
   searchResultsCache.delete(key);
   searchResultsCache.set(key, entry);
@@ -3613,117 +2588,51 @@ function searchCacheGet(key) {
 }
 
 function searchCacheSet(key, results, total, meta) {
-  const existing  = searchResultsCache.get(key);
-  const hitCount  = existing ? (existing.hitCount || 0) : 0;
-  if (searchResultsCache.size >= SEARCH_CACHE_MAX) {
-    searchResultsCache.delete(searchResultsCache.keys().next().value);
-  }
+  const existing = searchResultsCache.get(key);
+  const hitCount = existing ? (existing.hitCount || 0) : 0;
+  if (searchResultsCache.size >= SEARCH_CACHE_MAX) searchResultsCache.delete(searchResultsCache.keys().next().value);
   searchResultsCache.set(key, { results, total, meta: meta || null, ts: Date.now(), hitCount });
 }
 
-function makeCacheKey(query, language, contextVerseId) {
-  return `${String(query).toLowerCase().trim()}|${language}|${contextVerseId || ''}`;
-}
+function makeCacheKey(query, language, contextVerseId) { return `${String(query).toLowerCase().trim()}|${language}|${contextVerseId || ''}`; }
+function encodeCursor(cacheKey, nextOffset, total) { return Buffer.from(JSON.stringify({ k: cacheKey, o: nextOffset, t: total })).toString('base64url'); }
+function decodeCursor(cursor) { try { return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { return null; } }
 
-function encodeCursor(cacheKey, nextOffset, total) {
-  return Buffer.from(JSON.stringify({ k: cacheKey, o: nextOffset, t: total })).toString('base64url');
-}
-
-function decodeCursor(cursor) {
-  try {
-    return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-}
-
-// American-to-KJV spelling normalization table.
-// Seeded from a general American/British spelling dataset, then curated down
-// to a KJV-safe subset for scripture search so generic language variants do
-// not introduce noisy or destructive rewrites.
-const KJV_SPELLINGS = kjvSpellingReplacements.map(({ from, to }) => [
-  new RegExp(`\\b${from}\\b`, 'gi'),
-  to,
-]);
-
-function normalizeKJVSpellings(q) {
-  let s = q;
-  for (const [re, rep] of KJV_SPELLINGS) s = s.replace(re, rep);
-  return s;
-}
-
-function normalizeSearchText(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\-\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// Word-boundary aware substring check.
-// Plain String.includes() allows "heaven" to match inside "heavens", which causes
-// plural-form verses to get the same _directQueryMatch signal as the exact-match verse.
-// This helper requires the matched fragment to end at a word boundary (space or end-of-string).
-function normalizedTextIncludes(haystack, needle) {
-  if (!needle || !haystack) return false;
-  const idx = haystack.indexOf(needle);
-  if (idx === -1) return false;
-  const afterIdx = idx + needle.length;
-  // Boundary: must be end of string or followed by a non-alphanumeric character
-  return afterIdx >= haystack.length || !/[a-z0-9]/.test(haystack[afterIdx]);
-}
+const KJV_SPELLINGS = kjvSpellingReplacements.map(({ from, to }) => [new RegExp(`\\b${from}\\b`, 'gi'), to]);
+function normalizeKJVSpellings(q) { let s = q; for (const [re, rep] of KJV_SPELLINGS) s = s.replace(re, rep); return s; }
+function normalizeSearchText(text) { return String(text || '').toLowerCase().replace(/[^a-z0-9\-\s]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function normalizedTextIncludes(haystack, needle) { if (!needle || !haystack) return false; const idx = haystack.indexOf(needle); if (idx === -1) return false; const afterIdx = idx + needle.length; return afterIdx >= haystack.length || !/[a-z0-9]/.test(haystack[afterIdx]); }
 
 async function runSearchPipeline(query, language, contextVerseId, log, sessionId = null) {
   const lang = String(language || 'en').toLowerCase().trim();
-  // Normalize American→KJV spellings so FTS matches DB text
   if (lang === 'en' || lang === 'ylt') query = normalizeKJVSpellings(query);
   const cacheKey = makeCacheKey(query, lang, contextVerseId);
-
   const cached = searchCacheGet(cacheKey);
   if (cached) return { ...cached, fromCache: true, cacheKey };
-
   let results = [];
   let total = 0;
   let pipelineMeta = null;
-
   if (lang !== 'en') {
-    // English versions (e.g. YLT) run the full pipeline against LDS embeddings,
-    // then swap the display text to the selected version afterward.
     const ENGLISH_VERSIONS = new Set(['ylt']);
     if (ENGLISH_VERSIONS.has(lang)) {
       const full = await runSearchPipeline(query, 'en', contextVerseId, log, sessionId);
-      results       = full.results || [];
-      total         = full.total   || results.length;
-      pipelineMeta  = full.meta    || null;
-
-      // Swap scripture_text to the selected English version
+      results = full.results || [];
+      total = full.total || results.length;
+      pipelineMeta = full.meta || null;
       const targetDb = resolveDbAdapter(lang);
       if (targetDb && targetDb !== dba) {
-        const stmtCoords   = dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1');
+        const stmtCoords = dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1');
         const stmtTransText = targetDb.prepare('SELECT scripture_text, verse_title, book_title FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1');
-        results = results.map(r => {
-          const coords = stmtCoords.get(r.verse_id);
-          if (!coords) return r;
-          const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
-          if (t?.scripture_text) {
-            return { ...r, scripture_text: t.scripture_text, verse_title: t.verse_title || r.verse_title, book_title: t.book_title || r.book_title };
-          }
-          return r;
-        });
+        results = results.map(r => { const coords = stmtCoords.get(r.verse_id); if (!coords) return r; const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number); if (t?.scripture_text) return { ...r, scripture_text: t.scripture_text, verse_title: t.verse_title || r.verse_title, book_title: t.book_title || r.book_title }; return r; });
       }
     } else {
       const r = searchScriptureInDb(query, 0, 200, resolveDbAdapter(lang), log);
       results = r.results || [];
-      total   = r.total   || results.length;
+      total = r.total || results.length;
     }
   } else {
-    // ── Explicit mode detection ──────────────────────────────────────────────
-    // "" and ~ are OPTIONAL power-user shortcuts. Without them, the system
-    // automatically runs phrase + semantic + keyword and ranks by specificity.
-    const isQuoted   = /^"(.+)"$/.test(query.trim());
+    const isQuoted = /^"(.+)"$/.test(query.trim());
     const isSemantic = query.trim().startsWith('~');
-
-    // Step 1: Exact scripture reference — always wins regardless of syntax
     if (!isQuoted && !isSemantic) {
       const ref = engine.parseScriptureReference(query);
       if (ref) {
@@ -3735,140 +2644,50 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         }
       }
     }
-
-    // Step 2: Explicit phrase mode — "quoted phrase" → phrase-only (power-user shortcut)
     if (isQuoted) {
       const phrase = query.trim().slice(1, -1).trim();
       const phraseResult = phraseSearch(phrase, 0, 200, dba, log);
-      const phraseMeta = {
-        intent: 'phrase', display: 'Phrase', subtype: 'exact',
-        entityMatch: null, confidence: 1, expansions: [], facets: [],
-        originalQuery: phrase,
-      };
+      const phraseMeta = { intent: 'phrase', display: 'Phrase', subtype: 'exact', entityMatch: null, confidence: 1, expansions: [], facets: [], originalQuery: phrase };
       searchCacheSet(cacheKey, phraseResult.results, phraseResult.total, phraseMeta);
       return { results: phraseResult.results, total: phraseResult.total, meta: phraseMeta, fromCache: false, cacheKey };
     }
-
-    if (!embeddingsReady || !topicalGuideReady || !entitiesReady) {
-      await ensureSearchWarmup({ waitForEmbeddings: true });
-    }
-
-    // Step 3: Explicit semantic mode — ~query → embedding-only (power-user shortcut)
+    if (!embeddingsReady || !topicalGuideReady || !entitiesReady) await ensureSearchWarmup({ waitForEmbeddings: true });
     if (isSemantic) {
       const semQuery = query.trim().slice(1).trim();
       if (semQuery && embeddingsReady && embeddingPipe) {
         try {
-          const out  = await embeddingPipe(semQuery, { pooling: 'mean', normalize: true });
-          // Use raw vector — embeddingCache now stores raw vectors (ZCA whitening disabled)
+          const out = await embeddingPipe(semQuery, { pooling: 'mean', normalize: true });
           const qvec = new Float32Array(out.data);
           const semResult = await semanticSearch(semQuery, 0, 200, new Set(), qvec);
           if (semResult && semResult.results.length > 0) {
             const facets = nearestClusters(qvec, 4);
-            const semMeta = {
-              intent: 'semantic-explicit', display: 'Semantic', subtype: 'embedding',
-              entityMatch: null, confidence: 0, expansions: [], facets,
-              originalQuery: semQuery,
-            };
+            const semMeta = { intent: 'semantic-explicit', display: 'Semantic', subtype: 'embedding', entityMatch: null, confidence: 0, expansions: [], facets, originalQuery: semQuery };
             searchCacheSet(cacheKey, semResult.results, semResult.total, semMeta);
             return { results: semResult.results, total: semResult.total, meta: semMeta, fromCache: false, cacheKey };
           }
-        } catch (err) {
-          log.warn({ err }, '[SemanticExplicit] embedding failed, falling through to normal pipeline');
-        }
+        } catch (err) { log.warn({ err }, '[SemanticExplicit] embedding failed, falling through to normal pipeline'); }
       }
       query = query.trim().slice(1).trim();
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // UNIFIED PIPELINE — auto phrase + auto semantic + keyword, no syntax needed
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    // Step 4a: Auto phrase detection — always attempt phrase search.
-    // If the query's words appear verbatim in a verse, those hits get tier 2 (phrase).
-    // Users don't need quotes — the system checks automatically.
     const autoPhraseResult = phraseSearch(query.trim(), 0, 50, dba, log);
     const autoPhraseWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
     const autoPhraseCoverageFloor = autoPhraseWordCount >= 5 ? 0.42 : 0.68;
     const normalizedQueryText = normalizeSearchText(query.trim());
     const autoPhraseTermWeights = queryTermWeights(query.trim());
-    const autoAnchorPhrases = autoPhraseWordCount >= 5
-      ? extractAnchorPhrases(query.trim(), autoPhraseTermWeights, 4)
-      : [];
-    const phraseHitEligible = autoPhraseWordCount >= 5
-      ? LONG_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType)
-      : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
-    const phraseHits = phraseHitEligible
-      ? autoPhraseResult.results
-        .map(r => {
-          const phraseCoverage = weightedLexicalCoverage(query.trim(), r, autoPhraseTermWeights);
-          const normalizedVerseText = normalizeSearchText(r.scripture_text || '');
-          const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText);
-          const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, autoPhraseTermWeights);
-          return {
-            ...r,
-            _source: 'fts-phrase',
-            _phraseMatch: true,
-            _phraseCoverage: phraseCoverage,
-            _directPhraseMatch: directPhraseMatch,
-            _anchorPhraseMatch: autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'near',
-            // Mirror to _directQueryMatch so the tier-2 scorer awards the 0.92 bonus
-            // to phrase hits that are literal substrings of the verse text.
-            _directQueryMatch: directPhraseMatch,
-            _sequenceScore: sequenceScore,
-            _anchorWindowScore: anchorWindowScore(r.scripture_text, autoAnchorPhrases, autoPhraseTermWeights),
-          };
-        })
-        .filter(r => {
-          if ((r._phraseCoverage || 0) < autoPhraseCoverageFloor) return false;
-          if (autoPhraseWordCount <= 4) {
-            return Boolean(r._directPhraseMatch);
-          }
-          return Boolean(r._directPhraseMatch)
-            || (r._sequenceScore || 0) >= 0.35
-            || ((r._anchorWindowScore || 0) >= 0.55 && (r._phraseCoverage || 0) >= 0.5);
-        })
-      : [];
+    const autoAnchorPhrases = autoPhraseWordCount >= 5 ? extractAnchorPhrases(query.trim(), autoPhraseTermWeights, 4) : [];
+    const phraseHitEligible = autoPhraseWordCount >= 5 ? LONG_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType) : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
+    const phraseHits = phraseHitEligible ? autoPhraseResult.results.map(r => { const phraseCoverage = weightedLexicalCoverage(query.trim(), r, autoPhraseTermWeights); const normalizedVerseText = normalizeSearchText(r.scripture_text || ''); const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText); const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, autoPhraseTermWeights); return { ...r, _source: 'fts-phrase', _phraseMatch: true, _phraseCoverage: phraseCoverage, _directPhraseMatch: directPhraseMatch, _anchorPhraseMatch: autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'near', _directQueryMatch: directPhraseMatch, _sequenceScore: sequenceScore, _anchorWindowScore: anchorWindowScore(r.scripture_text, autoAnchorPhrases, autoPhraseTermWeights) }; }).filter(r => { if ((r._phraseCoverage || 0) < autoPhraseCoverageFloor) return false; if (autoPhraseWordCount <= 4) return Boolean(r._directPhraseMatch); return Boolean(r._directPhraseMatch) || (r._sequenceScore || 0) >= 0.35 || ((r._anchorWindowScore || 0) >= 0.55 && (r._phraseCoverage || 0) >= 0.5); }) : [];
     const phraseIdsSet = new Set(phraseHits.map(r => r.verse_id));
-
-    // Step 4b: Embed query once — used by semantic scoring, concept expansion, MMR
     let qvec = null;
-    if (embeddingsReady && embeddingPipe) {
-      try {
-        const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true });
-        qvec = whitenVector(new Float32Array(out.data));
-      } catch {}
-    }
-
-    // Step 4c: Per-word embeddings for WMD (only for multi-word queries)
+    if (embeddingsReady && embeddingPipe) { try { const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true }); qvec = whitenVector(new Float32Array(out.data)); } catch {} }
     let queryWordVecs = null;
     const qWords = query.trim().toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    if (embeddingsReady && embeddingPipe && qWords.length >= 2 && qWords.length <= 8) {
-      try {
-        const wordEmbeds = [];
-        for (const w of qWords) {
-          const wout = await embeddingPipe(w, { pooling: 'mean', normalize: true });
-          wordEmbeds.push({ word: w, vec: whitenVector(new Float32Array(wout.data)), weight: 1.0 });
-        }
-        queryWordVecs = wordEmbeds;
-      } catch {}
-    }
-
-    // Compute cosine similarity for phrase hits (needed for tier-2 tiebreaker)
-    if (phraseHits.length > 0 && qvec) {
-      for (const r of phraseHits) {
-        const vec = embeddingCache.get(r.verse_id);
-        r.similarity_score = vec ? +cosineSimilarity(qvec, vec).toFixed(4) : 0;
-      }
-    }
-
-    // Steps 5-6: Multi-source RRF fusion
-    // Pass 1: run with global weights to get confidence + preliminary intent
+    if (embeddingsReady && embeddingPipe && qWords.length >= 2 && qWords.length <= 8) { try { const wordEmbeds = []; for (const w of qWords) { const wout = await embeddingPipe(w, { pooling: 'mean', normalize: true }); wordEmbeds.push({ word: w, vec: whitenVector(new Float32Array(wout.data)), weight: 1.0 }); } queryWordVecs = wordEmbeds; } catch {} }
+    if (phraseHits.length > 0 && qvec) { for (const r of phraseHits) { const vec = embeddingCache.get(r.verse_id); r.similarity_score = vec ? +cosineSimilarity(qvec, vec).toFixed(4) : 0; } }
     const queryWords = new Set(query.trim().toLowerCase().split(/\s+/).filter(t => t.length > 1));
     let fusionResult = multiSourceFusion(query.trim(), query.trim(), 200);
-
-    // Step 7: Sigmoid confidence gate → concept expansion
-    const topRrfScore  = fusionResult.results[0]?._rrfScore || 0;
-    const topBm25      = topRrfScore * 300;
+    const topRrfScore = fusionResult.results[0]?._rrfScore || 0;
+    const topBm25 = topRrfScore * 300;
     const lexicalQuality = fusionResult.diagnostics?.lexicalSignalQuality ?? 0;
     const confidence = sigmoidConfidence(topBm25, fusionResult.total) * (0.35 + 0.65 * lexicalQuality);
     const queryWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
@@ -3876,112 +2695,77 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
     const shouldPreferSemantic = qvec && queryWordCount >= 5 && lexicalQuality < 0.45;
     const hasExactTopicMatch = !!fusionResult.diagnostics?.hasExactTopicMatch;
     const topicGuideHitCount = fusionResult.diagnostics?.topicGuideHitCount || 0;
-
     let prelimIntent = null;
-
-    // Pass 2: re-run fusion with per-intent weights if embeddings are ready (supervised refinement)
-    // Intent can only be classified once we have qvec; skip re-fusion for reference/short queries
     if (qvec && (queryWordCount >= 2 || hasExactTopicMatch)) {
       prelimIntent = classifyQueryIntent(query.trim(), confidence, qvec);
       prelimIntent = refineIntentWithTopicSignals(prelimIntent, queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch);
-      if (shouldPreferSemantic && prelimIntent.type === 'keyword') {
-        prelimIntent = { type: 'conceptual', subtype: 'long-query-low-lexical', entityMatch: null, display: 'Semantic' };
-      } else if (shouldPreferSemantic && prelimIntent.type === 'mixed') {
-        prelimIntent = { type: 'situational', subtype: 'long-query-low-lexical', entityMatch: null, display: 'Situational' };
-      }
-      if (intentWeights.has(prelimIntent.type)) {
-        fusionResult = multiSourceFusion(query.trim(), query.trim(), 200, prelimIntent.type);
-      }
+      if (shouldPreferSemantic && prelimIntent.type === 'keyword') prelimIntent = { type: 'conceptual', subtype: 'long-query-low-lexical', entityMatch: null, display: 'Semantic' };
+      else if (shouldPreferSemantic && prelimIntent.type === 'mixed') prelimIntent = { type: 'situational', subtype: 'long-query-low-lexical', entityMatch: null, display: 'Situational' };
+      if (intentWeights.has(prelimIntent.type)) fusionResult = multiSourceFusion(query.trim(), query.trim(), 200, prelimIntent.type);
     }
-
-    // Long narrative queries with weak lexical coverage should use dense retrieval
-    // as a primary candidate generator, not only as a late injection source.
-    // Similarity floor (0.25) prevents the HNSW from injecting genealogy name-lists
-    // and other structurally-unrelated verses that happen to be nearest-neighbors for
-    // extreme outlier query vectors — these show up with sim ≈ 0 or even negative.
     if (shouldPreferSemantic && qvec) {
       try {
         const semPrimary = await semanticSearch(query.trim(), 0, 80, new Set(), qvec);
-        // Filter out low-quality HNSW neighbors — require meaningful cosine similarity
         const semFiltered = (semPrimary?.results || []).filter(r => (r.similarity_score || 0) >= 0.25);
         if (semFiltered.length >= 3) {
           const semWeight = Math.max(1.8, (getIntentWeights(prelimIntent?.type || 'conceptual')[1] || 1.0) * 2.2);
-          const mergedScores = reciprocalRankFusion(
-            [
-              semFiltered.map(r => ({ ...r, _source: 'semantic-primary' })),
-              fusionResult.results,
-            ],
-            [],
-            [semWeight, 1.0]
-          );
-          fusionResult.results = [...mergedScores.entries()]
-            .map(([vid, entry]) => ({
-              ...entry.row,
-              verse_id: vid,
-              _rrfScore: entry.rrfScore,
-              _sourceCount: entry.sources.size,
-            }))
-            .sort((a, b) => b._rrfScore - a._rrfScore);
+          const mergedScores = reciprocalRankFusion([semFiltered.map(r => ({ ...r, _source: 'semantic-primary' })), fusionResult.results], [], [semWeight, 1.0]);
+          fusionResult.results = [...mergedScores.entries()].map(([vid, entry]) => ({ ...entry.row, verse_id: vid, _rrfScore: entry.rrfScore, _sourceCount: entry.sources.size })).sort((a, b) => b._rrfScore - a._rrfScore);
           fusionResult.total = fusionResult.results.length;
         }
       } catch {}
     }
-
-    // PMI only for single-word queries — multi-word PMI produces noise
     const pmiTermsAdded = queryWordCount <= 1 ? expandWithPmi(query.trim()).slice(0, 5).map(t => t.term) : [];
     let conceptTermsUsed = [];
     const shouldExpand = shouldPreferSemantic || (confidence < 0.6) || (isShortQuery && confidence < 0.85);
     if (shouldExpand && qvec && conceptCache.length) {
-      const topN   = confidence < 0.3 ? 5 : (confidence < 0.6 ? 3 : 2);
+      const topN = confidence < 0.3 ? 5 : (confidence < 0.6 ? 3 : 2);
       const wScale = confidence >= 0.6 ? 0.5 : 1.0;
       const concepts = await expandWithConcepts(query.trim(), topN, qvec);
       conceptTermsUsed = concepts.map(c => c.phrase);
       for (const c of concepts) {
         const cFusion = multiSourceFusion(c.phrase, c.phrase, 5);
-        for (const r of cFusion.results) {
-          if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) {
-            r._rrfScore = (r._rrfScore || 0) * c.score * wScale;
-            fusionResult.results.push(r);
-          }
-        }
+        for (const r of cFusion.results) { if (!fusionResult.results.find(e => e.verse_id === r.verse_id)) { r._rrfScore = (r._rrfScore || 0) * c.score * wScale; fusionResult.results.push(r); } }
       }
       fusionResult.total = fusionResult.results.length;
     }
-
     const queryTopicSlugs = fusionResult.diagnostics?.queryTopicSlugs || [];
-
     results = fusionResult.results;
-    total   = fusionResult.total;
-
-    // Merge phraseHits into candidates (deduplicated).
-    // Preserve the RRF score from fusion for any verse that was already ranked there —
-    // phraseHit rows carry no _rrfScore, so without this Genesis 1:1 loses its
-    // phrase-lane boost and "created the heaven" ranks below plural "heavens" verses.
+    total = fusionResult.total;
     if (phraseHits.length > 0) {
-      const rrfScoreByVerse = new Map(
-        results.filter(r => phraseIdsSet.has(r.verse_id)).map(r => [r.verse_id, r._rrfScore || 0])
-      );
+      const rrfScoreByVerse = new Map(results.filter(r => phraseIdsSet.has(r.verse_id)).map(r => [r.verse_id, r._rrfScore || 0]));
       results = results.filter(r => !phraseIdsSet.has(r.verse_id));
-      results = [
-        ...phraseHits.map(r => ({ ...r, _rrfScore: rrfScoreByVerse.get(r.verse_id) || 0 })),
-        ...results,
-      ];
+      results = [...phraseHits.map(r => ({ ...r, _rrfScore: rrfScoreByVerse.get(r.verse_id) || 0 })), ...results];
     }
-
-    // Step 4d: Proactive semantic injection for multi-word queries
-    // Problem: BM25 OR-fallback returns enough results to suppress the semantic semFallback
-    // (Step 8), so semantic-only matches — verses with no keyword overlap but high embedding
-    // similarity to the full phrase — never enter the candidate pool at all.
-    // Fix: always run HNSW for queries with 2+ words and inject top semantic hits.
-    // semInjectWeight = min(0.95, 0.40 + (N−1) × 0.08) — pure mathematics, no hardcoding:
-    //   N=2 → 0.48,  N=3 → 0.56,  N=5 → 0.72,  N=8 → 0.95
-    // Longer phrases get stronger semantic injection; short queries stay keyword-dominant.
+    let embeddingPhraseMatches = [];
+    const queryWordCountForPhrase = query.trim().split(/\s+/).filter(t => t.length > 1).length;
+    if (embeddingsReady && queryWordCountForPhrase >= 2 && queryWordCountForPhrase <= 8 && wordEmbeddingCache && wordEmbeddingCache.size > 0 && results && results.length > 0) {
+      try {
+        const phraseMatchStartTime = Date.now();
+        const candidates = results.slice(0, 200).map(r => ({ verse_id: r.verse_id, scripture_text: r.scripture_text || (verseMetaCache.get(r.verse_id)?.scripture_text || ''), existingScore: r._rrfScore || 0 })).filter(c => c.scripture_text && c.scripture_text.length > 0);
+        const embedder = embeddingPipe ? { encode: async (text, opts) => { const out = await embeddingPipe(text, opts); return { data: out.data }; } } : null;
+        const matches = await batchPhraseMatch(query.trim(), candidates, wordEmbeddingCache, embedder, { threshold: 0.55, maxResults: 15 });
+        if (matches && matches.length > 0) {
+          const stmtVerseForMatch = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
+          for (const match of matches) {
+            const row = stmtVerseForMatch.get(match.verse_id);
+            if (row) embeddingPhraseMatches.push({ ...row, similarity_score: match.score, _source: 'semantic-phrase', _rrfScore: match.score * 0.9, _directQueryMatch: true, _phraseCoverage: match.score });
+          }
+          const phraseMatchElapsed = Date.now() - phraseMatchStartTime;
+          log.info(`[PhraseMatcher] Found ${matches.length} matches from ${candidates.length} candidates in ${phraseMatchElapsed}ms`);
+        }
+      } catch (err) { log.warn('[PhraseMatcher] Error:', err.message); }
+    }
+    if (embeddingPhraseMatches && embeddingPhraseMatches.length > 0) {
+      const existingIds = new Set(results.map(r => r.verse_id));
+      let injectedCount = 0;
+      for (const match of embeddingPhraseMatches) { if (!existingIds.has(match.verse_id)) { results.push(match); existingIds.add(match.verse_id); injectedCount++; } }
+      if (injectedCount > 0) { results.sort((a, b) => (b._rrfScore || 0) - (a._rrfScore || 0)); log.info(`[PhraseMatcher] Injected ${injectedCount} new semantic phrase results`); }
+    }
     if (qvec && queryWordCount >= 2 && embeddingsReady && embeddingPipe) {
       const semInjectWeight = Math.min(0.95, 0.40 + (queryWordCount - 1) * 0.08);
       const semInjectFloor = queryWordCount >= 5 ? 0.22 : 0.16;
-      const strongLexicalHead = results.slice(0, 5).some(r =>
-        (r._sequenceScore || 0) >= 0.35 || (r._lexicalCoverage || 0) >= 0.48 || Boolean(r._anchorPhraseMatch)
-      );
+      const strongLexicalHead = results.slice(0, 5).some(r => (r._sequenceScore || 0) >= 0.35 || (r._lexicalCoverage || 0) >= 0.48 || Boolean(r._anchorPhraseMatch));
       try {
         const semProbe = await semanticSearch(query.trim(), 0, 50, new Set(), qvec);
         if (semProbe && semProbe.results.length > 0) {
@@ -3991,22 +2775,10 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
             if (queryWordCount >= 5 && strongLexicalHead && (sr.similarity_score || 0) < 0.28) continue;
             const existingIdx = existingByVerse.get(sr.verse_id);
             if (existingIdx !== undefined) {
-              // Verse already in results from FTS/topical lane — update sim score if
-              // semantic score is higher (lets WMD reranking and tier scoring use it)
               const existing = results[existingIdx];
-              if ((sr.similarity_score || 0) > (existing.similarity_score || 0)) {
-                existing.similarity_score = sr.similarity_score;
-                existing._rrfScore = Math.max(
-                  existing._rrfScore || 0,
-                  sr.similarity_score * semInjectWeight * 0.05
-                );
-              }
+              if ((sr.similarity_score || 0) > (existing.similarity_score || 0)) { existing.similarity_score = sr.similarity_score; existing._rrfScore = Math.max(existing._rrfScore || 0, sr.similarity_score * semInjectWeight * 0.05); }
             } else {
-              results.push({
-                ...sr,
-                _source: 'sem-inject',
-                _rrfScore: Math.max(0.01, sr.similarity_score * semInjectWeight * 0.06),
-              });
+              results.push({ ...sr, _source: 'sem-inject', _rrfScore: Math.max(0.01, sr.similarity_score * semInjectWeight * 0.06) });
               existingByVerse.set(sr.verse_id, results.length - 1);
             }
           }
@@ -4014,14 +2786,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         }
       } catch {}
     }
-
-    // Step 5.5: kNN graph expansion
     if (qvec && db_graph && results.length > 0) {
       const existingIds = new Set(results.map(r => r.verse_id));
-      const stmtVerse = dba.prepare(`
-        SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
-        FROM scriptures WHERE verse_id = ?
-      `);
+      const stmtVerse = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
       const knnStmt = db_graph.prepare('SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank ASC LIMIT 10');
       const toInject = [];
       for (const r of results.slice(0, 12)) {
@@ -4042,30 +2809,16 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         }
       }
       toInject.sort((a, b) => b.score - a.score);
-      for (const { verse_id, score } of toInject.slice(0, 30)) {
-        const row = stmtVerse.get(verse_id);
-        if (row) results.push({ ...row, _source: 'knn-expand', _rrfScore: score * 0.6, similarity_score: +score.toFixed(4) });
-      }
+      for (const { verse_id, score } of toInject.slice(0, 30)) { const row = stmtVerse.get(verse_id); if (row) results.push({ ...row, _source: 'knn-expand', _rrfScore: score * 0.6, similarity_score: +score.toFixed(4) }); }
       total = results.length;
     }
-
-    // Step 6: Attach spectral similarity if available
     if (spectralReady && qvec && results.length > 0) {
-      // Infer query spectral vector from pure semantic (HNSW) neighbors, not fusion results.
-      // Using fusion-top results would poison qSpec when entity-intent pulls the wrong domain
-      // (e.g. "God calling many but only few chosen" → fusion puts Genesis 1 at top →
-      // qSpec collapses to Genesis cluster → spectral blending demotes correct results).
-      // HNSW top-5 are purely embedding-nearest and unaffected by BM25/entity intent weights.
       const topK = Math.min(5, results.length);
       const qSpec = new Float32Array(SPECTRAL_DIM);
       let wSum = 0;
       let spectralSeeds;
-      if (hnswIndex) {
-        spectralSeeds = hnswIndex.query(qvec, topK, topK * 4)
-          .map(h => h.verse_id);
-      } else {
-        spectralSeeds = results.slice(0, topK).map(r => r.verse_id);
-      }
+      if (hnswIndex) spectralSeeds = hnswIndex.query(qvec, topK, topK * 4).map(h => h.verse_id);
+      else spectralSeeds = results.slice(0, topK).map(r => r.verse_id);
       for (const vid of spectralSeeds) {
         const sv = spectralCache.get(vid);
         if (!sv) continue;
@@ -4076,67 +2829,35 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       }
       if (wSum > 0) {
         for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] /= wSum;
-        // L2-normalize
         let norm = 0;
         for (let d = 0; d < SPECTRAL_DIM; d++) norm += qSpec[d] * qSpec[d];
         norm = Math.sqrt(norm) || 1;
         for (let d = 0; d < SPECTRAL_DIM; d++) qSpec[d] /= norm;
-        // Attach spectral sim to all results
         for (const r of results) {
           const sv = spectralCache.get(r.verse_id);
           if (sv) {
             let dot = 0, na = 0, nb = 0;
-            for (let d = 0; d < SPECTRAL_DIM; d++) {
-              dot += qSpec[d] * sv[d];
-              na += qSpec[d] * qSpec[d];
-              nb += sv[d] * sv[d];
-            }
+            for (let d = 0; d < SPECTRAL_DIM; d++) { dot += qSpec[d] * sv[d]; na += qSpec[d] * qSpec[d]; nb += sv[d] * sv[d]; }
             r._spectralSim = dot / ((Math.sqrt(na) * Math.sqrt(nb)) || 1);
           }
         }
       }
     }
-
-    // Step 6b: MMR diversity reranking
-    // λ adapts from entropy — nudged by per-intent semantic weight:
-    // high semantic weight → lower λ (more diversity), low → higher λ (relevance focus)
     if (results.length > 1 && qvec) {
-      const _preIntentClass = refineIntentWithTopicSignals(
-        classifyQueryIntent(query.trim(), confidence, qvec),
-        queryWordCount,
-        lexicalQuality,
-        topicGuideHitCount,
-        hasExactTopicMatch
-      );
+      const _preIntentClass = refineIntentWithTopicSignals(classifyQueryIntent(query.trim(), confidence, qvec), queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch);
       const _iW = getIntentWeights(_preIntentClass.type);
-      // Semantic weight normalized [0.1, 1.4] → λ bias ∈ [+0.08, -0.08]
-      const _semNorm  = Math.min(1.0, Math.max(0.0, (_iW[1] - 0.1) / 1.3));
-      // High semantic weight (conceptual/situational queries) → lower λ → more diversity
-      // Low semantic weight (keyword/reference) → higher λ → tighter relevance focus
-      const _mmrLambda = 0.5 + (0.5 - _semNorm) * 0.16; // [0.42, 0.58]
+      const _semNorm = Math.min(1.0, Math.max(0.0, (_iW[1] - 0.1) / 1.3));
+      const _mmrLambda = 0.5 + (0.5 - _semNorm) * 0.16;
       results = mmrRerank(results, qvec, _mmrLambda, Math.min(200, results.length));
       results = results.map(r => ({ ...r, similarity_score: +(r.simToQuery ?? r.similarity_score ?? 0).toFixed(4) }));
     }
-
-    // Step 8: Semantic fallback
     const semFallbackThreshold = isShortQuery ? 15 : 5;
     if (total < semFallbackThreshold && qvec) {
       const excludeIds = new Set(results.map(r => r.verse_id));
       const sem = await semanticSearch(query.trim(), 0, 30, excludeIds, qvec);
-      if (sem && sem.results.length > 0) {
-        results = [...results, ...sem.results];
-        total = results.length;
-      }
+      if (sem && sem.results.length > 0) { results = [...results, ...sem.results]; total = results.length; }
     }
-
-    // Step 6.5: Query-Personalized PageRank
-    const propagationIntentClass = prelimIntent || refineIntentWithTopicSignals(
-      classifyQueryIntent(query.trim(), confidence, qvec),
-      queryWordCount,
-      lexicalQuality,
-      topicGuideHitCount,
-      hasExactTopicMatch
-    );
+    const propagationIntentClass = prelimIntent || refineIntentWithTopicSignals(classifyQueryIntent(query.trim(), confidence, qvec), queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch);
     const propagationProfiles = {
       reference: null,
       phrase: { alpha: 0.72, hops: 1, iters: 3, seedLimit: 5, maxInfluence: 0.06, knnLimit: 8, crossRefLimit: 4, topicEdgeLimit: 0 },
@@ -4147,74 +2868,33 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       entity: { alpha: 0.78, hops: 1, iters: 3, seedLimit: 5, maxInfluence: 0.07, knnLimit: 8, crossRefLimit: 4, topicEdgeLimit: 0 },
     };
     const propagationConfig = propagationProfiles[propagationIntentClass.type] || propagationProfiles.mixed;
-    const qpprSeedRows = propagationConfig && results.length > 0
-      ? results.filter((row) => {
-        if (!row || !row.verse_id) return false;
-        if (row._directQueryMatch || row._anchorPhraseMatch) return true;
-        if ((row._lexicalCoverage || 0) >= 0.44) return true;
-        if ((row.similarity_score || 0) >= 0.32) return true;
-        // Exclude topical-guide from PageRank seeds so topical hits don't seed PPR
-        return row._source === 'cross-ref' || row._source === 'semantic-primary';
-      }).slice(0, propagationConfig.seedLimit)
-      : [];
-    const qpprScores = propagationConfig && qpprSeedRows.length >= 3
-      ? queryPPR(qpprSeedRows, { ...propagationConfig, queryTopicSlugs })
-      : null;
-    if (contextVerseId) {
-      results = contextBoost(results, contextVerseId);
-    }
-
-    // Step 6.6: RWR graph diffusion — inject structurally related verses from pre-baked scores
-    // Seeds from top-3 FTS results; picks up highly connected neighbours not found by FTS/HNSW.
+    const qpprSeedRows = propagationConfig && results.length > 0 ? results.filter((row) => { if (!row || !row.verse_id) return false; if (row._directQueryMatch || row._anchorPhraseMatch) return true; if ((row._lexicalCoverage || 0) >= 0.44) return true; if ((row.similarity_score || 0) >= 0.32) return true; return row._source === 'cross-ref' || row._source === 'semantic-primary'; }).slice(0, propagationConfig.seedLimit) : [];
+    const qpprScores = propagationConfig && qpprSeedRows.length >= 3 ? queryPPR(qpprSeedRows, { ...propagationConfig, queryTopicSlugs }) : null;
+    if (contextVerseId) results = contextBoost(results, contextVerseId);
     if (rwrStmt && results.length > 0) {
       try {
         const existingIds = new Set(results.map(r => r.verse_id));
-        const stmtVerse = dba.prepare(
-          'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
-        );
-        const toInject = new Map(); // verse_id → best rwr_score
+        const stmtVerse = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
+        const toInject = new Map();
         for (const seed of results.slice(0, 3)) {
           const rwrRows = rwrStmt.all(seed.verse_id);
           for (const rr of rwrRows) {
-            if (existingIds.has(rr.neighbor_id)) {
-              // Already present — boost its RRF score instead of injecting
-              const existing = results.find(r => r.verse_id === rr.neighbor_id);
-              if (existing) existing._rrfScore = (existing._rrfScore || 0) + rr.rwr_score * 0.1;
-            } else if ((toInject.get(rr.neighbor_id) || 0) < rr.rwr_score) {
-              toInject.set(rr.neighbor_id, rr.rwr_score);
-            }
+            if (existingIds.has(rr.neighbor_id)) { const existing = results.find(r => r.verse_id === rr.neighbor_id); if (existing) existing._rrfScore = (existing._rrfScore || 0) + rr.rwr_score * 0.1; }
+            else if ((toInject.get(rr.neighbor_id) || 0) < rr.rwr_score) toInject.set(rr.neighbor_id, rr.rwr_score);
           }
         }
-        // Inject top-5 RWR neighbours not already in results
         const candidates = [...toInject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-        for (const [vid, rwrScore] of candidates) {
-          const row = stmtVerse.get(vid);
-          if (row) {
-            const vec = embeddingCache.get(vid);
-            const simScore = (vec && qvec) ? +cosineSimilarity(qvec, vec).toFixed(4) : 0;
-            results.push({ ...row, _source: 'rwr', _rrfScore: rwrScore * 0.08, similarity_score: simScore });
-          }
-        }
+        for (const [vid, rwrScore] of candidates) { const row = stmtVerse.get(vid); if (row) { const vec = embeddingCache.get(vid); const simScore = (vec && qvec) ? +cosineSimilarity(qvec, vec).toFixed(4) : 0; results.push({ ...row, _source: 'rwr', _rrfScore: rwrScore * 0.08, similarity_score: simScore }); } }
       } catch {}
     }
-
-    // Step 7.5: WMD reranking for multi-concept queries
-    // Sinkhorn EMD between per-word query embeddings and IDF-weighted per-word verse tokens.
-    // Uses concept-cache as a word embedding lookup for verse words; skips words not found.
-    // This correctly measures the minimum-cost transport between the query's word distribution
-    // and the verse's word distribution — avoiding the "averaging problem".
     if (queryWordVecs && queryWordVecs.length >= 2 && confidence < 0.7 && results.length > 0) {
-      // Build word→vec lookup from conceptCache single-word entries (pre-baked)
       const wordVecLookup = new Map();
-      for (const c of conceptCache) {
-        if (!c.phrase.includes(' ')) wordVecLookup.set(c.phrase.toLowerCase(), c.vec);
-      }
+      for (const c of conceptCache) { if (!c.phrase.includes(' ')) wordVecLookup.set(c.phrase.toLowerCase(), c.vec); }
       const wmdLimit = Math.min(50, results.length);
       for (let i = 0; i < wmdLimit; i++) {
         const r = results[i];
         const cosSim = r.similarity_score || 0;
         if (cosSim <= 0) continue;
-        // Build IDF-weighted per-word token distribution for the verse
         const verseMeta = verseMetaCache.get(r.verse_id);
         const verseText = verseMeta?.scripture_text || r.scripture_text || '';
         const verseWords = verseText.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 2);
@@ -4223,10 +2903,9 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
           const vec = wordVecLookup.get(w);
           if (!vec) continue;
           const idfScore = idfStmt ? (idfStmt.get(w)?.idf || 3.0) : 1.0;
-          if (idfScore < 1.0) continue; // skip stopwords
+          if (idfScore < 1.0) continue;
           verseTokens.push({ vec, weight: idfScore });
         }
-        // Fall back to single-token if no word embeddings found in concept cache
         const vVec = embeddingCache.get(r.verse_id);
         if (verseTokens.length < 2) {
           if (!vVec) continue;
@@ -4234,251 +2913,86 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
           const wmdScore = Math.exp(-wmd * 3.0);
           r.similarity_score = +(0.7 * cosSim + 0.3 * wmdScore).toFixed(4);
         } else {
-          // Normalize token weights to sum to 1 (required by Sinkhorn)
           const wSum = verseTokens.reduce((s, t) => s + t.weight, 0);
           for (const t of verseTokens) t.weight /= wSum;
           const wmd = sinkhornWMD(queryWordVecs, verseTokens);
           const wmdScore = Math.exp(-wmd * 3.0);
-          // Blend: 60% cosine + 40% WMD (more WMD weight now verse side is real)
           r.similarity_score = +(0.6 * cosSim + 0.4 * wmdScore).toFixed(4);
         }
       }
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Step 10: 5-TIER SPECIFICITY SCORING WITH SIGMOID SOFT-GATES
-    //
-    // Every result gets assigned to exactly one tier based on how it was found.
-    // Tier 1 (reference) already early-returned above.
-    //
-    //   Tier 2 (base 4.0): Exact/AND phrase match — verbatim text in verse
-    //   Tier 3 (base 3.0): Semantic — cosine sim soft-gated (no hard cliff)
-    //   Tier 4 (base 2.0): Topical — found via topical guide source
-    //   Tier 5 (base 1.0): Keyword/mixed — BM25/RRF only
-    //
-    // Sigmoid soft-gate: σ(k·(sim - θ)) replaces hard threshold.
-    // At sim=θ → gate=0.5. At sim=θ+0.1 → gate≈0.88. Smooth, no cliff.
-    //
-    // Within each tier: ranked by natural score (cosine for 2-3, RRF for 4-5).
-    // Tier gaps = 1.0, within-tier scores ∈ [0, 1) → no cross-tier leakage.
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    // Threshold calibrated from distribution analysis:
-    // scripture_minilm (fine-tuned bge-base-en-v1.5): random median≈0.25, adjacent-verse median≈0.37, P95≈0.67
-    // Whitening disabled — always use raw thresholds.
-    const SEM_THRESHOLD_BASE = 0.28; // raw: separates signal (>0.35) from background noise (~0.22)
-    const SEM_SIGMOID_K = 20; // steepness: 0.12→0.88 transition over ±0.1 around θ
-
-    const intentClass = refineIntentWithTopicSignals(
-      classifyQueryIntent(query.trim(), confidence, qvec),
-      queryWordCount,
-      lexicalQuality,
-      topicGuideHitCount,
-      hasExactTopicMatch
-    );
-
-    // Per-intent semantic threshold adjustment:
-    // Higher semantic weight (intentWeights[1]) → lower threshold (softer semantic gate)
-    // Lower semantic weight → higher threshold (stricter semantic gate)
-    // Δ range: ±0.04   so final threshold stays in [0.24, 0.32] (raw)
+    const SEM_THRESHOLD_BASE = 0.28;
+    const SEM_SIGMOID_K = 20;
+    const intentClass = refineIntentWithTopicSignals(classifyQueryIntent(query.trim(), confidence, qvec), queryWordCount, lexicalQuality, topicGuideHitCount, hasExactTopicMatch);
     const _iWFinal = getIntentWeights(intentClass.type);
     const _semWNorm = Math.min(1.0, Math.max(0.0, (_iWFinal[1] - 0.1) / 1.3));
     const SEM_THRESHOLD = SEM_THRESHOLD_BASE - (_semWNorm - 0.5) * 0.08;
-
-    // Quality filter: remove OR-fallback stopword noise before tier assignment
-    // Raw cosine baseline for unrelated pairs ≈ 0.15-0.25; floor at 0.20 to exclude noise
     const SIM_FLOOR = 0.15;
     if (qvec) {
-      // Relative RRF floor: scale to the actual distribution of scores in the pool.
-      // Intent-specific weights (e.g. "mixed" W₀ ≈ 0.42 vs global W₀ = 3.0) compress
-      // all _rrfScore values proportionally, so a fixed 0.015 floor would zero the
-      // entire result set when the intent weight is low.
-      // Floor = max(topRrf × 0.08, 0.001): keeps results within ~12× of the top score.
-      const _topRrf = results.length > 0
-        ? Math.max(...results.slice(0, 20).map(r => r._rrfScore || 0))
-        : 0;
+      const _topRrf = results.length > 0 ? Math.max(...results.slice(0, 20).map(r => r._rrfScore || 0)) : 0;
       const RRF_FLOOR = _topRrf > 0 ? Math.max(_topRrf * 0.08, 0.001) : 0.015;
-      results = results.filter(r => {
-        if (phraseIdsSet.has(r.verse_id)) return true;
-        const sim = r.similarity_score || 0;
-        const rrf = r._rrfScore || 0;
-        return sim >= SIM_FLOOR || rrf >= RRF_FLOOR;
-      });
+      results = results.filter(r => { if (phraseIdsSet.has(r.verse_id)) return true; const sim = r.similarity_score || 0; const rrf = r._rrfScore || 0; return sim >= SIM_FLOOR || rrf >= RRF_FLOOR; });
     }
-
     if (results.length > 1) {
       results = results.map(r => {
         const simScore = r.similarity_score || 0;
         const rrf = r._rrfScore || 0;
         const rrfNorm = Math.min(rrf * 8, 0.99);
         const isTopicalSource = (r._source || '').includes('topical');
-        // QPPR graph-authority score (0–1, normalised); 0 if not in local subgraph
         const qpprBoost = (qpprScores && qpprScores.get(r.verse_id)) || 0;
         r._qpprScore = qpprBoost;
-        // Spectral similarity for tier promotion (computed in Step 6 above)
         const specSim = r._spectralSim || 0;
         let tier, tierScore;
-
-        const hasMeaningfulPhraseEvidence = phraseIdsSet.has(r.verse_id)
-          || Boolean(r._directQueryMatch)
-          || r._anchorPhraseMatch
-          || (queryWordCount >= 5 && (r._sequenceScore || 0) >= 0.52 && (r._lexicalCoverage || 0) >= 0.4)
-          || (queryWordCount >= 5 && (r._anchorWindowScore || 0) >= 0.72);
+        const hasMeaningfulPhraseEvidence = phraseIdsSet.has(r.verse_id) || Boolean(r._directQueryMatch) || r._anchorPhraseMatch || (queryWordCount >= 5 && (r._sequenceScore || 0) >= 0.52 && (r._lexicalCoverage || 0) >= 0.4) || (queryWordCount >= 5 && (r._anchorWindowScore || 0) >= 0.72);
         if (hasMeaningfulPhraseEvidence) {
-          // Tier 2: exact/AND phrase match — cosine tiebreaker
           tier = 2;
-          tierScore = Math.min(
-            Math.max(
-              simScore > 0 ? simScore : 0,
-              (r._directQueryMatch ? 0.92 : 0),
-              (r._phraseCoverage || r._lexicalCoverage || 0) * 0.6
-                + (r._anchorStrength || 0) * 0.2
-                + (r._phraseSignal || 0) * 0.1
-                + (r._anchorWindowScore || 0) * 0.1,
-              rrfNorm
-            ),
-            0.99
-          );
+          tierScore = Math.min(Math.max(simScore > 0 ? simScore : 0, (r._directQueryMatch ? 0.92 : 0), (r._phraseCoverage || r._lexicalCoverage || 0) * 0.6 + (r._anchorStrength || 0) * 0.2 + (r._phraseSignal || 0) * 0.1 + (r._anchorWindowScore || 0) * 0.1, rrfNorm), 0.99);
         } else if (qvec && simScore > 0) {
-          // Sigmoid soft-gate: smooth transition instead of hard cutoff
           const gate = 1.0 / (1.0 + Math.exp(-SEM_SIGMOID_K * (simScore - SEM_THRESHOLD)));
-          if (gate >= 0.5) {
-            // Tier 3: semantic match — rank by gated cosine
-            tier = 3;
-            tierScore = Math.min(gate * simScore, 0.99);
-          } else if (isTopicalSource) {
-            // Tier 4: topical with sub-threshold semantic — blend gate + RRF
-            tier = 4;
-            tierScore = Math.min(gate * simScore + (1 - gate) * rrfNorm, 0.99);
-          } else if (specSim > 0.55 && qpprBoost > 0.3) {
-            // Spectral + QPPR promotion: graph-structurally central AND spectrally close
-            // → promote tier 5 candidate to tier 4 (unsupervised structure signal)
-            tier = 4;
-            tierScore = Math.min(specSim * 0.6 + rrfNorm * 0.4, 0.99);
-          } else {
-            // Tier 5: weak semantic — use RRF with small cosine nudge
-            tier = 5;
-            tierScore = Math.min(rrfNorm + gate * simScore * 0.3, 0.99);
-          }
-        } else if (isTopicalSource) {
-          // Tier 4: pure topical (no embedding available)
-          tier = 4;
-          tierScore = rrfNorm;
-        } else {
-          // Tier 5: keyword/mixed coverage
-          tier = 5;
-          if (queryWordCount >= 5) {
-            const lexicalNudge = Math.max(0, (r._lexicalCoverage || 0) - 0.28) * 0.08;
-            const anchorNudge = (r._anchorWindowScore || 0) * 0.07;
-            const sequenceNudge = (r._sequenceScore || 0) * 0.12;
-            tierScore = Math.min(rrfNorm + lexicalNudge + anchorNudge + sequenceNudge, 0.99);
-          } else {
-            tierScore = rrfNorm;
-          }
-        }
-
-        // specificityScore: tier 2→[4,5), tier 3→[3,4), tier 4→[2,3), tier 5→[1,2)
-        // Apply QPPR within-tier boost: max +0.15 — cannot cross tier boundary (gap=1.0)
+          if (gate >= 0.5) { tier = 3; tierScore = Math.min(gate * simScore, 0.99); }
+          else if (isTopicalSource) { tier = 4; tierScore = Math.min(gate * simScore + (1 - gate) * rrfNorm, 0.99); }
+          else if (specSim > 0.55 && qpprBoost > 0.3) { tier = 4; tierScore = Math.min(specSim * 0.6 + rrfNorm * 0.4, 0.99); }
+          else { tier = 5; tierScore = Math.min(rrfNorm + gate * simScore * 0.3, 0.99); }
+        } else if (isTopicalSource) { tier = 4; tierScore = rrfNorm; }
+        else { tier = 5; if (queryWordCount >= 5) { const lexicalNudge = Math.max(0, (r._lexicalCoverage || 0) - 0.28) * 0.08; const anchorNudge = (r._anchorWindowScore || 0) * 0.07; const sequenceNudge = (r._sequenceScore || 0) * 0.12; tierScore = Math.min(rrfNorm + lexicalNudge + anchorNudge + sequenceNudge, 0.99); } else { tierScore = rrfNorm; } }
         const structurePrior = computeWeakStructurePrior(r, intentClass.type, queryWordCount, lexicalQuality);
         let specificityScore = (6 - tier) + tierScore + qpprBoost * (propagationConfig?.maxInfluence || 0.08) + structurePrior;
-        if (calibrationCurves.size > 0) {
-          specificityScore = calibrateScore(tier, specificityScore);
-        }
+        if (calibrationCurves.size > 0) specificityScore = calibrateScore(tier, specificityScore);
         const nextRow = { ...r, _specificity_score: specificityScore, _tier: tier, _structurePrior: structurePrior };
         nextRow._relevance_probability = computeRelevanceProbability(nextRow, intentClass.type, confidence);
         return nextRow;
       });
-      results.sort((a, b) =>
-        (b._specificity_score || 0) - (a._specificity_score || 0)
-        || (b._relevance_probability || 0) - (a._relevance_probability || 0)
-      );
+      results.sort((a, b) => (b._specificity_score || 0) - (a._specificity_score || 0) || (b._relevance_probability || 0) - (a._relevance_probability || 0));
     }
-
     const adaptiveCutoff = computeAdaptiveResultCutoff(results, intentClass.type, confidence);
-    if (adaptiveCutoff) {
-      results = results.slice(0, adaptiveCutoff.keepCount);
-    }
-
-    // Clean internal fields before caching — keep _source and _tier for display
-    const allExpansions = [...new Set([...pmiTermsAdded, ...conceptTermsUsed])]
-      .filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
+    if (adaptiveCutoff) results = results.slice(0, adaptiveCutoff.keepCount);
+    const allExpansions = [...new Set([...pmiTermsAdded, ...conceptTermsUsed])].filter(t => !queryWords.has(t) && t.length > 1).slice(0, 10);
     const facets = qvec ? nearestClusters(qvec, 4) : [];
-    pipelineMeta = {
-      intent:     intentClass.type,
-      display:    intentClass.display,
-      subtype:    intentClass.subtype,
-      entityMatch: intentClass.entityMatch,
-      confidence: +confidence.toFixed(3),
-      probabilityModel: 'logistic-v1',
-      expansions: allExpansions,
-      facets,
-      qpprActive:      !!(qpprScores && qpprScores.size > 0),
-      graphSeedCount: qpprSeedRows.length,
-      weakStructurePrior: shouldUseWeakStructurePrior(intentClass.type, queryWordCount, lexicalQuality),
-      phraseMatchCount: phraseHits.length,
-      adaptiveCutoff,
-    };
-
-    // Auto-populate search_calibration: write top-20 tier+raw_score rows
-    // so PAV calibration can fit curves without requiring client to send them manually.
+    pipelineMeta = { intent: intentClass.type, display: intentClass.display, subtype: intentClass.subtype, entityMatch: intentClass.entityMatch, confidence: +confidence.toFixed(3), probabilityModel: 'logistic-v1', expansions: allExpansions, facets, qpprActive: !!(qpprScores && qpprScores.size > 0), graphSeedCount: qpprSeedRows.length, weakStructurePrior: shouldUseWeakStructurePrior(intentClass.type, queryWordCount, lexicalQuality), phraseMatchCount: phraseHits.length, adaptiveCutoff };
     try {
-      const calIns = db_user.prepare(
-        'INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, 0)'
-      );
+      const calIns = db_user.prepare('INSERT INTO search_calibration (ts, tier, raw_score, clicked) VALUES (?, ?, ?, 0)');
       const now = Date.now();
-      db_user.transaction(() => {
-        for (const r of results.slice(0, 20)) {
-          if (r._tier != null && r._specificity_score != null) {
-            calIns.run(now, r._tier, +r._specificity_score.toFixed(4));
-          }
-        }
-      })();
+      db_user.transaction(() => { for (const r of results.slice(0, 20)) { if (r._tier != null && r._specificity_score != null) calIns.run(now, r._tier, +r._specificity_score.toFixed(4)); } })();
     } catch {}
-
-    results = results.map(r => {
-      const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _anchorPhraseMatch, _phraseSignal, _phraseCoverage, _qpprScore, _structurePrior, ...clean } = r;
-      return clean;
-    });
+    results = results.map(r => { const { _rrfScore, _bm25, _bm25_rank, _sourceCount, simToQuery, idx, _learned_score, _phraseMatch, _anchorPhraseMatch, _phraseSignal, _phraseCoverage, _qpprScore, _structurePrior, ...clean } = r; return clean; });
     total = results.length;
   }
-
-  // Step 9: Dwell-time boost — within-tier nudge only (max 0.15, tier gap = 1.0)
   try {
-    const topDwell = db_user.prepare(`
-      SELECT verse_id, SUM(dwell_ms) AS total_dwell
-      FROM reading_events WHERE event_type = 'read' AND dwell_ms > 3000
-      GROUP BY verse_id ORDER BY total_dwell DESC LIMIT 500
-    `).all();
+    const topDwell = db_user.prepare(`SELECT verse_id, SUM(dwell_ms) AS total_dwell FROM reading_events WHERE event_type = 'read' AND dwell_ms > 3000 GROUP BY verse_id ORDER BY total_dwell DESC LIMIT 500`).all();
     if (topDwell.length > 0) {
       const maxDwell = topDwell[0].total_dwell || 1;
       const dwellMap = new Map(topDwell.map(r => [r.verse_id, r.total_dwell / maxDwell]));
-      results = results.map(r => {
-        const dw = dwellMap.get(r.verse_id) || 0;
-        if (dw > 0) return { ...r, similarity_score: ((r.similarity_score || 0) + dw * 0.15) };
-        return r;
-      });
+      results = results.map(r => { const dw = dwellMap.get(r.verse_id) || 0; if (dw > 0) return { ...r, similarity_score: ((r.similarity_score || 0) + dw * 0.15) }; return r; });
     }
   } catch {}
-
-  // Step 9b: Item2Vec session similarity boost
   if (item2vecReady && item2vecVectors.size > 0 && results.length > 0) {
-    const topVecs = results.slice(0, 5)
-      .map(r => item2vecVectors.get(r.verse_id))
-      .filter(Boolean);
+    const topVecs = results.slice(0, 5).map(r => item2vecVectors.get(r.verse_id)).filter(Boolean);
     if (topVecs.length > 0) {
       const queryVec = new Float32Array(ITEM2VEC_DIM);
       for (const v of topVecs) for (let i = 0; i < ITEM2VEC_DIM; i++) queryVec[i] += v[i] / topVecs.length;
-
-      results = results.map(r => {
-        const rv = item2vecVectors.get(r.verse_id);
-        if (!rv) return r;
-        const sim = item2vecSimilarity(queryVec, rv);
-        return { ...r, similarity_score: (r.similarity_score || 0) + sim * 0.1 };
-      });
+      results = results.map(r => { const rv = item2vecVectors.get(r.verse_id); if (!rv) return r; const sim = item2vecSimilarity(queryVec, rv); return { ...r, similarity_score: (r.similarity_score || 0) + sim * 0.1 }; });
     }
   }
-
-  // Step 9c: Session-centroid boost
   let sessionCentroidActive = false;
   if (sessionId && embeddingsReady) {
     try {
@@ -4487,349 +3001,160 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
         const centroid = sessionCentroid(sState.liveHistory);
         if (centroid) {
           sessionCentroidActive = true;
-          results = results.map(r => {
-            const vec = embeddingCache.get(r.verse_id);
-            if (!vec) return r;
-            const sim = cosineSimilarity(centroid, vec);
-            const boost = Math.max(0, sim - 0.3) * 0.4;
-            return boost > 0 ? { ...r, similarity_score: (r.similarity_score || 0) + boost } : r;
-          });
+          results = results.map(r => { const vec = embeddingCache.get(r.verse_id); if (!vec) return r; const sim = cosineSimilarity(centroid, vec); const boost = Math.max(0, sim - 0.3) * 0.4; return boost > 0 ? { ...r, similarity_score: (r.similarity_score || 0) + boost } : r; });
         }
       }
-    } catch {};
+    } catch {}
   }
-
-  // NOTE: No re-sort by similarity_score here — tier ordering from Step 10 is authoritative.
-  // Dwell/item2vec/centroid boosts are small within-tier nudges (max ~0.3) and cannot
-  // cross tier boundaries (gap = 1.0). The _tier field preserves specificity hierarchy.
-
   if (pipelineMeta) pipelineMeta.sessionDrift = sessionCentroidActive;
-
   searchCacheSet(cacheKey, results, total, pipelineMeta);
   return { results, total, meta: pipelineMeta, fromCache: false, cacheKey };
 }
 
 function buildVerseMetaCache() {
   const rows = db.prepare('SELECT id AS verse_id, chapter_id, scripture_text FROM verses').all();
-  for (const r of rows) {
-    verseMetaCache.set(r.verse_id, { chapter_id: r.chapter_id, scripture_text: r.scripture_text });
-  }
+  for (const r of rows) verseMetaCache.set(r.verse_id, { chapter_id: r.chapter_id, scripture_text: r.scripture_text });
 }
 
 function buildEmbeddingCache() {
   if (!db_embed) return;
-
-  // ZCA whitening is DISABLED: analysis showed the current ZCA transform inverts
-  // cosine similarity rankings (e.g. 1Cor13:13 vs D&C4:5: raw=0.49, whitened=0.01).
-  // Root cause: ZCA over-amplifies low-variance directions, destroying the semantic
-  // signal from high-variance dimensions where the model encodes meaning.
-  // Raw L2-normalized scripture_minilm vectors preserve the correct similarity ordering.
-  // Keeping the whitening data load commented out until a regularised (PCA-based)
-  // whitening with ε≥0.1 is baked.
-  //
-  // TO RE-ENABLE: uncomment the block below and run scripts/prebake-whitening.js
-  // with a larger epsilon (e.g., EPSILON=0.1) to avoid inverting similarity ord.
-  //
-  // try {
-  //   const wRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'W'").get();
-  //   const mRow = db_embed.prepare("SELECT data FROM embedding_whitening WHERE key = 'mean'").get();
-  //   if (wRow && mRow) {
-  //     whiteningW = new Float32Array(wRow.data.buffer, wRow.data.byteOffset, wRow.data.byteLength / 4);
-  //     whiteningMean = new Float32Array(mRow.data.buffer, mRow.data.byteOffset, mRow.data.byteLength / 4);
-  //     fastify.log.info(`[Whitening] Loaded ZCA transform: W(${EMBED_DIM}×${EMBED_DIM}) + μ(${EMBED_DIM})`);
-  //   }
-  // } catch (err) {
-  //   fastify.log.warn({ err }, '[Whitening] Failed to load — using raw embeddings');
-  // }
-
-  // Always use raw L2-normalized embeddings (whitening disabled, see above)
-  const useWhitened = false; // whiteningW !== null;
+  const useWhitened = false;
   const table = 'verse_embeddings';
   let count = 0;
   try {
     const rows = db_embed.prepare(`SELECT verse_id, embedding FROM ${table}`).all();
-    for (const r of rows) {
-      embeddingCache.set(
-        r.verse_id,
-        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
-      );
-      count++;
-    }
-  } catch (err) {
-    // Whitening disabled — this branch should never fire
-    fastify.log.warn('[Embeddings] Failed to load verse_embeddings — no fallback available');
-  }
+    for (const r of rows) { embeddingCache.set(r.verse_id, new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)); count++; }
+  } catch (err) { fastify.log.warn('[Embeddings] Failed to load verse_embeddings — no fallback available'); }
   embeddingsReady = true;
   fastify.log.info(`[Embeddings] Loaded ${count} vectors (raw — ZCA whitening disabled)`);
-
-  // Build HNSW ANN over loaded verse embeddings for high-speed semantic nearest neighbors
   buildHNSWIndex();
-
-  // Load spectral graph embeddings if available
   try {
-    const db_graph_check = db_embed ? null : null; // use verse-graph.db
     const graphPath = require('path').join(__dirname, '..', 'resources', 'db', 'verse-graph.db');
     const graphDb = new (require('better-sqlite3'))(graphPath, { readonly: true });
     const specRows = graphDb.prepare('SELECT verse_id, embedding FROM verse_spectral').all();
-    for (const r of specRows) {
-      spectralCache.set(
-        r.verse_id,
-        new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4)
-      );
-    }
+    for (const r of specRows) spectralCache.set(r.verse_id, new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4));
     spectralReady = spectralCache.size > 0;
     graphDb.close();
     fastify.log.info(`[Spectral] Loaded ${spectralCache.size} spectral embeddings (${SPECTRAL_DIM}D)`);
-  } catch (err) {
-    fastify.log.warn('[Spectral] verse_spectral not available (non-fatal):', err.message);
-  }
+  } catch (err) { fastify.log.warn('[Spectral] verse_spectral not available (non-fatal):', err.message); }
 }
 
 async function processBatchAsync(pipe, verses, offset) {
-  if (offset >= verses.length) {
-    buildEmbeddingCache();
-    fastify.log.info('[Embeddings] Ready — in-memory cache built.');
-    return;
-  }
+  if (offset >= verses.length) { buildEmbeddingCache(); fastify.log.info('[Embeddings] Ready — in-memory cache built.'); return; }
   const batch = verses.slice(offset, offset + EMBED_BATCH_SIZE);
   const rows = [];
-  for (const v of batch) {
-    const out = await pipe(v.scripture_text, { pooling: 'mean', normalize: true });
-    rows.push({ verse_id: v.verse_id, buf: Buffer.from(new Float32Array(out.data).buffer) });
-  }
+  for (const v of batch) { const out = await pipe(v.scripture_text, { pooling: 'mean', normalize: true }); rows.push({ verse_id: v.verse_id, buf: Buffer.from(new Float32Array(out.data).buffer) }); }
   const ins = db_embed.prepare('INSERT OR REPLACE INTO verse_embeddings (verse_id, embedding) VALUES (?, ?)');
   db_embed.transaction(items => { for (const { verse_id, buf } of items) ins.run(verse_id, buf); })(rows);
   const done = offset + batch.length;
-  if (done % 1000 < EMBED_BATCH_SIZE || done >= verses.length)
-    fastify.log.info(`[Embeddings] ${done}/${verses.length}`);
+  if (done % 1000 < EMBED_BATCH_SIZE || done >= verses.length) fastify.log.info(`[Embeddings] ${done}/${verses.length}`);
   setImmediate(() => processBatchAsync(pipe, verses, done));
 }
 
 async function initEmbeddings() {
-  if (!db_embed) return; // no embeddings DB available
-
-  // Helper: load the fine-tuned Scripture-MiniLM ONNX pipeline
+  if (!db_embed) return;
   async function loadScripturePipeline() {
     const { pipeline, env } = await import('@xenova/transformers');
-    // Prefer the native Node ONNX runtime (onnxruntime-node) so the backend
-    // always executes the locally-built ONNX model instead of falling back
-    // to a web/WASM runtime. This avoids mixing runtime copies that caused
-    // "Tensor.location must be a string" errors.
     try {
-      // Use require() so resolution follows the project's CommonJS tree
-      // and picks up the native `onnxruntime-node` package.
-      // `onnxruntime-node` re-exports `onnxruntime-common` and exposes `env`.
-      // eslint-disable-next-line global-require
       const onnxNode = require('onnxruntime-node');
-      if (onnxNode && onnxNode.env) {
-        env.backends = env.backends || {};
-        env.backends.onnx = onnxNode.env;
-        fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-node (native) backend');
-      }
-    } catch (e) {
-      fastify.log.warn('[Embeddings] onnxruntime-node not available — using default Xenova ONNX backend:', e.message);
-    }
-    // Prefer the WebAssembly ONNX backend (onnxruntime-web) when available.
-    // This avoids runtime mismatches between different `onnxruntime-common`
-    // // copies that can surface as "Tensor.location must be a string" errors.
-    // try {
-    //   const onnxWeb = await import('onnxruntime-web');
-    //   if (onnxWeb && onnxWeb.env) {
-    //     env.backends = env.backends || {};
-    //     env.backends.onnx = onnxWeb.env;
-    //     fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-web (WASM) backend');
-    //   }
-    // } catch (e) {
-    //   fastify.log.warn('[Embeddings] onnxruntime-web not available — using default ONNX backend:', e.message);
-    // }
+      if (onnxNode && onnxNode.env) { env.backends = env.backends || {}; env.backends.onnx = onnxNode.env; fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-node (native) backend'); }
+    } catch (e) { fastify.log.warn('[Embeddings] onnxruntime-node not available — using default Xenova ONNX backend:', e.message); }
     const localModel = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL);
     const quantizedPath = path.join(localModel, 'onnx', 'model_quantized.onnx');
     const plainPath = path.join(localModel, 'onnx', 'model.onnx');
     const hasQuantized = fs.existsSync(quantizedPath);
     const hasPlain = fs.existsSync(plainPath);
-    if (!hasQuantized && !hasPlain) {
-      throw new Error('[Embeddings] scripture_minilm ONNX not found — local ONNX model required; Xenova fallback disabled');
-    }
+    if (!hasQuantized && !hasPlain) throw new Error('[Embeddings] scripture_minilm ONNX not found — local ONNX model required; Xenova fallback disabled');
     env.localModelPath = ONNX_MODEL_DIR;
     env.allowRemoteModels = false;
     return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: hasQuantized });
   }
-
   try {
-    const total    = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
+    const total = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
     const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
-
-    // Fast path: all embeddings pre-stored (production / post-local-bake)
     if (!REBUILD_EMBEDDINGS && existing >= total) {
       fastify.log.info(`[Embeddings] ${existing}/${total} pre-stored — loading cache.`);
       buildEmbeddingCache();
-      // Load pipeline for semantic search queries (lightweight — model is ~23MB, loads in ~3-5s)
       try {
         fastify.log.info('[Embeddings] Loading pipeline for semantic search…');
         embeddingPipe = await loadScripturePipeline();
         fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.');
-      } catch (pipeErr) {
-        fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
-      }
+      } catch (pipeErr) { fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message); }
       return;
     }
-
-    // Only reach here in development when embeddings are missing or REBUILD_EMBEDDINGS=true
     if (SKIP_RECOMPUTE) {
       fastify.log.warn('[Embeddings] Production/Electron mode — cannot compute missing embeddings. Run scripts/compute-embeddings.js locally.');
       if (existing > 0) {
         buildEmbeddingCache();
-        try {
-          embeddingPipe = await loadScripturePipeline();
-          fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.');
-        } catch (pipeErr) {
-          fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
-        }
+        try { embeddingPipe = await loadScripturePipeline(); fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.'); } catch (pipeErr) { fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message); }
       }
       return;
     }
-
     fastify.log.info('[Embeddings] Loading pipeline…');
     const pipe = await loadScripturePipeline();
     embeddingPipe = pipe;
     fastify.log.info('[Embeddings] Pipeline loaded.');
-    if (REBUILD_EMBEDDINGS) {
-      db_embed.prepare('DELETE FROM verse_embeddings').run();
-      fastify.log.info('[Embeddings] Cleared for rebuild.');
-    }
-    const embeddedIds = new Set(
-      db_embed.prepare('SELECT verse_id FROM verse_embeddings').all().map(r => r.verse_id)
-    );
-    const missing = db.prepare('SELECT id AS verse_id, scripture_text FROM verses').all()
-      .filter(v => !embeddedIds.has(v.verse_id));
+    if (REBUILD_EMBEDDINGS) { db_embed.prepare('DELETE FROM verse_embeddings').run(); fastify.log.info('[Embeddings] Cleared for rebuild.'); }
+    const embeddedIds = new Set(db_embed.prepare('SELECT verse_id FROM verse_embeddings').all().map(r => r.verse_id));
+    const missing = db.prepare('SELECT id AS verse_id, scripture_text FROM verses').all().filter(v => !embeddedIds.has(v.verse_id));
     fastify.log.info(`[Embeddings] Computing ${missing.length} embeddings in background…`);
     setImmediate(() => processBatchAsync(pipe, missing, 0));
-  } catch (err) {
-    fastify.log.error('[Embeddings] Init failed: ' + err.message);
-  }
+  } catch (err) { fastify.log.error('[Embeddings] Init failed: ' + err.message); }
 }
 
 function ensureSearchWarmup({ waitForEmbeddings = false } = {}) {
   if (!searchWarmupPromise) {
-    searchWarmupPromise = (async () => {
-      try {
-        initializeCaches();
-      } catch (err) {
-        fastify.log.error(err, '[Caches] initialization failed');
-      }
-
-      try {
-        await initEmbeddings();
-      } catch (err) {
-        fastify.log.error(err, '[Embeddings] initialization failed');
-      }
-    })();
+    searchWarmupPromise = (async () => { try { initializeCaches(); } catch (err) { fastify.log.error(err, '[Caches] initialization failed'); } try { await initEmbeddings(); } catch (err) { fastify.log.error(err, '[Embeddings] initialization failed'); } })();
   }
-
   if (!waitForEmbeddings) searchWarmupPromise.catch(() => {});
   return searchWarmupPromise;
 }
 
-const entityPersonIndex = new Map(); // normalized-name → Set<verse_id>
-const entityPlaceIndex  = new Map(); // normalized-name → Set<verse_id>
-const verseEntityCache  = new Map(); // verse_id → { people: string[], places: string[] }
+const entityPersonIndex = new Map();
+const entityPlaceIndex = new Map();
+const verseEntityCache = new Map();
 let entitiesReady = false;
 
-function normalizeEntityName(name) {
-  return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-}
+function normalizeEntityName(name) { return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim(); }
 
 function buildEntityCache() {
   if (!db_tags) return;
   try {
-    // Try pre-baked entity indexes first
     const personCount = db_tags.prepare('SELECT COUNT(*) AS n FROM entity_person_index').get()?.n;
     if (personCount > 0) {
-      // Pre-baked: load from indexed tables (much faster, no JSON parsing)
       const personStmt = db_tags.prepare('SELECT DISTINCT name_normalized FROM entity_person_index');
-      for (const r of personStmt.all()) {
-        const verses = db_tags.prepare('SELECT verse_id FROM entity_person_index WHERE name_normalized = ?').all(r.name_normalized);
-        entityPersonIndex.set(r.name_normalized, new Set(verses.map(v => v.verse_id)));
-      }
+      for (const r of personStmt.all()) { const verses = db_tags.prepare('SELECT verse_id FROM entity_person_index WHERE name_normalized = ?').all(r.name_normalized); entityPersonIndex.set(r.name_normalized, new Set(verses.map(v => v.verse_id))); }
       const placeStmt = db_tags.prepare('SELECT DISTINCT name_normalized FROM entity_place_index');
-      for (const r of placeStmt.all()) {
-        const verses = db_tags.prepare('SELECT verse_id FROM entity_place_index WHERE name_normalized = ?').all(r.name_normalized);
-        entityPlaceIndex.set(r.name_normalized, new Set(verses.map(v => v.verse_id)));
-      }
-      // Load verse entity cache
+      for (const r of placeStmt.all()) { const verses = db_tags.prepare('SELECT verse_id FROM entity_place_index WHERE name_normalized = ?').all(r.name_normalized); entityPlaceIndex.set(r.name_normalized, new Set(verses.map(v => v.verse_id))); }
       const vecRows = db_tags.prepare('SELECT verse_id, people, places FROM verse_entity_cache').all();
-      for (const r of vecRows) {
-        verseEntityCache.set(r.verse_id, {
-          people: JSON.parse(r.people || '[]'),
-          places: JSON.parse(r.places || '[]'),
-        });
-      }
+      for (const r of vecRows) verseEntityCache.set(r.verse_id, { people: JSON.parse(r.people || '[]'), places: JSON.parse(r.places || '[]') });
       entitiesReady = true;
       fastify.log.info(`[Entities] Pre-baked: ${entityPersonIndex.size} people, ${entityPlaceIndex.size} places, ${verseEntityCache.size} verses`);
-
-      // ── Load entity centroid embeddings for mathematical disambiguation ──
       try {
         const centroidRows = db_tags.prepare('SELECT entity_id, centroid FROM ai_entity_centroids').all();
-        for (const r of centroidRows) {
-          entityCentroidCache.set(
-            r.entity_id,
-            new Float32Array(r.centroid.buffer, r.centroid.byteOffset, r.centroid.byteLength / 4)
-          );
-        }
+        for (const r of centroidRows) entityCentroidCache.set(r.entity_id, new Float32Array(r.centroid.buffer, r.centroid.byteOffset, r.centroid.byteLength / 4));
         fastify.log.info(`[Entity Centroids] ${entityCentroidCache.size} centroid vectors loaded`);
-      } catch { /* ai_entity_centroids table may not exist yet */ }
-
+      } catch {}
       return;
     }
   } catch {}
-  // Fallback: runtime build from chapter_entities
   try {
     const chapterRows = db_tags.prepare('SELECT chapter_id, entities_json FROM chapter_entities').all();
     const chapterEntityCache = new Map();
-    for (const r of chapterRows) {
-      let people = [], places = [];
-      if (r.entities_json) {
-        try {
-          const j = JSON.parse(r.entities_json);
-          people = j.people || [];
-          places = j.places || [];
-        } catch { /* skip malformed */ }
-      }
-      chapterEntityCache.set(r.chapter_id, { people, places });
-    }
+    for (const r of chapterRows) { let people = [], places = []; if (r.entities_json) { try { const j = JSON.parse(r.entities_json); people = j.people || []; places = j.places || []; } catch {} } chapterEntityCache.set(r.chapter_id, { people, places }); }
     const verseChapterRows = db_tags.prepare('SELECT verse_id, chapter_id FROM verse_doctrine_tags').all();
     for (const vc of verseChapterRows) {
       const ent = chapterEntityCache.get(vc.chapter_id);
       if (!ent) continue;
       verseEntityCache.set(vc.verse_id, ent);
-      for (const p of ent.people) {
-        const key = normalizeEntityName(p);
-        if (!entityPersonIndex.has(key)) entityPersonIndex.set(key, new Set());
-        entityPersonIndex.get(key).add(vc.verse_id);
-      }
-      for (const p of ent.places) {
-        const key = normalizeEntityName(p);
-        if (!entityPlaceIndex.has(key)) entityPlaceIndex.set(key, new Set());
-        entityPlaceIndex.get(key).add(vc.verse_id);
-      }
+      for (const p of ent.people) { const key = normalizeEntityName(p); if (!entityPersonIndex.has(key)) entityPersonIndex.set(key, new Set()); entityPersonIndex.get(key).add(vc.verse_id); }
+      for (const p of ent.places) { const key = normalizeEntityName(p); if (!entityPlaceIndex.has(key)) entityPlaceIndex.set(key, new Set()); entityPlaceIndex.get(key).add(vc.verse_id); }
     }
     entitiesReady = chapterRows.length > 0;
     fastify.log.info(`[Entities] Runtime cache: ${entityPersonIndex.size} people, ${entityPlaceIndex.size} places`);
-  } catch (err) {
-    fastify.log.warn('[Entities] Cache build failed:', err.message);
-  }
+  } catch (err) { fastify.log.warn('[Entities] Cache build failed:', err.message); }
 }
 
-// ── Deferred cache initialisation ──────────────────────────────────────────
-// These functions are intentionally NOT called synchronously at module-load
-// time. They are heavy (loading 40k+ rows, parsing JSON, filling Maps) and
-// would delay the process start by 5-15 s on slower disks.
-// They are called via setImmediate AFTER fastify.listen() so that:
-//   1. The /health endpoint responds in ~100 ms (used by Electron waitForServer)
-//   2. The Electron window appears immediately with full FTS search working
-//   3. Enhanced features (semantic, entity, topical) warm up in the background
-// All feature flags (topicalGuideReady, entitiesReady, embeddingsReady …)
-// default to false, so every code path already has a graceful fallback.
 function initializeCaches() {
   buildVerseMetaCache();
   buildTopicalGuideCache();
@@ -4840,262 +3165,82 @@ function initializeCaches() {
   initClusterLabels();
 }
 
-// Finds a topic by name/slug match, returns all verses in that topic cluster
-// ranked by how many topics they share with the query topic.
 function topicSearch(query, page = 0, pageSize = 10) {
   if (!topicalGuideReady || !db_tg) return { results: [], total: 0 };
   const lower = String(query || '').toLowerCase().trim();
   if (!lower) return { results: [], total: 0 };
-  // Match topic slug or name (exact first, then prefix, then substring)
-  const allTopics = [...topicNameMap.entries()]; // [slug, name]
-  let matched =
-    allTopics.find(([s, n]) => s === lower || String(n || '').toLowerCase() === lower) ??
-    allTopics.find(([s, n]) => s.startsWith(lower) || String(n || '').toLowerCase().startsWith(lower)) ??
-    allTopics.find(([s, n]) => s.includes(lower) || String(n || '').toLowerCase().includes(lower));
-  if (!matched) return null; // signal: no TG match, fall through to FTS
-
+  const allTopics = [...topicNameMap.entries()];
+  let matched = allTopics.find(([s, n]) => s === lower || String(n || '').toLowerCase() === lower) ?? allTopics.find(([s, n]) => s.startsWith(lower) || String(n || '').toLowerCase().startsWith(lower)) ?? allTopics.find(([s, n]) => s.includes(lower) || String(n || '').toLowerCase().includes(lower));
+  if (!matched) return null;
   const [topicSlug, topicName] = matched;
   const queryTopics = new Set([topicSlug]);
-
-  const topicVerseIds = db_tg.prepare(`
-    SELECT g.verse_id FROM topical_guide g
-    JOIN topics t ON t.id = g.topic_id
-    WHERE t.slug = ? AND g.verse_id IS NOT NULL AND g.verse_id != -1
-  `).all(topicSlug).map(r => r.verse_id);
-
+  const topicVerseIds = db_tg.prepare(`SELECT g.verse_id FROM topical_guide g JOIN topics t ON t.id = g.topic_id WHERE t.slug = ? AND g.verse_id IS NOT NULL AND g.verse_id != -1`).all(topicSlug).map(r => r.verse_id);
   if (!topicVerseIds.length) return { results: [], total: 0, matchedTopic: topicName };
-
-  const scored = topicVerseIds.map(vid => {
-    const vTopics = verseTopicCache.get(vid) ?? new Set();
-    let overlap = 0;
-    for (const s of queryTopics) if (vTopics.has(s)) overlap++;
-    return { verse_id: vid, overlap };
-  });
+  const scored = topicVerseIds.map(vid => { const vTopics = verseTopicCache.get(vid) ?? new Set(); let overlap = 0; for (const s of queryTopics) if (vTopics.has(s)) overlap++; return { verse_id: vid, overlap }; });
   scored.sort((a, b) => b.overlap - a.overlap);
-
-  const total  = scored.length;
-  const paged  = scored.slice(page * pageSize, page * pageSize + pageSize);
-  const stmt   = dba.prepare(
-    'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, volume_id FROM scriptures WHERE verse_id = ?'
-  );
+  const total = scored.length;
+  const paged = scored.slice(page * pageSize, page * pageSize + pageSize);
+  const stmt = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, volume_id FROM scriptures WHERE verse_id = ?`);
   const results = paged.map(({ verse_id }) => ({ ...stmt.get(verse_id), matched_concept: topicName }));
   return { results, total, matchedTopic: topicName };
 }
 
 fastify.get('/topic-search', async (request, reply) => {
   const { q, language = 'en' } = request.query;
-  const page     = Math.max(0, parseInt(request.query.page     ?? 0,  10) || 0);
+  const page = Math.max(0, parseInt(request.query.page ?? 0, 10) || 0);
   const pageSize = Math.min(20, Math.max(1, parseInt(request.query.pageSize ?? 10, 10) || 10));
-
   if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
-
-  if (!topicalGuideReady || !embeddingsReady || !entitiesReady) {
-    await ensureSearchWarmup({ waitForEmbeddings: true });
-  }
-
+  if (!topicalGuideReady || !embeddingsReady || !entitiesReady) await ensureSearchWarmup({ waitForEmbeddings: true });
   const lang = language.toLowerCase();
   const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : null;
-
-  const stmtCoords = targetDb
-    ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
-    : null;
-  const stmtTransText = targetDb
-    ? targetDb.prepare('SELECT scripture_text FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1')
-    : null;
-
-  const translateResults = (results) => {
-    if (!stmtCoords || !stmtTransText) return results;
-    return results.map(r => {
-      const coords = stmtCoords.get(r.verse_id);
-      if (!coords) return r;
-      const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
-      return t?.scripture_text ? { ...r, scripture_text: t.scripture_text } : r;
-    });
-  };
-
+  const stmtCoords = targetDb ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1') : null;
+  const stmtTransText = targetDb ? targetDb.prepare('SELECT scripture_text FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1') : null;
+  const translateResults = (results) => { if (!stmtCoords || !stmtTransText) return results; return results.map(r => { const coords = stmtCoords.get(r.verse_id); if (!coords) return r; const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number); return t?.scripture_text ? { ...r, scripture_text: t.scripture_text } : r; }); };
   const tgResult = topicSearch(q.trim(), page, pageSize);
-  if (tgResult && tgResult.total > 0) {
-    return {
-      results:      translateResults(tgResult.results),
-      total:        tgResult.total,
-      matchedTopic: tgResult.matchedTopic ?? null,
-      page,
-      pageSize,
-      fallback:     false,
-    };
-  }
-
+  if (tgResult && tgResult.total > 0) return { results: translateResults(tgResult.results), total: tgResult.total, matchedTopic: tgResult.matchedTopic ?? null, page, pageSize, fallback: false };
   const db = lang !== 'en' && targetDb ? targetDb : dba;
-  const { results: ftsResults, total: ftsTotal } =
-    phraseSearch(q.trim(), page, pageSize, dba, fastify.log);
-  return {
-    results:      translateResults(ftsResults),
-    total:        ftsTotal ?? ftsResults.length,
-    matchedTopic: null,
-    page,
-    pageSize,
-    fallback:     true,
-  };
+  const { results: ftsResults, total: ftsTotal } = phraseSearch(q.trim(), page, pageSize, dba, fastify.log);
+  return { results: translateResults(ftsResults), total: ftsTotal ?? ftsResults.length, matchedTopic: null, page, pageSize, fallback: true };
 });
 
 fastify.get('/verse/adjacent', async (request, reply) => {
-    const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
-    if (!verse_id || !direction) {
-        reply.code(400);
-        return { error: 'missing parameters' };
-    }
-
-    const targetDb = resolveDbAdapter(language);
-
-    const result = getAdjacentVerse({
-        verse_id: Number(verse_id),
-        book_id:        book_id        ? Number(book_id)        : undefined,
-        chapter_number: chapter_number ? Number(chapter_number) : undefined,
-        verse_number:   verse_number   ? Number(verse_number)   : undefined,
-        direction,
-    }, targetDb, fastify.log);
-
-    if (!result) {
-        reply.code(404);
-        return { error: 'not found' };
-    }
-    return { ...result, version_citation: getVersionCitation(language || 'en', result.volume_id) };
+  const { verse_id, direction, language, book_id, chapter_number, verse_number } = request.query;
+  if (!verse_id || !direction) { reply.code(400); return { error: 'missing parameters' }; }
+  const targetDb = resolveDbAdapter(language);
+  const result = getAdjacentVerse({ verse_id: Number(verse_id), book_id: book_id ? Number(book_id) : undefined, chapter_number: chapter_number ? Number(chapter_number) : undefined, verse_number: verse_number ? Number(verse_number) : undefined, direction }, targetDb, fastify.log);
+  if (!result) { reply.code(404); return { error: 'not found' }; }
+  return { ...result, version_citation: getVersionCitation(language || 'en', result.volume_id) };
 });
 
 fastify.get('/verse/:verse_id/related', async (request, reply) => {
-  const verseId  = parseInt(request.params.verse_id, 10);
+  const verseId = parseInt(request.params.verse_id, 10);
   if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
-
   const language = (request.query.language || 'en').toLowerCase();
-  const page     = Math.max(0, parseInt(request.query.page     ?? 0,  10) || 0);
+  const page = Math.max(0, parseInt(request.query.page ?? 0, 10) || 0);
   const pageSize = Math.min(20, Math.max(1, parseInt(request.query.pageSize ?? 10, 10) || 10));
-  const offset   = page * pageSize;
+  const offset = page * pageSize;
   const targetDb = resolveDbAdapter(language);
-
   const meta = verseMetaCache.get(verseId);
   if (!meta) { reply.code(404); return { error: 'Verse not found' }; }
-
-  const liveTopics  = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
+  const liveTopics = topicalGuideReady ? (verseTopicCache.get(verseId) ?? new Set()) : new Set();
   const liveChapter = meta.chapter_id;
-
-  // Fetch canonical metadata (coords, title) always from English DB;
-  // swap scripture_text from the requested language DB when not English.
-  const stmtMeta = dba.prepare(`
-    SELECT verse_id, verse_title, scripture_text, book_title,
-           chapter_number, verse_number, chapter_id, volume_id
-    FROM scriptures WHERE verse_id = ?
-  `);
-  // For non-English: resolve coords from English, then fetch text from target DB
-  const stmtCoords = language !== 'en'
-    ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1')
-    : null;
-  const stmtTransText = language !== 'en'
-    ? targetDb.prepare(`
-        SELECT scripture_text FROM scriptures
-        WHERE book_id = ? AND chapter_number = ? AND verse_number = ?
-        LIMIT 1
-      `)
-    : null;
-
-  const resolveRow = (verse_id) => {
-    const row = stmtMeta.get(verse_id);
-    if (!row) return null;
-    if (stmtCoords && stmtTransText) {
-      const coords = stmtCoords.get(verse_id);
-      if (coords) {
-        const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
-        if (t?.scripture_text) row.scripture_text = t.scripture_text;
-      }
-    }
-    return row;
-  };
-
-  // Build overlap map: verse_id → count of shared topics
-  const tgScores = new Map(); // verse_id → overlap count
-  if (liveTopics.size > 0) {
-    for (const slug of liveTopics) {
-      const peers = topicVerseIndex.get(slug);
-      if (!peers) continue;
-      for (const vid of peers) {
-        if (vid === verseId) continue;
-        const vmeta = verseMetaCache.get(vid);
-        if (vmeta && vmeta.chapter_id === liveChapter) continue;
-        tgScores.set(vid, (tgScores.get(vid) ?? 0) + 1);
-      }
-    }
-  }
-
-  // ── Strategy: Use kNN + RWR fusion for related verses ──
+  const stmtMeta = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, volume_id FROM scriptures WHERE verse_id = ?`);
+  const stmtCoords = language !== 'en' ? dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1') : null;
+  const stmtTransText = language !== 'en' ? targetDb.prepare(`SELECT scripture_text FROM scriptures WHERE book_id = ? AND chapter_number = ? AND verse_number = ? LIMIT 1`) : null;
+  const resolveRow = (verse_id) => { const row = stmtMeta.get(verse_id); if (!row) return null; if (stmtCoords && stmtTransText) { const coords = stmtCoords.get(verse_id); if (coords) { const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number); if (t?.scripture_text) row.scripture_text = t.scripture_text; } } return row; };
+  const tgScores = new Map();
+  if (liveTopics.size > 0) { for (const slug of liveTopics) { const peers = topicVerseIndex.get(slug); if (!peers) continue; for (const vid of peers) { if (vid === verseId) continue; const vmeta = verseMetaCache.get(vid); if (vmeta && vmeta.chapter_id === liveChapter) continue; tgScores.set(vid, (tgScores.get(vid) ?? 0) + 1); } } }
   let knnAvailable = false;
-  try {
-    if (db_graph) {
-      const knnRow = db_graph.prepare('SELECT COUNT(*) AS n FROM verse_knn WHERE verse_id = ?').get(verseId);
-      knnAvailable = knnRow && knnRow.n > 0;
-    }
-  } catch {}
-
+  try { if (db_graph) { const knnRow = db_graph.prepare('SELECT COUNT(*) AS n FROM verse_knn WHERE verse_id = ?').get(verseId); knnAvailable = knnRow && knnRow.n > 0; } } catch {}
   if (knnAvailable) {
-    // Pre-baked kNN: embedding similarity neighbors
-    const knnRows = db_graph.prepare(
-      'SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank'
-    ).all(verseId);
-
-    // Pre-baked RWR: topic-graph walk neighbors (multi-hop structural)
-    let rwrMap = new Map(); // neighbor_id → rwr_score
-    if (rwrStmt) {
-      try {
-        const rwrRows = rwrStmt.all(verseId);
-        for (const r of rwrRows) rwrMap.set(r.neighbor_id, r.rwr_score);
-      } catch {}
-    }
-
-    // Fuse kNN (embedding) + RWR (structural) + topic overlap + PPR
-    const allCandidates = new Map(); // verse_id → combined score
-    // Add kNN candidates
-    for (const r of knnRows) {
-      const overlap = tgScores.get(r.neighbor_id) ?? 0;
-      const pr = pageRankCache.get(r.neighbor_id) ?? 0;
-      const cTopics = verseTopicCache.get(r.neighbor_id) ?? new Set();
-      const jaccard = jaccardSimilarity(liveTopics, cTopics);
-      const rwrScore = rwrMap.get(r.neighbor_id) ?? 0;
-      // PPR boost: use topic-specific authority if available
-      let pprBoost = 0;
-      if (pprStmt && liveTopics.size > 0) {
-        for (const slug of [...liveTopics].slice(0, 5)) {
-          try {
-            const row = db_tg.prepare('SELECT ppr FROM topic_ppr WHERE topic_slug = ? AND verse_id = ?').get(slug, r.neighbor_id);
-            if (row && row.ppr > pprBoost) pprBoost = row.ppr;
-          } catch {}
-        }
-      }
-      const score = r.similarity * 1.0      // embedding similarity (primary, ~0.3-0.9)
-                  + rwrScore * 2.0           // structural proximity (multi-hop, ~0-0.3)
-                  + overlap * 0.15           // raw topic overlap
-                  + jaccard * 0.5            // normalized topic similarity
-                  + pprBoost * 0.5           // topic-specific authority (~0-0.02)
-                  + pr * 2000;               // global authority (~0-0.1)
-      allCandidates.set(r.neighbor_id, { verse_id: r.neighbor_id, embSim: r.similarity, score, overlap });
-    }
-    // Add RWR-only candidates (multi-hop connections kNN may miss)
-    for (const [nid, rwrScore] of rwrMap) {
-      if (allCandidates.has(nid)) continue; // already in kNN results
-      const overlap = tgScores.get(nid) ?? 0;
-      const pr = pageRankCache.get(nid) ?? 0;
-      const cTopics = verseTopicCache.get(nid) ?? new Set();
-      const jaccard = jaccardSimilarity(liveTopics, cTopics);
-      const score = rwrScore * 3.0 + overlap * 0.15 + jaccard * 0.5 + pr * 2000;
-      allCandidates.set(nid, { verse_id: nid, embSim: 0, score, overlap });
-    }
-
-    const enhanced = [...allCandidates.values()]
-      .filter(r => {
-        // Exclude same-chapter results
-        const m = verseMetaCache.get(r.verse_id);
-        return !m || m.chapter_id !== liveChapter;
-      });
+    const knnRows = db_graph.prepare('SELECT neighbor_id, similarity FROM verse_knn WHERE verse_id = ? ORDER BY rank').all(verseId);
+    let rwrMap = new Map();
+    if (rwrStmt) { try { const rwrRows = rwrStmt.all(verseId); for (const r of rwrRows) rwrMap.set(r.neighbor_id, r.rwr_score); } catch {} }
+    const allCandidates = new Map();
+    for (const r of knnRows) { const overlap = tgScores.get(r.neighbor_id) ?? 0; const pr = pageRankCache.get(r.neighbor_id) ?? 0; const cTopics = verseTopicCache.get(r.neighbor_id) ?? new Set(); const jaccard = jaccardSimilarity(liveTopics, cTopics); const rwrScore = rwrMap.get(r.neighbor_id) ?? 0; let pprBoost = 0; if (pprStmt && liveTopics.size > 0) { for (const slug of [...liveTopics].slice(0, 5)) { try { const row = db_tg.prepare('SELECT ppr FROM topic_ppr WHERE topic_slug = ? AND verse_id = ?').get(slug, r.neighbor_id); if (row && row.ppr > pprBoost) pprBoost = row.ppr; } catch {} } } const score = r.similarity * 1.0 + rwrScore * 2.0 + overlap * 0.15 + jaccard * 0.5 + pprBoost * 0.5 + pr * 2000; allCandidates.set(r.neighbor_id, { verse_id: r.neighbor_id, embSim: r.similarity, score, overlap }); }
+    for (const [nid, rwrScore] of rwrMap) { if (allCandidates.has(nid)) continue; const overlap = tgScores.get(nid) ?? 0; const pr = pageRankCache.get(nid) ?? 0; const cTopics = verseTopicCache.get(nid) ?? new Set(); const jaccard = jaccardSimilarity(liveTopics, cTopics); const score = rwrScore * 3.0 + overlap * 0.15 + jaccard * 0.5 + pr * 2000; allCandidates.set(nid, { verse_id: nid, embSim: 0, score, overlap }); }
+    const enhanced = [...allCandidates.values()].filter(r => { const m = verseMetaCache.get(r.verse_id); return !m || m.chapter_id !== liveChapter; });
     enhanced.sort((a, b) => b.score - a.score);
-
-    // ── Source: Cluster neighbors (cross-book discovery) ──
     let clusterLabel = null;
     if (db_graph) {
       try {
@@ -5106,1796 +3251,256 @@ fastify.get('/verse/:verse_id/related', async (request, reply) => {
           const verseBook = sourceBook ? sourceBook.book_id : null;
           const existingIds = new Set(enhanced.map(r => r.verse_id));
           existingIds.add(verseId);
-          const clusterMembers = db_graph.prepare(`
-            SELECT vc.verse_id, vc.centroid_distance
-            FROM verse_clusters vc
-            WHERE vc.cluster_id = ? AND vc.verse_id != ?
-            ORDER BY vc.centroid_distance ASC
-            LIMIT 60
-          `).all(clusterRow.cluster_id, verseId);
+          const clusterMembers = db_graph.prepare(`SELECT vc.verse_id, vc.centroid_distance FROM verse_clusters vc WHERE vc.cluster_id = ? AND vc.verse_id != ? ORDER BY vc.centroid_distance ASC LIMIT 60`).all(clusterRow.cluster_id, verseId);
           const clusterNeighbors = [];
-          for (const m of clusterMembers) {
-            if (existingIds.has(m.verse_id)) continue;
-            const row = dba.prepare(`
-              SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id
-              FROM scriptures WHERE verse_id = ?
-            `).get(m.verse_id);
-            if (!row) continue;
-            const sameBook = row.book_id === verseBook;
-            const clusterScore = (1 - m.centroid_distance) * (sameBook ? 0.4 : 1.0);
-            clusterNeighbors.push({ verse_id: m.verse_id, embSim: 0, score: clusterScore * 0.7, overlap: 0 });
-            existingIds.add(m.verse_id);
-            if (clusterNeighbors.length >= 12) break;
-          }
-          if (clusterNeighbors.length > 0) {
-            enhanced.push(...clusterNeighbors);
-            enhanced.sort((a, b) => b.score - a.score);
-          }
+          for (const m of clusterMembers) { if (existingIds.has(m.verse_id)) continue; const row = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`).get(m.verse_id); if (!row) continue; const sameBook = row.book_id === verseBook; const clusterScore = (1 - m.centroid_distance) * (sameBook ? 0.4 : 1.0); clusterNeighbors.push({ verse_id: m.verse_id, embSim: 0, score: clusterScore * 0.7, overlap: 0 }); existingIds.add(m.verse_id); if (clusterNeighbors.length >= 12) break; }
+          if (clusterNeighbors.length > 0) { enhanced.push(...clusterNeighbors); enhanced.sort((a, b) => b.score - a.score); }
         }
       } catch {}
     }
-
-    // ── Source: Item2Vec behavioral similarity ──
     if (item2vecReady && item2vecVectors.size > 0 && item2vecVectors.size <= 10000) {
       const iv = item2vecVectors.get(verseId);
       if (iv) {
         const existingIds = new Set(enhanced.map(r => r.verse_id));
         existingIds.add(verseId);
         const i2vScored = [];
-        for (const [vid, vec] of item2vecVectors) {
-          if (existingIds.has(vid)) continue;
-          const sim = item2vecSimilarity(iv, vec);
-          if (sim > 0.3) i2vScored.push({ vid, sim });
-        }
+        for (const [vid, vec] of item2vecVectors) { if (existingIds.has(vid)) continue; const sim = item2vecSimilarity(iv, vec); if (sim > 0.3) i2vScored.push({ vid, sim }); }
         i2vScored.sort((a, b) => b.sim - a.sim);
-        for (const { vid, sim } of i2vScored.slice(0, 8)) {
-          try {
-            const row = dba.prepare(
-              'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
-            ).get(vid);
-            if (row) enhanced.push({ verse_id: vid, embSim: sim * 0.5, score: sim * 0.5, overlap: 0, source: 'item2vec', ...row });
-          } catch {}
-        }
+        for (const { vid, sim } of i2vScored.slice(0, 8)) { try { const row = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`).get(vid); if (row) enhanced.push({ verse_id: vid, embSim: sim * 0.5, score: sim * 0.5, overlap: 0, source: 'item2vec', ...row }); } catch {} }
         if (i2vScored.length > 0) enhanced.sort((a, b) => b.score - a.score);
       }
     }
-
-    // kNN results are already curated (top-20 most similar) — use light diversity only
-    // Skip cluster-based filtering since kNN neighbors are inherently relevant
     const diverseResults = enhanced.slice(0, offset + pageSize);
-
     const paged = diverseResults.slice(offset, offset + pageSize);
-    const results = paged.map(({ verse_id, embSim }) => {
-      const row = resolveRow(verse_id);
-      const cTopics = verseTopicCache.get(verse_id);
-      const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
-      const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
-      return { ...row, similarity_score: +(embSim ?? 0).toFixed(4), matched_concept: matchedConcept };
-    });
+    const results = paged.map(({ verse_id, embSim }) => { const row = resolveRow(verse_id); const cTopics = verseTopicCache.get(verse_id); const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null; const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null; return { ...row, similarity_score: +(embSim ?? 0).toFixed(4), matched_concept: matchedConcept }; });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
     return { results, total: enhanced.length, matchedConcept, page, pageSize, cluster_id: clusterLabel };
   }
   if (embeddingsReady) {
     const liveVec = embeddingCache.get(verseId);
     if (!liveVec) { reply.code(404); return { error: 'Embedding not found' }; }
-
-    // Bayesian scoring: P(related | embedding_sim, topic_overlap)
     const candidates = [];
-    for (const [cid, cvec] of embeddingCache) {
-      const cmeta = verseMetaCache.get(cid);
-      if (cmeta && cmeta.chapter_id === liveChapter) continue;
-      const embSim = cosineSimilarity(liveVec, cvec);
-      if (embSim < 0.15) continue; // early pruning: skip very dissimilar
-      const overlap = tgScores.get(cid) ?? 0;
-      const cTopics = verseTopicCache.get(cid) ?? new Set();
-      const jaccard = jaccardSimilarity(liveTopics, cTopics);
-      const bayesScore = bayesianRelevance(embSim, jaccard, overlap);
-      candidates.push({ verse_id: cid, score: bayesScore, embSim, overlap });
-    }
+    for (const [cid, cvec] of embeddingCache) { const cmeta = verseMetaCache.get(cid); if (cmeta && cmeta.chapter_id === liveChapter) continue; const embSim = cosineSimilarity(liveVec, cvec); if (embSim < 0.15) continue; const overlap = tgScores.get(cid) ?? 0; const cTopics = verseTopicCache.get(cid) ?? new Set(); const jaccard = jaccardSimilarity(liveTopics, cTopics); const bayesScore = bayesianRelevance(embSim, jaccard, overlap); candidates.push({ verse_id: cid, score: bayesScore, embSim, overlap }); }
     candidates.sort((a, b) => b.score - a.score);
-
-    // MMR diversity: prevent same-book/same-theme dominance in related verses
-    const topCandidates = candidates.slice(0, 200); // pre-filter for performance
+    const topCandidates = candidates.slice(0, 200);
     const mmrResults = [];
     const selectedVecs = [];
     for (let pick = 0; pick < offset + pageSize && topCandidates.length > 0; pick++) {
       let bestIdx = -1;
       let bestMmr = -Infinity;
-      const LAMBDA = 0.65; // slightly more relevance-focused for related verses
+      const LAMBDA = 0.65;
       for (let i = 0; i < topCandidates.length; i++) {
         const c = topCandidates[i];
         const cVec = embeddingCache.get(c.verse_id);
         let maxSimToSelected = 0;
-        if (cVec && selectedVecs.length > 0) {
-          for (const sv of selectedVecs) {
-            const sim = cosineSimilarity(cVec, sv);
-            if (sim > maxSimToSelected) maxSimToSelected = sim;
-          }
-        }
+        if (cVec && selectedVecs.length > 0) { for (const sv of selectedVecs) { const sim = cosineSimilarity(cVec, sv); if (sim > maxSimToSelected) maxSimToSelected = sim; } }
         const mmr = LAMBDA * (c.score / (candidates[0]?.score || 1)) - (1 - LAMBDA) * maxSimToSelected;
         if (mmr > bestMmr) { bestMmr = mmr; bestIdx = i; }
       }
-      if (bestIdx >= 0) {
-        const chosen = topCandidates.splice(bestIdx, 1)[0];
-        const cVec = embeddingCache.get(chosen.verse_id);
-        if (cVec) selectedVecs.push(cVec);
-        mmrResults.push(chosen);
-      } else break;
+      if (bestIdx >= 0) { const chosen = topCandidates.splice(bestIdx, 1)[0]; const cVec = embeddingCache.get(chosen.verse_id); if (cVec) selectedVecs.push(cVec); mmrResults.push(chosen); } else break;
     }
-
     const paged = mmrResults.slice(offset, offset + pageSize);
-    const results = paged.map(({ verse_id, score, embSim }) => {
-      const row = resolveRow(verse_id);
-      const cTopics = verseTopicCache.get(verse_id);
-      const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
-      const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null;
-      return { ...row, similarity_score: +embSim.toFixed(4), matched_concept: matchedConcept };
-    });
+    const results = paged.map(({ verse_id, score, embSim }) => { const row = resolveRow(verse_id); const cTopics = verseTopicCache.get(verse_id); const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null; const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? sharedSlug) : null; return { ...row, similarity_score: +embSim.toFixed(4), matched_concept: matchedConcept }; });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
     return { results, total: candidates.length, matchedConcept, page, pageSize };
   }
-
   if (tgScores.size > 0) {
     const allSorted = [...tgScores.entries()].sort((a, b) => b[1] - a[1]);
     const paged = allSorted.slice(offset, offset + pageSize);
-    const results = paged.map(([vid, overlap]) => {
-      const row = resolveRow(vid);
-      const cTopics = verseTopicCache.get(vid);
-      const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null;
-      const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? null) : null;
-      return { ...row, similarity_score: +(overlap / liveTopics.size).toFixed(4), matched_concept: matchedConcept };
-    });
+    const results = paged.map(([vid, overlap]) => { const row = resolveRow(vid); const cTopics = verseTopicCache.get(vid); const sharedSlug = cTopics ? ([...liveTopics].find(s => cTopics.has(s)) ?? null) : null; const matchedConcept = sharedSlug ? (topicNameMap.get(sharedSlug) ?? null) : null; return { ...row, similarity_score: +(overlap / liveTopics.size).toFixed(4), matched_concept: matchedConcept }; });
     const matchedConcept = liveTopics.size ? (topicNameMap.get([...liveTopics][0]) ?? null) : null;
     return { results, total: allSorted.length, matchedConcept, page, pageSize, fallback: true };
   }
-
   const phrase = meta.scripture_text.split(/\s+/).slice(0, 8).join(' ');
   const { results: ftsResults, total: ftsTotal } = phraseSearch(phrase, page, pageSize, dba, fastify.log);
   const filtered = ftsResults.filter(r => r.verse_id !== verseId);
-  if (stmtCoords && stmtTransText) {
-    for (const r of filtered) {
-      const coords = stmtCoords.get(r.verse_id);
-      if (coords) {
-        const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number);
-        if (t?.scripture_text) r.scripture_text = t.scripture_text;
-      }
-    }
-  }
+  if (stmtCoords && stmtTransText) { for (const r of filtered) { const coords = stmtCoords.get(r.verse_id); if (coords) { const t = stmtTransText.get(coords.book_id, coords.chapter_number, coords.verse_number); if (t?.scripture_text) r.scripture_text = t.scripture_text; } } }
   return { results: filtered, total: ftsTotal ?? filtered.length, page, pageSize, fallback: true };
 });
 
 fastify.get('/verse/:verse_id/translation', async (request, reply) => {
   const { verse_id } = request.params;
   const { language } = request.query;
-  if (!language || !['en', 'tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(language.toLowerCase())) {
-    reply.code(400);
-    return { error: 'language must be en, tl, ceb, es, el, ilo, ja, ylt or war' };
-  }
+  if (!language || !['en', 'tl', 'ceb', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(language.toLowerCase())) { reply.code(400); return { error: 'language must be en, tl, ceb, es, el, ilo, ja, ylt or war' }; }
   const targetDb = language.toLowerCase() === 'en' ? dba : resolveDbAdapter(language);
   try {
-    // Resolve coordinates from the KJV DB so non-KJV versification (e.g. Japanese) is handled correctly.
-    const coords = dba.prepare(
-      'SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1'
-    ).get(Number(verse_id));
+    const coords = dba.prepare('SELECT book_id, chapter_number, verse_number FROM scriptures WHERE verse_id = ? LIMIT 1').get(Number(verse_id));
     if (!coords) { reply.code(404); return { error: 'verse not found' }; }
     const row = fetchVerseByCoords(targetDb, coords, 'scripture_text');
     if (!row) { reply.code(404); return { error: 'verse not found in translation' }; }
     return { verse_id: Number(verse_id), language: language.toLowerCase(), scripture_text: row.scripture_text };
-  } catch (err) {
-    fastify.log.error('translation fetch failed', err);
-    reply.code(500);
-    return { error: 'fetch failed' };
-  }
+  } catch (err) { fastify.log.error('translation fetch failed', err); reply.code(500); return { error: 'fetch failed' }; }
 });
 
 fastify.get('/verse/of-the-day', async (request, reply) => {
-  try {
-    const result = getVerseOfTheDay(dba);
-    if (!result) { reply.code(404); return { error: 'not found' }; }
-    return result;
-  } catch (err) {
-    fastify.log.error('verse-of-the-day failed', err);
-    reply.code(500);
-    return { error: 'internal error' };
-  }
+  try { const result = getVerseOfTheDay(dba); if (!result) { reply.code(404); return { error: 'not found' }; } return result; } catch (err) { fastify.log.error('verse-of-the-day failed', err); reply.code(500); return { error: 'internal error' }; }
 });
 
-// ── GET /for-you ────────────────────────────────────────────────────────────
 fastify.get('/for-you', async (request, reply) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '12', 10)));
     const language = (request.query.language || 'en').toLowerCase();
-
-    const stmtVerse = dba.prepare(
-      'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?'
-    );
-
-    // ── Step 1: Get user's reading history verse_ids ──
-    const readRows = db_user.prepare(
-      'SELECT DISTINCT verse_id FROM reading_events WHERE event_type = \'read\' ORDER BY ts DESC LIMIT 200'
-    ).all();
+    const stmtVerse = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id, volume_id FROM scriptures WHERE verse_id = ?`);
+    const readRows = db_user.prepare(`SELECT DISTINCT verse_id FROM reading_events WHERE event_type = 'read' ORDER BY ts DESC LIMIT 200`).all();
     const readSet = new Set(readRows.map(r => r.verse_id));
-
-    const scored = new Map(); // verse_id → score
-
-    // ── Step 2: Cluster affinity — find user's favourite clusters ──
+    const scored = new Map();
     if (db_graph && readSet.size > 0) {
       const clusterFreq = new Map();
-      for (const vid of [...readSet].slice(0, 100)) {
-        try {
-          const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(vid);
-          if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1);
-        } catch {}
-      }
+      for (const vid of [...readSet].slice(0, 100)) { try { const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(vid); if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1); } catch {} }
       const topClusters = [...clusterFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-
-      for (const [clusterId, freq] of topClusters) {
-        const weight = freq / Math.max(...topClusters.map(c => c[1]));
-        try {
-          const members = db_graph.prepare(
-            'SELECT verse_id, centroid_distance FROM verse_clusters WHERE cluster_id = ? ORDER BY centroid_distance ASC LIMIT 30'
-          ).all(clusterId);
-          for (const m of members) {
-            if (readSet.has(m.verse_id)) continue;
-            const s = weight * (1 - m.centroid_distance);
-            scored.set(m.verse_id, (scored.get(m.verse_id) || 0) + s * 0.6);
-          }
-        } catch {}
-      }
-    }
-
-    // ── Step 3: Topic PPR from user's reading history topics ──
+      for (const [clusterId, freq] of topClusters) { const weight = freq / Math.max(...topClusters.map(c => c[1])); try { const members = db_graph.prepare(`SELECT verse_id, centroid_distance FROM verse_clusters WHERE cluster_id = ? ORDER BY centroid_distance ASC LIMIT 30`).all(clusterId); for (const m of members) { if (readSet.has(m.verse_id)) continue; const s = weight * (1 - m.centroid_distance); scored.set(m.verse_id, (scored.get(m.verse_id) || 0) + s * 0.6); } } catch {} } }
     if (db_tg && readSet.size > 0) {
       const recentVerses = [...readSet].slice(0, 30);
       const topicSlugs = new Set();
-      for (const vid of recentVerses) {
-        try {
-          const vt = db_tg.prepare('SELECT topic_slugs FROM verse_topics WHERE verse_id = ?').get(vid);
-          if (vt && vt.topic_slugs) {
-            JSON.parse(vt.topic_slugs || '[]').slice(0, 3).forEach(s => topicSlugs.add(s));
-          }
-        } catch {}
-      }
-      for (const slug of [...topicSlugs].slice(0, 8)) {
-        try {
-          const pprRows = db_tg.prepare(
-            'SELECT verse_id, ppr FROM topic_ppr WHERE topic_slug = ? ORDER BY ppr DESC LIMIT 50'
-          ).all(slug);
-          for (const r of pprRows) {
-            if (readSet.has(r.verse_id)) continue;
-            scored.set(r.verse_id, (scored.get(r.verse_id) || 0) + r.ppr * 0.4);
-          }
-        } catch {}
-      }
-    }
-
-    // ── Step 4: Fallback — global PageRank for cold start ──
+      for (const vid of recentVerses) { try { const vt = db_tg.prepare('SELECT topic_slugs FROM verse_topics WHERE verse_id = ?').get(vid); if (vt && vt.topic_slugs) { JSON.parse(vt.topic_slugs || '[]').slice(0, 3).forEach(s => topicSlugs.add(s)); } } catch {} }
+      for (const slug of [...topicSlugs].slice(0, 8)) { try { const pprRows = db_tg.prepare(`SELECT verse_id, ppr FROM topic_ppr WHERE topic_slug = ? ORDER BY ppr DESC LIMIT 50`).all(slug); for (const r of pprRows) { if (readSet.has(r.verse_id)) continue; scored.set(r.verse_id, (scored.get(r.verse_id) || 0) + r.ppr * 0.4); } } catch {} } }
     if (scored.size < limit) {
-      const pr = [...pageRankCache.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 100)
-        .filter(([vid]) => !readSet.has(vid));
-      for (const [vid, pr_score] of pr.slice(0, limit * 3)) {
-        if (!scored.has(vid)) scored.set(vid, pr_score * 0.2);
-      }
+      const pr = [...pageRankCache.entries()].sort((a, b) => b[1] - a[1]).slice(0, 100).filter(([vid]) => !readSet.has(vid));
+      for (const [vid, pr_score] of pr.slice(0, limit * 3)) { if (!scored.has(vid)) scored.set(vid, pr_score * 0.2); }
     }
-
-    // ── Step 5: Sort, fetch text, diversify by book ──
     const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
     const results = [];
     const seenBooks = new Set();
-    for (const [vid, score] of ranked) {
-      if (results.length >= limit) break;
-      try {
-        const row = stmtVerse.get(vid);
-        if (!row) continue;
-        const bookCount = [...seenBooks].filter(b => b === row.book_id).length;
-        if (bookCount >= 2) continue;
-        seenBooks.add(row.book_id);
-        results.push({ ...row, _for_you_score: +score.toFixed(4), _reason: 'for-you' });
-      } catch {}
-    }
-
-    const withReasons = results.map(r => {
-      const { _for_you_score, ...clean } = r;
-      return { ...clean, discovery_score: _for_you_score };
-    });
-
+    for (const [vid, score] of ranked) { if (results.length >= limit) break; try { const row = stmtVerse.get(vid); if (!row) continue; const bookCount = [...seenBooks].filter(b => b === row.book_id).length; if (bookCount >= 2) continue; seenBooks.add(row.book_id); results.push({ ...row, _for_you_score: +score.toFixed(4), _reason: 'for-you' }); } catch {} }
+    const withReasons = results.map(r => { const { _for_you_score, ...clean } = r; return { ...clean, discovery_score: _for_you_score }; });
     return { verses: withReasons, total: withReasons.length, personalised: readSet.size > 0 };
-  } catch (err) {
-    fastify.log.warn({ err }, '/for-you failed');
-    return { verses: [], total: 0, personalised: false };
-  }
+  } catch (err) { fastify.log.warn({ err }, '/for-you failed'); return { verses: [], total: 0, personalised: false }; }
 });
 
-// ── GET /trending ────────────────────────────────────────────────────────────
 fastify.get('/trending', async (request, reply) => {
   try {
     const limit = Math.min(20, Math.max(1, parseInt(request.query.limit || '10', 10)));
     const now = Date.now();
     const h24 = now - 86400000;
-    const d7  = now - 7 * 86400000;
-
-    const readRows = db_user.prepare(`
-      SELECT verse_id,
-             SUM(CASE WHEN ts >= ? THEN 3 ELSE 0 END) +
-             SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS hot_score,
-             MAX(ts) AS last_seen
-      FROM reading_events
-      WHERE ts >= ? AND event_type IN ('read', 'highlight', 'bookmark')
-      GROUP BY verse_id
-      HAVING hot_score > 0
-    `).all(h24, d7, d7);
-
-    const clickRows = db_user.prepare(`
-      SELECT verse_id,
-             SUM(CASE WHEN ts >= ? THEN 2 ELSE 1 END) AS click_score
-      FROM search_feedback
-      WHERE ts >= ?
-      GROUP BY verse_id
-    `).all(h24, d7);
-
+    const d7 = now - 7 * 86400000;
+    const readRows = db_user.prepare(`SELECT verse_id, SUM(CASE WHEN ts >= ? THEN 3 ELSE 0 END) + SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS hot_score, MAX(ts) AS last_seen FROM reading_events WHERE ts >= ? AND event_type IN ('read', 'highlight', 'bookmark') GROUP BY verse_id HAVING hot_score > 0`).all(h24, d7, d7);
+    const clickRows = db_user.prepare(`SELECT verse_id, SUM(CASE WHEN ts >= ? THEN 2 ELSE 1 END) AS click_score FROM search_feedback WHERE ts >= ? GROUP BY verse_id`).all(h24, d7);
     const scores = new Map();
     for (const r of readRows) scores.set(r.verse_id, (scores.get(r.verse_id) || 0) + r.hot_score);
     for (const r of clickRows) scores.set(r.verse_id, (scores.get(r.verse_id) || 0) + r.click_score);
-
-    if (scores.size < limit) {
-      const prTop = [...pageRankCache.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit * 2);
-      for (const [vid, pr] of prTop) {
-        if (!scores.has(vid)) scores.set(vid, pr * 5);
-      }
-    }
-
+    if (scores.size < limit) { const prTop = [...pageRankCache.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit * 2); for (const [vid, pr] of prTop) { if (!scores.has(vid)) scores.set(vid, pr * 5); } }
     const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit * 3);
     const results = [];
     const seenBooks = new Set();
-    for (const [vid, score] of ranked) {
-      if (results.length >= limit) break;
-      try {
-        const row = dba.prepare(
-          'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?'
-        ).get(vid);
-        if (!row) continue;
-        if (seenBooks.has(row.book_id) && seenBooks.size < 5) { seenBooks.add(row.book_id); }
-        results.push({ ...row, trending_score: +score.toFixed(2) });
-        seenBooks.add(row.book_id);
-      } catch {}
-    }
-
+    for (const [vid, score] of ranked) { if (results.length >= limit) break; try { const row = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?`).get(vid); if (!row) continue; if (seenBooks.has(row.book_id) && seenBooks.size < 5) { seenBooks.add(row.book_id); } results.push({ ...row, trending_score: +score.toFixed(2) }); seenBooks.add(row.book_id); } catch {} }
     return { verses: results, total: results.length };
-  } catch (err) {
-    fastify.log.warn({ err }, '/trending failed');
-    return { verses: [], total: 0 };
-  }
+  } catch (err) { fastify.log.warn({ err }, '/trending failed'); return { verses: [], total: 0 }; }
 });
 
-// ── GET /personalized-votd ────────────────────────────────────────────────────
 fastify.get('/personalized-votd', async (request, reply) => {
   try {
     const language = (request.query.language || 'en').toLowerCase();
-    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-
-    const recentCount = db_user.prepare(
-      'SELECT COUNT(DISTINCT verse_id) AS n FROM reading_events WHERE ts > ?'
-    ).get(Date.now() - 30 * 86400000).n;
-
+    const today = new Date().toISOString().slice(0, 10);
+    const recentCount = db_user.prepare(`SELECT COUNT(DISTINCT verse_id) AS n FROM reading_events WHERE ts > ?`).get(Date.now() - 30 * 86400000).n;
     if (recentCount >= 5 && db_graph) {
       const clusterFreq = new Map();
-      const readRows = db_user.prepare(
-        'SELECT verse_id FROM reading_events WHERE event_type = \'read\' ORDER BY ts DESC LIMIT 50'
-      ).all();
+      const readRows = db_user.prepare(`SELECT verse_id FROM reading_events WHERE event_type = 'read' ORDER BY ts DESC LIMIT 50`).all();
       const readSet = new Set(readRows.map(r => r.verse_id));
-
-      for (const { verse_id } of readRows.slice(0, 30)) {
-        try {
-          const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(verse_id);
-          if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1);
-        } catch {}
-      }
-
+      for (const { verse_id } of readRows.slice(0, 30)) { try { const cr = db_graph.prepare('SELECT cluster_id FROM verse_clusters WHERE verse_id = ?').get(verse_id); if (cr) clusterFreq.set(cr.cluster_id, (clusterFreq.get(cr.cluster_id) || 0) + 1); } catch {} }
       if (clusterFreq.size > 0) {
         const topCluster = [...clusterFreq.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        const members = db_graph.prepare(
-          'SELECT verse_id FROM verse_clusters WHERE cluster_id = ? AND verse_id NOT IN (SELECT verse_id FROM reading_events WHERE ts > ?) ORDER BY centroid_distance ASC LIMIT 50'
-        ).all(topCluster, Date.now() - 86400000);
-
+        const members = db_graph.prepare(`SELECT verse_id FROM verse_clusters WHERE cluster_id = ? AND verse_id NOT IN (SELECT verse_id FROM reading_events WHERE ts > ?) ORDER BY centroid_distance ASC LIMIT 50`).all(topCluster, Date.now() - 86400000);
         if (members.length > 0) {
-          // Deterministic seed from today's date so same user gets same VOTD all day
           const dateSeed = parseInt(today.replace(/-/g, ''), 10);
           const pick = members[dateSeed % members.length];
-          const row = dba.prepare(
-            'SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?'
-          ).get(pick.verse_id);
+          const row = dba.prepare(`SELECT verse_id, verse_title, scripture_text, book_title, chapter_number, verse_number, chapter_id, book_id FROM scriptures WHERE verse_id = ?`).get(pick.verse_id);
           if (row) return { verse: row, personalised: true, date: today };
         }
       }
     }
-
-    // Fallback: use existing getVerseOfTheDay
     const fallback = getVerseOfTheDay(dba);
     return { verse: fallback, personalised: false, date: today };
-  } catch (err) {
-    fastify.log.warn({ err }, '/personalized-votd failed');
-    try { return { verse: getVerseOfTheDay(dba), personalised: false, date: new Date().toISOString().slice(0, 10) }; } catch { return { verse: null }; }
-  }
+  } catch (err) { fastify.log.warn({ err }, '/personalized-votd failed'); try { return { verse: getVerseOfTheDay(dba), personalised: false, date: new Date().toISOString().slice(0, 10) }; } catch { return { verse: null }; } }
 });
 
 function registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray }) {
   const DEFAULT_SESSION_ID = 'GLOBAL';
   const SESSION_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const SESSION_CODE_LENGTH = 6;
-  // Use the service config defined at module level; allow env override for testing.
-  const SESSION_GRACE_MS          = Number(process.env.SESSION_GRACE_MS          || SERVICE_CONFIG.SESSION_GRACE_MS);
+  const SESSION_GRACE_MS = Number(process.env.SESSION_GRACE_MS || SERVICE_CONFIG.SESSION_GRACE_MS);
   const SESSION_NO_VIEWER_GRACE_MS = Number(process.env.SESSION_NO_VIEWER_GRACE_MS || SERVICE_CONFIG.SESSION_NO_VIEWER_GRACE_MS);
   const PRESENTER_LEFT_DEBOUNCE_MS = Number(process.env.PRESENTER_LEFT_DEBOUNCE_MS || SERVICE_CONFIG.PRESENTER_LEFT_DEBOUNCE_MS);
   const sessionState = new Map();
   const cleanupTimers = new Map();
   const sessionViewerCounts = new Map();
-
-  function normalizeSessionId(value) {
-    if (!value) return '';
-    return String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-  }
-
-  function getSessionState(sessionId) {
-    if (!sessionState.has(sessionId)) {
-      sessionState.set(sessionId, {
-        theme: null,
-        liveVerse: null,
-        highlightedText: '',
-        presenterSocketId: null,
-        label: '',
-        // Stable hex token issued when a presenter first claims the slot.
-        // Persists across socket reconnects so the same browser tab can always
-        // reclaim its own session even after a network blip.
-        presenterToken: null,
-        // Unix timestamp of the last presenter action (go-live, update-verse, etc.).
-        presenterLastActivityAt: null,
-        // Unix timestamp of when the presenter's socket last disconnected.
-        // The presenter slot is held indefinitely until voluntary leave — this
-        // timestamp is tracked for informational purposes only.
-        presenterDisconnectedAt: null,
-        // Set of presenterTokens that were evicted from this session.  Barred
-        // from re-entering until the current presenter voluntarily leaves.
-        lockedOutTokens: new Set(),
-        // Token + socketId for the "main" TV/projector that created the session.
-        // Additional viewers join as secondary mirrors and get the same content.
-        mainClientToken: null,
-        mainClientSocketId: null,
-        pinHash: null,
-        updatedAt: Date.now(),
-        // Ring buffer: verse_ids of the last 5 verses pushed live.
-        // Used to compute a session-centroid for search re-ranking.
-        liveHistory: [],
-        // true once a TV/viewer socket has joined — used to pick the right grace period
-        hadViewer: false,
-        // pending setTimeout handle: emitting presenter-left is deferred so brief
-        // WiFi drops can be cancelled before the TV ever sees the event
-        _presenterLeftTimer: null,
-      });
-    }
-    return sessionState.get(sessionId);
-  }
-
-  // ── Electron standalone: pre-seed the LOCAL session ───────────────────────────
-  // When the app runs inside Electron both the Presenter window (?session=LOCAL)
-  // and the Client window (create-client-session{preferredSessionId:'LOCAL'}) must
-  // land in the SAME socket.io room.  If the Client socket fires first it would
-  // normally generate a random session ID instead of honouring 'LOCAL', because
-  // sessionExists('LOCAL') would be false.  Seeding the state map here guarantees
-  // sessionExists returns true from the very first connection, so both windows
-  // always converge on the same 'LOCAL' room without any race condition.
+  function normalizeSessionId(value) { if (!value) return ''; return String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24); }
+  function getSessionState(sessionId) { if (!sessionState.has(sessionId)) sessionState.set(sessionId, { theme: null, liveVerse: null, highlightedText: '', presenterSocketId: null, label: '', presenterToken: null, presenterLastActivityAt: null, presenterDisconnectedAt: null, lockedOutTokens: new Set(), mainClientToken: null, mainClientSocketId: null, pinHash: null, updatedAt: Date.now(), liveHistory: [], hadViewer: false, _presenterLeftTimer: null }); return sessionState.get(sessionId); }
   const IS_ELECTRON = !!process.versions?.electron;
-  if (IS_ELECTRON) {
-    getSessionState('LOCAL');   // creates the map entry; no token is set yet
-    fastify.log.info('Electron mode: LOCAL session pre-seeded');
-  }
-
-  function generateSessionId() {
-    // Guard against unbounded session accumulation (e.g. server left running for weeks)
-    if (sessionState.size >= SERVICE_CONFIG.MAX_SESSIONS) {
-      fastify.log.warn(`MAX_SESSIONS (${SERVICE_CONFIG.MAX_SESSIONS}) reached — refusing new session`);
-      return null;
-    }
-    for (let i = 0; i < 16; i += 1) {
-      let generated = '';
-      for (let j = 0; j < SESSION_CODE_LENGTH; j += 1) {
-        const idx = Math.floor(Math.random() * SESSION_CODE_CHARS.length);
-        generated += SESSION_CODE_CHARS[idx];
-      }
-      if (!sessionState.has(generated) && generated !== DEFAULT_SESSION_ID) {
-        return generated;
-      }
-    }
-    return `${SESSION_CODE_CHARS[Math.floor(Math.random() * SESSION_CODE_CHARS.length)]}${Date.now().toString(36).toUpperCase().slice(-5)}`;
-  }
-
-  // Generate a 32-character cryptographically random hex token.
-  // Used to give each presenter (and main TV) a stable identity that survives
-  // socket reconnects.  Node's built-in `crypto` module — no extra deps.
-  function generateToken() {
-    return require('crypto').randomBytes(16).toString('hex');
-  }
-
-  function incrementViewerCount(sessionId) {
-    const n = (sessionViewerCounts.get(sessionId) || 0) + 1;
-    sessionViewerCounts.set(sessionId, n);
-    broadcastViewerCount(sessionId, n);
-  }
-
-  function decrementViewerCount(sessionId) {
-    const n = Math.max(0, (sessionViewerCounts.get(sessionId) || 1) - 1);
-    sessionViewerCounts.set(sessionId, n);
-    broadcastViewerCount(sessionId, n);
-  }
-
-  function broadcastViewerCount(sessionId, count) {
-    if (!sessionId || sessionId === DEFAULT_SESSION_ID) return;
-    io.to(sessionId).emit('viewer-count', { sessionId, count });
-  }
-
-  function emitToSession(sessionId, event, payload) {
-    io.to(sessionId).emit(event, payload);
-  }
-
-  function getRoomSize(sessionId) {
-    const rooms = io && io.sockets && io.sockets.adapter && io.sockets.adapter.rooms;
-    if (!rooms || typeof rooms.get !== 'function') return null;
-    const room = rooms.get(sessionId);
-    return room ? room.size : 0;
-  }
-
-  function cancelCleanup(sessionId) {
-    const normalized = normalizeSessionId(sessionId);
-    if (!normalized) return;
-    const timer = cleanupTimers.get(normalized);
-    if (timer) {
-      clearTimeout(timer);
-      cleanupTimers.delete(normalized);
-    }
-  }
-
-  function cleanupSessionIfUnused(sessionId) {
-    const normalized = normalizeSessionId(sessionId);
-    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
-    const roomSize = getRoomSize(normalized);
-    if (roomSize !== 0) return;
-    // Don't clean up sessions with recent presenter activity (handles timer/activity race)
-    const state = sessionState.get(normalized);
-    if (state && state.presenterLastActivityAt && (Date.now() - state.presenterLastActivityAt < 60000)) {
-      scheduleCleanup(normalized); // reschedule
-      return;
-    }
-    cancelCleanup(normalized);
-    if (sessionState.has(normalized)) {
-      sessionState.delete(normalized);
-      fastify.log.info(`Session ${normalized} terminated (no active sockets)`);
-    }
-  }
-
-  function scheduleCleanup(sessionId, { disconnecting = false } = {}) {
-    const normalized = normalizeSessionId(sessionId);
-    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
-    const roomSize = getRoomSize(normalized);
-    if (roomSize === null || (!disconnecting && roomSize > 0) || (disconnecting && roomSize > 1)) {
-      cancelCleanup(normalized);
-      return;
-    }
-    cancelCleanup(normalized);
-    // Sessions that have hosted a TV screen get the full 30-min grace so they can
-    // come back to the same QR code after a power-save cycle.  Sessions that only
-    // ever had a presenter (e.g. someone opened the app but never connected a TV)
-    // are cleaned up quickly — nobody is scanning that QR code.
-    const state = sessionState.get(normalized);
-    const graceMs = (state && state.hadViewer) ? SESSION_GRACE_MS : SESSION_NO_VIEWER_GRACE_MS;
-    const timer = setTimeout(() => {
-      cleanupSessionIfUnused(normalized);
-    }, graceMs);
-    cleanupTimers.set(normalized, timer);
-  }
-
-  function sessionExists(sessionId) {
-    const normalized = normalizeSessionId(sessionId);
-    if (!normalized) return false;
-    if (sessionState.has(normalized)) return true;
-    const roomSize = getRoomSize(normalized);
-    return typeof roomSize === 'number' && roomSize > 0;
-  }
-
-  // voluntary=true  → presenter explicitly left (leave-session, end-live).
-  //                   Clear the token + lockout list so the room is fully open.
-  // voluntary=false → socket dropped (network blip, page refresh).
-  //                   Keep presenterToken so the same browser tab can reconnect.
-  function releasePresenterLock(sessionId, socketId, voluntary = false) {
-    const normalized = normalizeSessionId(sessionId);
-    if (!normalized || normalized === DEFAULT_SESSION_ID) return;
-    const state = sessionState.get(normalized);
-    if (state && state.presenterSocketId === socketId) {
-      state.presenterSocketId = null;
-      if (voluntary) {
-        state.presenterToken            = null;
-        state.presenterLastActivityAt   = null;
-        state.presenterDisconnectedAt   = null;
-        state.lockedOutTokens           = new Set();
-      }
-      state.updatedAt = Date.now();
-    }
-  }
-
-  function hasConnectedSocket(socketId) {
-    if (!socketId) return false;
-    const socketMap = io && io.sockets && io.sockets.sockets;
-    if (!socketMap) return false;
-    if (typeof socketMap.has === 'function') return socketMap.has(socketId);
-    if (typeof socketMap.get === 'function') return Boolean(socketMap.get(socketId));
-    return false;
-  }
-
-  function clearStalePresenterLock(state) {
-    if (!state || !state.presenterSocketId) return;
-    if (!hasConnectedSocket(state.presenterSocketId)) {
-      state.presenterSocketId = null;
-      state.updatedAt = Date.now();
-    }
-  }
-
-  function ensurePresenterAccess(sessionId, socket) {
-    const state = getSessionState(sessionId);
-    clearStalePresenterLock(state);
-    if (state.presenterSocketId === socket.id) {
-      state.presenterLastActivityAt = Date.now();
-    }
-    // Hard block: only the socket that won the presenter slot is allowed.
-    // NO silent grant — a socket must call join-session as presenter first.
-    if (!state.presenterSocketId || state.presenterSocketId !== socket.id) {
-      socket.emit('session-error', { message: 'Presenter access required — join as presenter first' });
-      return false;
-    }
-    return true;
-  }
-
-  // Safety-net garbage collector: every 5 minutes, delete any session whose room
-  // is empty AND whose cleanup timer has already fired or was never scheduled.
-  // This catches sessions that slipped through the normal cleanup path (e.g. the
-  // cleanup timer ran and deleted the Map entry but a new one was recreated by
-  // an errant getSessionState call, or a very old presenter-left debounce timer
-  // left a ghost entry).  Sessions that still have an active TV socket in their
-  // room are left alone — getRoomSize() > 0 for them.
-  const _idleSweep = setInterval(() => {
-    for (const [sessionId] of sessionState) {
-      if (sessionId === DEFAULT_SESSION_ID) continue;
-      const roomSize = getRoomSize(sessionId);
-      if (roomSize !== null && roomSize === 0 && !cleanupTimers.has(sessionId)) {
-        sessionState.delete(sessionId);
-        fastify.log.info(`[idle-sweep] Removed ghost session ${sessionId}`);
-      }
-    }
-  }, 5 * 60 * 1000);
-
-  io.engine.on('connection_error', (err) => {
-    fastify.log.warn({ err: err.message, code: err.code }, '[Socket.IO] connection error');
-  });
-
+  if (IS_ELECTRON) { getSessionState('LOCAL'); fastify.log.info('Electron mode: LOCAL session pre-seeded'); }
+  function generateSessionId() { if (sessionState.size >= SERVICE_CONFIG.MAX_SESSIONS) { fastify.log.warn(`MAX_SESSIONS (${SERVICE_CONFIG.MAX_SESSIONS}) reached — refusing new session`); return null; } for (let i = 0; i < 16; i += 1) { let generated = ''; for (let j = 0; j < SESSION_CODE_LENGTH; j += 1) { const idx = Math.floor(Math.random() * SESSION_CODE_CHARS.length); generated += SESSION_CODE_CHARS[idx]; } if (!sessionState.has(generated) && generated !== DEFAULT_SESSION_ID) return generated; } return `${SESSION_CODE_CHARS[Math.floor(Math.random() * SESSION_CODE_CHARS.length)]}${Date.now().toString(36).toUpperCase().slice(-5)}`; }
+  function generateToken() { return require('crypto').randomBytes(16).toString('hex'); }
+  function incrementViewerCount(sessionId) { const n = (sessionViewerCounts.get(sessionId) || 0) + 1; sessionViewerCounts.set(sessionId, n); broadcastViewerCount(sessionId, n); }
+  function decrementViewerCount(sessionId) { const n = Math.max(0, (sessionViewerCounts.get(sessionId) || 1) - 1); sessionViewerCounts.set(sessionId, n); broadcastViewerCount(sessionId, n); }
+  function broadcastViewerCount(sessionId, count) { if (!sessionId || sessionId === DEFAULT_SESSION_ID) return; io.to(sessionId).emit('viewer-count', { sessionId, count }); }
+  function emitToSession(sessionId, event, payload) { io.to(sessionId).emit(event, payload); }
+  function getRoomSize(sessionId) { const rooms = io && io.sockets && io.sockets.adapter && io.sockets.adapter.rooms; if (!rooms || typeof rooms.get !== 'function') return null; const room = rooms.get(sessionId); return room ? room.size : 0; }
+  function cancelCleanup(sessionId) { const normalized = normalizeSessionId(sessionId); if (!normalized) return; const timer = cleanupTimers.get(normalized); if (timer) { clearTimeout(timer); cleanupTimers.delete(normalized); } }
+  function cleanupSessionIfUnused(sessionId) { const normalized = normalizeSessionId(sessionId); if (!normalized || normalized === DEFAULT_SESSION_ID) return; const roomSize = getRoomSize(normalized); if (roomSize !== 0) return; const state = sessionState.get(normalized); if (state && state.presenterLastActivityAt && (Date.now() - state.presenterLastActivityAt < 60000)) { scheduleCleanup(normalized); return; } cancelCleanup(normalized); if (sessionState.has(normalized)) { sessionState.delete(normalized); fastify.log.info(`Session ${normalized} terminated (no active sockets)`); } }
+  function scheduleCleanup(sessionId, { disconnecting = false } = {}) { const normalized = normalizeSessionId(sessionId); if (!normalized || normalized === DEFAULT_SESSION_ID) return; const roomSize = getRoomSize(normalized); if (roomSize === null || (!disconnecting && roomSize > 0) || (disconnecting && roomSize > 1)) { cancelCleanup(normalized); return; } cancelCleanup(normalized); const state = sessionState.get(normalized); const graceMs = (state && state.hadViewer) ? SESSION_GRACE_MS : SESSION_NO_VIEWER_GRACE_MS; const timer = setTimeout(() => { cleanupSessionIfUnused(normalized); }, graceMs); cleanupTimers.set(normalized, timer); }
+  function sessionExists(sessionId) { const normalized = normalizeSessionId(sessionId); if (!normalized) return false; if (sessionState.has(normalized)) return true; const roomSize = getRoomSize(normalized); return typeof roomSize === 'number' && roomSize > 0; }
+  function releasePresenterLock(sessionId, socketId, voluntary = false) { const normalized = normalizeSessionId(sessionId); if (!normalized || normalized === DEFAULT_SESSION_ID) return; const state = sessionState.get(normalized); if (state && state.presenterSocketId === socketId) { state.presenterSocketId = null; if (voluntary) { state.presenterToken = null; state.presenterLastActivityAt = null; state.presenterDisconnectedAt = null; state.lockedOutTokens = new Set(); } state.updatedAt = Date.now(); } }
+  function hasConnectedSocket(socketId) { if (!socketId) return false; const socketMap = io && io.sockets && io.sockets.sockets; if (!socketMap) return false; if (typeof socketMap.has === 'function') return socketMap.has(socketId); if (typeof socketMap.get === 'function') return Boolean(socketMap.get(socketId)); return false; }
+  function clearStalePresenterLock(state) { if (!state || !state.presenterSocketId) return; if (!hasConnectedSocket(state.presenterSocketId)) { state.presenterSocketId = null; state.updatedAt = Date.now(); } }
+  function ensurePresenterAccess(sessionId, socket) { const state = getSessionState(sessionId); clearStalePresenterLock(state); if (state.presenterSocketId === socket.id) state.presenterLastActivityAt = Date.now(); if (!state.presenterSocketId || state.presenterSocketId !== socket.id) { socket.emit('session-error', { message: 'Presenter access required — join as presenter first' }); return false; } return true; }
+  const _idleSweep = setInterval(() => { for (const [sessionId] of sessionState) { if (sessionId === DEFAULT_SESSION_ID) continue; const roomSize = getRoomSize(sessionId); if (roomSize !== null && roomSize === 0 && !cleanupTimers.has(sessionId)) { sessionState.delete(sessionId); fastify.log.info(`[idle-sweep] Removed ghost session ${sessionId}`); } } }, 5 * 60 * 1000);
+  io.engine.on('connection_error', (err) => { fastify.log.warn({ err: err.message, code: err.code }, '[Socket.IO] connection error'); });
   io.on('connection', (socket) => {
     fastify.log.info('a user connected');
-    socket.on('error', (err) => {
-      fastify.log.warn({ err: err.message, socketId: socket.id }, '[Socket.IO] socket error');
-    });
+    socket.on('error', (err) => { fastify.log.warn({ err: err.message, socketId: socket.id }, '[Socket.IO] socket error'); });
     let activeSessionId = DEFAULT_SESSION_ID;
     let activeRole = 'viewer';
     socket.join(activeSessionId);
     getSessionState(activeSessionId);
-
-    // ── Per-socket rate limiter for expensive events ──────────────────────────
     const _socketRateBuckets = {};
-    function socketRateLimit(event, maxPerMin) {
-      const now = Date.now();
-      const bucket = _socketRateBuckets[event] || (_socketRateBuckets[event] = { count: 0, resetAt: now + 60000 });
-      if (now > bucket.resetAt) { bucket.count = 0; bucket.resetAt = now + 60000; }
-      if (++bucket.count > maxPerMin) {
-        fastify.log.warn({ socketId: socket.id, event }, '[rate-limit] Socket event throttled');
-        return false;
-      }
-      return true;
-    }
-
-    const joinSession = (candidateSessionId, role = 'viewer', pin = '', presenterToken = '') => {
-      const normalized = normalizeSessionId(candidateSessionId);
-      if (!normalized) return null;
-      const previousSessionId = activeSessionId;
-      if (role === 'presenter') {
-        const state = getSessionState(normalized);
-        clearStalePresenterLock(state);   // clear dead-socket reference first
-
-        const incomingToken = String(presenterToken || '').trim();
-
-        // A token that was evicted stays barred until the current presenter
-        // voluntarily leaves.
-        if (incomingToken && state.lockedOutTokens.has(incomingToken)) {
-          return { error: 'presenter-locked-out' };
-        }
-
-        // PIN gate — runs BEFORE token assignment so a failed/incomplete PIN
-        // attempt doesn't pollute the presenter slot with a half-assigned token.
-        if (state.pinHash) {
-          const provided = String(pin || '').trim();
-          if (!provided) return { requiresPin: true };
-          if (hashPin(provided) !== state.pinHash) return { pinIncorrect: true };
-        }
-
-        // The token matches — this is the original device/tab returning after
-        // a network blip or page refresh.  Clear the disconnect timer now that
-        // they're back, then fall through to the grant section.
-        if (incomingToken && state.presenterToken === incomingToken) {
-          state.presenterDisconnectedAt = null; // they're back — stop the eviction clock
-        }
-
-        else if (!state.presenterToken) {
-          // Slot is vacant.  Assign the incoming token (or generate a fresh one
-          // if the client didn't supply one, as is the case on first join).
-          state.presenterToken = incomingToken || generateToken();
-        }
-
-        else {
-          if (hasConnectedSocket(state.presenterSocketId)) {
-            // The preacher's device is online — protect them unconditionally.
-            // Being "idle" (not touching the screen) is normal during a sermon.
-            io.to(state.presenterSocketId).emit('presenter-takeover-attempt', {
-              message: 'Another device attempted to join your session as presenter',
-            });
-            return { error: 'Another presenter is active in this session' };
-          } else {
-            // Presenter disconnected. Allow takeover if disconnect was > SESSION_GRACE_MS ago
-            // or if the grace period has passed. During grace period, hold the slot.
-            const disconnectedAt = state.presenterDisconnectedAt;
-            const graceElapsed = disconnectedAt && (Date.now() - disconnectedAt > SESSION_GRACE_MS);
-            if (graceElapsed) {
-              // Grace period expired — allow new presenter
-              state.presenterToken = incomingToken || generateToken();
-              state.presenterDisconnectedAt = null;
-              state.lockedOutTokens = new Set();
-              fastify.log.info(`Session ${normalized}: presenter slot released after grace period`);
-            } else {
-              return { error: 'presenter-session-in-progress' };
-            }
-          }
-        }
-      }
-      if (activeSessionId && activeSessionId !== normalized) {
-        socket.leave(activeSessionId);
-        if (activeRole === 'presenter') {
-          releasePresenterLock(previousSessionId, socket.id, true /* voluntary — switching sessions */);
-        } else {
-          decrementViewerCount(previousSessionId);
-        }
-        scheduleCleanup(previousSessionId);
-      }
-      activeSessionId = normalized;
-      activeRole = role;
-      socket.join(activeSessionId);
-      cancelCleanup(activeSessionId);
-      const state = getSessionState(activeSessionId);
-      if (role === 'presenter') {
-        // Cancel any pending presenter-left debounce — this can happen when the
-        // presenter reconnects within PRESENTER_LEFT_DEBOUNCE_MS of a socket drop.
-        // In that case the TV never receives presenter-left and the display stays
-        // completely stable.
-        if (state._presenterLeftTimer) {
-          clearTimeout(state._presenterLeftTimer);
-          state._presenterLeftTimer = null;
-        }
-        state.presenterSocketId = socket.id;
-      } else {
-        // Mark that a TV/viewer has joined this session at least once.
-        // This triggers the longer SESSION_GRACE_MS on cleanup instead of
-        // the quick SESSION_NO_VIEWER_GRACE_MS, preserving the QR code for
-        // power-save reconnects.
-        state.hadViewer = true;
-        incrementViewerCount(activeSessionId);
-      }
-      // Tell the joining socket it's in the session (include pinSet so the
-      // presenter UI can show the correct lock state on reconnect)
-      socket.emit('session-joined', { sessionId: activeSessionId, pinSet: !!state.pinHash, label: state.label || '' });
-      if (state.theme) socket.emit('update-theme', state.theme);
-      if (state.liveVerse) socket.emit('update-verse', state.liveVerse);
-      if (state.customMode) socket.emit('custom-text', { ...state.customMode, theme: state.theme });
-      if (state.highlightedText) socket.emit('highlight-text', state.highlightedText);
-      socket.emit('viewer-count', {
-        sessionId: activeSessionId,
-        count: sessionViewerCounts.get(activeSessionId) || 0,
-      });
-      if (role === 'presenter') {
-        // Tell the TV (and any secondary screens) a presenter is now live.
-        // Include the session's current live verse + theme so the TV can
-        // restore the display immediately on reconnect without waiting for go-live.
-        socket.to(activeSessionId).emit('presenter-joined', {
-          sessionId: activeSessionId,
-          verse: state.liveVerse || null,
-          theme: state.theme     || null,
-        });
-      } else {
-        // When a viewer (TV) joins and a presenter is already active, notify that
-        // viewer immediately so it exits kiosk mode and shows the correct QR label
-        if (state.presenterSocketId && io.sockets.sockets.get(state.presenterSocketId)) {
-          socket.emit('presenter-joined', {
-            sessionId: activeSessionId,
-            verse: state.liveVerse || null,
-            theme: state.theme     || null,
-          });
-        }
-      }
-      return { sessionId: activeSessionId, pinSet: !!state.pinHash, presenterToken: state.presenterToken, label: state.label || '' };
-    };
-
-    const leaveActiveSession = () => {
-      if (!activeSessionId || activeSessionId === DEFAULT_SESSION_ID) {
-        return { sessionId: DEFAULT_SESSION_ID };
-      }
-      const previousSessionId = activeSessionId;
-      if (activeRole === 'presenter') {
-        // Tell the TV (and any secondary screens) the presenter has left so they
-        // can reset state and switch the QR back to the presenter-join URL.
-        socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId, voluntary: true });
-        releasePresenterLock(previousSessionId, socket.id, true /* voluntary */);
-      } else {
-        decrementViewerCount(previousSessionId);
-      }
-      socket.leave(previousSessionId);
-      activeSessionId = DEFAULT_SESSION_ID;
-      activeRole = 'viewer';
-      socket.join(DEFAULT_SESSION_ID);
-      scheduleCleanup(previousSessionId);
-      socket.emit('session-left', { sessionId: previousSessionId });
-      return { sessionId: previousSessionId };
-    };
-
-    socket.on('create-session', (payload, callback) => {
-      const sessionId = generateSessionId();
-      if (!sessionId) {
-        const error = { message: 'Server session limit reached — please try again later' };
-        socket.emit('session-error', error);
-        if (typeof callback === 'function') callback({ ok: false, ...error });
-        return;
-      }
-      // Pre-generate the presenter token so it can be returned to the client
-      // immediately and stored in sessionStorage for reconnect identity.
-      const presenterToken = generateToken();
-      const joined = joinSession(sessionId, 'presenter', '', presenterToken);
-      if (joined && joined.error) {
-        const error = { message: joined.error };
-        socket.emit('session-error', error);
-        if (typeof callback === 'function') callback({ ok: false, ...error });
-        return;
-      }
-      // Store label if provided
-      const label = String((payload && payload.label) || '').trim().slice(0, 40);
-      if (label) getSessionState(joined.sessionId).label = label;
-      socket.emit('session-created', { sessionId: joined.sessionId, presenterToken: joined.presenterToken, label });
-      if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken, label });
-    });
-
-    // The Client display (e.g. a TV) calls this to create a named session that
-    // the Presenter then joins by scanning the QR code or typing the short code.
-    //
-    // Phase 2 addition: accepts an optional `preferredSessionId` so a TV that
-    // has reloaded (browser crash, power-save) can request its previous code
-    // back.  If that session still exists in state, the TV silently rejoins it
-    // without changing the QR code — the Presenter never notices the hiccup.
-    socket.on('create-client-session', (payload, callback) => {
-      const preferred      = normalizeSessionId(payload && payload.preferredSessionId);
-      const incomingToken  = payload && payload.mainClientToken ? String(payload.mainClientToken).trim() : '';
-      let sessionId;
-      let isMainClient = false;
-
-      if (preferred && sessionExists(preferred)) {
-        // The TV's previous session is still alive — try to rejoin it.
-        sessionId = preferred;
-        const state = getSessionState(sessionId);
-
-        if (!state.mainClientToken) {
-          // Session exists but has no main-client yet (edge case) — claim it.
-          isMainClient = true;
-        } else if (incomingToken && incomingToken === state.mainClientToken) {
-          // Same TV reconnecting (browser crash / power-save) — restore slot.
-          isMainClient = true;
-          fastify.log.info(`Main TV reconnecting to client session ${sessionId}`);
-        } else {
-          // Different device — join as secondary viewer (mirrors exactly).
-          isMainClient = false;
-          fastify.log.info(`Secondary viewer joining client session ${sessionId}`);
-        }
-      } else {
-        sessionId = generateSessionId();
-        if (!sessionId) {
-          const error = { message: 'Server session limit reached' };
-          socket.emit('session-error', error);
-          if (typeof callback === 'function') callback({ ok: false, ...error });
-          return;
-        }
-        isMainClient = true;
-      }
-
-      if (activeSessionId && activeSessionId !== DEFAULT_SESSION_ID && activeSessionId !== sessionId) {
-        socket.leave(activeSessionId);
-        decrementViewerCount(activeSessionId);
-        scheduleCleanup(activeSessionId);
-      }
-
-      activeSessionId = sessionId;
-      activeRole = 'viewer';
-      socket.join(sessionId);
-      cancelCleanup(sessionId);
-
-      const state = getSessionState(sessionId); // ensure state map entry exists
-      state.hadViewer = true;                   // FIX: was never set on this path
-      incrementViewerCount(sessionId);
-
-      let mainClientToken = state.mainClientToken || null;
-      if (isMainClient) {
-        if (!state.mainClientToken) {
-          // Freshly generated or unclaimed — mint a new token.
-          mainClientToken = generateToken();
-          state.mainClientToken = mainClientToken;
-        }
-        state.mainClientSocketId = socket.id;
-      }
-
-      socket.emit('client-session-created', {
-        sessionId,
-        mainClientToken: isMainClient ? mainClientToken : undefined,
-        isMainClient,
-      });
-      if (typeof callback === 'function') callback({
-        ok: true,
-        sessionId,
-        mainClientToken: isMainClient ? mainClientToken : undefined,
-        isMainClient,
-      });
-    });
-
-    socket.on('join-session', (payload, callback) => {
-      const requested      = normalizeSessionId(payload && payload.sessionId);
-      const role           = payload && payload.role === 'presenter' ? 'presenter' : 'viewer';
-      const pin            = payload && payload.pin ? String(payload.pin).trim() : '';
-      // Presenter token — stable identity persisted in the client's sessionStorage.
-      // An empty string is fine for viewers (token logic only runs for presenter role).
-      const presenterToken = payload && payload.presenterToken ? String(payload.presenterToken).trim() : '';
-      if (!sessionExists(requested)) {
-        const error = { message: 'Session not found' };
-        socket.emit('session-error', error);
-        if (typeof callback === 'function') callback({ ok: false, ...error });
-        return;
-      }
-      const joined = joinSession(requested, role, pin, presenterToken);
-      // PIN-related rejections — do NOT emit session-error (they're expected flows)
-      if (joined && joined.requiresPin) {
-        if (typeof callback === 'function') callback({ ok: false, requiresPin: true });
-        return;
-      }
-      if (joined && joined.pinIncorrect) {
-        if (typeof callback === 'function') callback({ ok: false, pinIncorrect: true, message: 'Incorrect PIN — try again' });
-        return;
-      }
-      if (!joined || joined.error) {
-        const errCode = joined && joined.error;
-        const message = errCode === 'presenter-locked-out'
-          ? 'This session already has an active presenter. You can join once they end the service.'
-          : (errCode || 'Valid session code is required');
-        socket.emit('session-error', { message });
-        if (typeof callback === 'function') callback({ ok: false, error: errCode, message });
-        return;
-      }
-      if (!joined.sessionId) {
-        const error = { message: 'Valid session code is required' };
-        socket.emit('session-error', error);
-        if (typeof callback === 'function') callback({ ok: false, ...error });
-        return;
-      }
-      // Persist label if presenter supplies one and the session has none yet
-      if (role === 'presenter' && payload && payload.label) {
-        const state = getSessionState(joined.sessionId);
-        if (!state.label) state.label = String(payload.label).trim().slice(0, 40);
-        joined.label = state.label;
-      }
-      if (typeof callback === 'function') callback({
-        ok: true,
-        sessionId: joined.sessionId,
-        pinSet: joined.pinSet,
-        presenterToken: joined.presenterToken || null,
-        label: joined.label || '',
-      });
-    });
-
-    socket.on('leave-session', (payload, callback) => {
-      const left = leaveActiveSession();
-      if (typeof callback === 'function') callback({ ok: true, sessionId: left.sessionId });
-    });
-
-    socket.on('set-session-pin', (payload, callback) => {
-      if (!ensurePresenterAccess(activeSessionId, socket)) {
-        if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' });
-        return;
-      }
-      const pin = payload && payload.pin ? String(payload.pin).trim() : '';
-      if (!/^\d{4,8}$/.test(pin)) {
-        if (typeof callback === 'function') callback({ ok: false, message: 'PIN must be 4–8 digits' });
-        return;
-      }
-      const state = getSessionState(activeSessionId);
-      state.pinHash = hashPin(pin);
-      if (typeof callback === 'function') callback({ ok: true });
-    });
-
-    socket.on('clear-session-pin', (_payload, callback) => {
-      if (!ensurePresenterAccess(activeSessionId, socket)) {
-        if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' });
-        return;
-      }
-      const state = getSessionState(activeSessionId);
-      state.pinHash = null;
-      if (typeof callback === 'function') callback({ ok: true });
-    });
-
-    socket.on('search', async (payload) => {
-      try {
-        if (!socketRateLimit('search', 120)) {
-          socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'rate-limited' });
-          return;
-        }
-        const query         = typeof payload === 'string' ? payload : payload?.query;
-        const pageSize      = Math.min(50, Math.max(1, Number(payload?.pageSize) || 10));
-        const language      = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
-        const contextVerseId = Number(payload?.contextVerseId) || null;
-        const cursorStr     = payload?.cursor || null;
-
-        if (!query || !String(query).trim()) {
-          socket.emit('search-results', { results: [], total: 0, nextCursor: null });
-          return;
-        }
-
-        const queryStr = String(query).trim();
-        if (queryStr.length > 500) {
-          socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'query-too-long' });
-          return;
-        }
-
-        fastify.log.info(`search: "${queryStr}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`);
-
-        let offset = 0;
-        let pipelineResults, total, cacheKey, pipelineMeta;
-
-        if (cursorStr) {
-          // Cursor path: decode offset + cache key, no pipeline re-run
-          const decoded = decodeCursor(cursorStr);
-          if (decoded) {
-            const cached = searchCacheGet(decoded.k);
-            if (cached) {
-              offset          = decoded.o;
-              pipelineResults = cached.results;
-              total           = cached.total;
-              pipelineMeta    = cached.meta;
-              cacheKey        = decoded.k;
-            }
-          }
-          // If cache expired since cursor was issued, fall through to fresh run
-          if (!pipelineResults) {
-            const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId);
-            pipelineResults = fresh.results;
-            total           = fresh.total;
-            pipelineMeta    = fresh.meta;
-            cacheKey        = fresh.cacheKey;
-            offset          = 0;
-          }
-        } else {
-          // Fresh search: run pipeline (cache hit = fast)
-          const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId);
-          pipelineResults = fresh.results;
-          total           = fresh.total;
-          pipelineMeta    = fresh.meta;
-          cacheKey        = fresh.cacheKey;
-          offset          = 0;
-        }
-
-        const pageResults = pipelineResults.slice(offset, offset + pageSize);
-        const nextOffset  = offset + pageResults.length;
-        const hasMore     = nextOffset < total;
-        const nextCursor  = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null;
-
-        socket.emit('search-results', {
-          results:    pageResults,
-          total,
-          nextCursor,
-          meta:       pipelineMeta,
-          // keep legacy page field for backward compat
-          page:       Math.floor(offset / pageSize),
-          pageSize,
-          query,
-          language,
-        });
-      } catch (err) {
-        fastify.log.error({ err }, 'search handler failed');
-        socket.emit('search-results', { results: [], total: 0, nextCursor: null });
-        socket.emit('session-error', 'Search failed for the selected language');
-      }
-    });
-
-    socket.on('update-verse', (payload) => {
-      if (!socketRateLimit('update-verse', 60)) return;
-      const verse = payload && payload.verse ? payload.verse : payload;
-      if (!verse || typeof verse !== 'object' || !verse.verse_id) return;
-      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      fastify.log.info({ verseId: verse?.verse_id }, 'updating verse');
-      const state = getSessionState(sessionId);
-      state.liveVerse = verse;
-      state.updatedAt = Date.now();
-      emitToSession(sessionId, 'update-verse', verse);
-    });
-
-    socket.on('update-theme', (payload) => {
-      const theme = payload && payload.theme ? payload.theme : payload;
-      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      fastify.log.info('updating theme');
-      const state = getSessionState(sessionId);
-      state.theme = theme;
-      state.updatedAt = Date.now();
-      emitToSession(sessionId, 'update-theme', theme);
-    });
-
-    socket.on('highlight-text', (payload) => {
-      if (!socketRateLimit('highlight-text', 60)) return;
-      const text = payload && Object.prototype.hasOwnProperty.call(payload, 'text') ? payload.text : payload;
-      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      fastify.log.info('highlighting text');
-      const state = getSessionState(sessionId);
-      state.highlightedText = text ? String(text).trim().slice(0, 5000) : '';
-      state.updatedAt = Date.now();
-      emitToSession(sessionId, 'highlight-text', state.highlightedText);
-    });
-
-    // Presenter hits "End Live" → blank the TV, return Client to QR idle state.
-    // Session stays alive — QR code is unchanged — presenter can go live again.
-    socket.on('clear-screen', (payload, callback) => {
-      const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      const state = getSessionState(sessionId);
-      state.liveVerse      = null;
-      state.highlightedText = '';
-      state.customMode     = null;
-      state.updatedAt      = Date.now();
-      emitToSession(sessionId, 'clear-screen', {});
-      fastify.log.info(`clear-screen broadcast to session ${sessionId}`);
-      if (typeof callback === 'function') callback({ ok: true });
-    });
-
-    // ── go-custom (F2/F12) — send arbitrary announcement text to the TV ───────
-    socket.on('go-custom', (payload) => {
-      if (!socketRateLimit('go-custom', 30)) return;
-      const { text, subtext, theme } = payload || {};
-      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      if (!text) return;
-      const state = getSessionState(sessionId);
-      state.customMode = { text: String(text), subtext: String(subtext || '') };
-      state.theme      = theme || state.theme;
-      state.liveVerse  = null;
-      state.updatedAt  = Date.now();
-      emitToSession(sessionId, 'custom-text', { text: String(text), subtext: String(subtext || ''), theme });
-      if (theme) emitToSession(sessionId, 'update-theme', theme);
-      fastify.log.info(`go-custom broadcast to session ${sessionId}`);
-    });
-
-    // ── preload-background (F11) — pre-warm browser cache before go-live ──────
-    socket.on('preload-background', (payload) => {
-      if (!payload?.background_url) return;
-      const sessionId = activeSessionId || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      emitToSession(sessionId, 'preload-background', { background_url: payload.background_url });
-    });
-
-    // ── now-reading ─────────────────────────────────────────────────────────
-    // Presenter toggles the "Now Reading" label on TV/client screens.
-    socket.on('now-reading', (payload) => {
-      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      emitToSession(sessionId, 'now-reading', { on: !!payload?.on, verse_id: payload?.verse_id || null });
-    });
-
-    // ── update-language ──────────────────────────────────────────────────────
-    // Presenter switches language while a verse is already live.
-    // Fetch the same verse from the correct database and re-broadcast it
-    // so the TV updates immediately without requiring a new go-live.
-    socket.on('update-language', (payload) => {
-      const lang      = payload?.language ? String(payload.language).toLowerCase().trim() : 'en';
-      const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-
-      const state = getSessionState(sessionId);
-      state.language  = lang;
-      state.updatedAt = Date.now();
-
-      // If there's a live verse, re-fetch it in the new language and re-broadcast
-      if (state.liveVerse) {
-        const targetDb = resolveDbAdapter(lang);
-        try {
-          const row = fetchVerseByCoords(
-            targetDb,
-            state.liveVerse,
-            'scripture_text, verse_title, book_title, volume_title, volume_short_title'
-          );
-          if (row) {
-            const updated = {
-              ...state.liveVerse,
-              scripture_text:    row.scripture_text || state.liveVerse.scripture_text,
-              book_title:        row.book_title     || state.liveVerse.book_title,
-              verse_title:       row.verse_title    || state.liveVerse.verse_title,
-              volume_title:      row.volume_title   || state.liveVerse.volume_title   || '',
-              volume_short_title: row.volume_short_title || state.liveVerse.volume_short_title || '',
-              segments:          segmentVerseText(row.scripture_text || state.liveVerse.scripture_text),
-              currentSegment:    0,
-            };
-            updated.totalSegments = updated.segments.length;
-            state.liveVerse = updated;
-            emitToSession(sessionId, 'update-verse', updated);
-          }
-        } catch (err) {
-          fastify.log.warn(`update-language: failed to fetch verse in ${lang}:`, err?.message);
-        }
-      }
-
-      fastify.log.info(`update-language: session ${sessionId} → ${lang}`);
-    });
-
-    socket.on('go-live', ({verse, theme, language, sessionId: rawSessionId, secondaryLanguage}) => {
-      const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID;
-      if (!ensurePresenterAccess(sessionId, socket)) return;
-      fastify.log.info({ sessionId }, '[Socket.IO] go-live triggered');
-
-      let scriptureText = verse.scripture_text;
-      let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number;
-      let bookTitle = verse.book_title;
-
-      // Normalize language input
-      const normalizedLanguage = language ? language.toLowerCase().trim() : null;
-
-      // Determine target database with streamlined mapping
-      let targetDb = dba;
-      const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normalizedLanguage);
-      if (isTranslation) {
-        targetDb = resolveDbAdapter(normalizedLanguage);
-      }
-
-      if (targetDb) {
-        try {
-          const result = fetchVerseByCoords(
-            targetDb,
-            verse,
-            'scripture_text, verse_title, book_title, volume_title, volume_short_title'
-          );
-
-          if (result) {
-            // Apply field validation only for translations per specification
-            if (isTranslation) {
-              if (result.scripture_text) scriptureText = result.scripture_text;
-              if (result.verse_title) verseTitle = result.verse_title;
-              if (result.book_title) bookTitle = result.book_title;
-            } else {
-              scriptureText = result.scripture_text;
-              verseTitle = result.verse_title;
-              bookTitle = result.book_title;
-            }
-            verse = { ...verse,
-              volume_title:       result.volume_title       || verse.volume_title       || '',
-              volume_short_title: result.volume_short_title || verse.volume_short_title || '',
-            };
-          }
-        } catch (err) {
-          fastify.log.error(
-            isTranslation
-              ? `Failed to fetch ${normalizedLanguage} translation`
-              : 'Failed to fetch English text',
-            err
-          );
-        }
-      }
-
-      // Segment the verse for readability
-      const segments = segmentVerseText(scriptureText);
-      const verseWithSegments = {
-        ...verse,
-        scripture_text: scriptureText,
-        verse_title: verseTitle,
-        book_title: bookTitle,
-        segments,
-        totalSegments: segments.length,
-        currentSegment: 0,
-        // Always clear secondary fields so stale values from ...verse don't
-        // bleed through when the presenter switches Off. The block below
-        // re-populates them only when a secondary language is active.
-        secondary_text:        null,
-        secondary_book_title:  null,
-        secondary_segments:    null,
-        secondaryLanguage:     null,
-        language:             normalizedLanguage || 'en',
-        version_citation:     getVersionCitation(normalizedLanguage || 'en', verse.volume_id),
-      };
-
-      // F8 — dual language display: fetch secondary language text
-      const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null;
-      if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) {
-        const secDb = resolveDbAdapter(normSecLang);
-        try {
-          const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title');
-          if (secRow) {
-            verseWithSegments.secondary_text       = secRow.scripture_text;
-            verseWithSegments.secondary_book_title = secRow.book_title;
-            verseWithSegments.secondaryLanguage    = normSecLang;
-          }
-        } catch (err) {
-          fastify.log.warn('dual-lang fetch failed:', err?.message);
-        }
-      }
-
-      // Recompute citation now that secondaryLanguage is known
-      if (verseWithSegments.secondaryLanguage) {
-        verseWithSegments.version_citation = getVersionCitation(
-          normalizedLanguage || 'en',
-          verse.volume_id,
-          verseWithSegments.secondaryLanguage
-        );
-      }
-
-      // Dual-language segmentation: re-segment both texts at a tighter word
-      // limit and pair them so every slide shows one matched chunk of each.
-      if (verseWithSegments.secondaryLanguage && verseWithSegments.secondary_text) {
-        const { primarySegments, secondarySegments } = segmentVerseTextDual(
-          scriptureText,
-          verseWithSegments.secondary_text
-        );
-        verseWithSegments.segments           = primarySegments;
-        verseWithSegments.totalSegments      = primarySegments.length;
-        verseWithSegments.secondary_segments = secondarySegments;
-      }
-
-      const state = getSessionState(sessionId);
-      state.liveVerse = verseWithSegments;
-      state.theme = theme;
-      state.highlightedText = '';
-      state.updatedAt = Date.now();
-
-      // Track live history for session-centroid re-ranking (max 5)
-      if (verse.verse_id) {
-        state.liveHistory = [verse.verse_id, ...state.liveHistory.filter(id => id !== verse.verse_id)].slice(0, 5);
-      }
-
-      // Send only to clients in the same session
-      emitToSession(sessionId, 'update-verse', verseWithSegments);
-      emitToSession(sessionId, 'update-theme', theme);
-    });
-
-    socket.on('disconnecting', () => {
-      if (socket.rooms && typeof socket.rooms.forEach === 'function') {
-        socket.rooms.forEach((roomId) => {
-          if (roomId !== socket.id) {
-            // During `disconnecting` the socket is still in its rooms, so
-            // socket.to() can still reach the TV/viewers before the lock is released.
-            if (activeRole === 'presenter') {
-              // Debounce presenter-left so brief WiFi blips (< PRESENTER_LEFT_DEBOUNCE_MS)
-              // are invisible to the TV.  If the presenter reconnects and calls join-session
-              // within that window the timer is cancelled and the TV display is never disturbed.
-              const state = getSessionState(roomId);
-              if (state) {
-                // Track disconnect time — slot stays held until voluntary leave.
-                if (state.presenterSocketId === socket.id) {
-                  state.presenterDisconnectedAt = Date.now();
-                }
-                if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer);
-                const capturedRoomId = roomId;
-                state._presenterLeftTimer = setTimeout(() => {
-                  state._presenterLeftTimer = null;
-                  io.to(capturedRoomId).emit('presenter-left', { sessionId: capturedRoomId, locked: true });
-                }, PRESENTER_LEFT_DEBOUNCE_MS);
-              }
-            }
-            releasePresenterLock(roomId, socket.id);
-            if (activeRole !== 'presenter') decrementViewerCount(roomId);
-            scheduleCleanup(roomId, { disconnecting: true });
-          }
-        });
-      } else {
-        if (activeRole === 'presenter') {
-          const state = getSessionState(activeSessionId);
-          if (state) {
-            if (state.presenterSocketId === socket.id) {
-              state.presenterDisconnectedAt = Date.now();
-            }
-            if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer);
-            const capturedSessionId = activeSessionId;
-            state._presenterLeftTimer = setTimeout(() => {
-              state._presenterLeftTimer = null;
-              io.to(capturedSessionId).emit('presenter-left', { sessionId: capturedSessionId, locked: true });
-            }, PRESENTER_LEFT_DEBOUNCE_MS);
-          }
-        }
-        releasePresenterLock(activeSessionId, socket.id);
-        if (activeRole !== 'presenter') decrementViewerCount(activeSessionId);
-        scheduleCleanup(activeSessionId, { disconnecting: true });
-      }
-    });
-
-    socket.on('disconnect', () => {
-      releasePresenterLock(activeSessionId, socket.id);
-      scheduleCleanup(activeSessionId);
-      fastify.log.info({ socketId: socket.id }, 'user disconnected');
-    });
+    function socketRateLimit(event, maxPerMin) { const now = Date.now(); const bucket = _socketRateBuckets[event] || (_socketRateBuckets[event] = { count: 0, resetAt: now + 60000 }); if (now > bucket.resetAt) { bucket.count = 0; bucket.resetAt = now + 60000; } if (++bucket.count > maxPerMin) { fastify.log.warn({ socketId: socket.id, event }, '[rate-limit] Socket event throttled'); return false; } return true; }
+    const joinSession = (candidateSessionId, role = 'viewer', pin = '', presenterToken = '') => { const normalized = normalizeSessionId(candidateSessionId); if (!normalized) return null; const previousSessionId = activeSessionId; if (role === 'presenter') { const state = getSessionState(normalized); clearStalePresenterLock(state); const incomingToken = String(presenterToken || '').trim(); if (incomingToken && state.lockedOutTokens.has(incomingToken)) return { error: 'presenter-locked-out' }; if (state.pinHash) { const provided = String(pin || '').trim(); if (!provided) return { requiresPin: true }; if (hashPin(provided) !== state.pinHash) return { pinIncorrect: true }; } if (incomingToken && state.presenterToken === incomingToken) state.presenterDisconnectedAt = null; else if (!state.presenterToken) state.presenterToken = incomingToken || generateToken(); else { if (hasConnectedSocket(state.presenterSocketId)) { io.to(state.presenterSocketId).emit('presenter-takeover-attempt', { message: 'Another device attempted to join your session as presenter' }); return { error: 'Another presenter is active in this session' }; } else { const disconnectedAt = state.presenterDisconnectedAt; const graceElapsed = disconnectedAt && (Date.now() - disconnectedAt > SESSION_GRACE_MS); if (graceElapsed) { state.presenterToken = incomingToken || generateToken(); state.presenterDisconnectedAt = null; state.lockedOutTokens = new Set(); fastify.log.info(`Session ${normalized}: presenter slot released after grace period`); } else return { error: 'presenter-session-in-progress' }; } } } if (activeSessionId && activeSessionId !== normalized) { socket.leave(activeSessionId); if (activeRole === 'presenter') releasePresenterLock(previousSessionId, socket.id, true); else decrementViewerCount(previousSessionId); scheduleCleanup(previousSessionId); } activeSessionId = normalized; activeRole = role; socket.join(activeSessionId); cancelCleanup(activeSessionId); const state = getSessionState(activeSessionId); if (role === 'presenter') { if (state._presenterLeftTimer) { clearTimeout(state._presenterLeftTimer); state._presenterLeftTimer = null; } state.presenterSocketId = socket.id; } else { state.hadViewer = true; incrementViewerCount(activeSessionId); } socket.emit('session-joined', { sessionId: activeSessionId, pinSet: !!state.pinHash, label: state.label || '' }); if (state.theme) socket.emit('update-theme', state.theme); if (state.liveVerse) socket.emit('update-verse', state.liveVerse); if (state.customMode) socket.emit('custom-text', { ...state.customMode, theme: state.theme }); if (state.highlightedText) socket.emit('highlight-text', state.highlightedText); socket.emit('viewer-count', { sessionId: activeSessionId, count: sessionViewerCounts.get(activeSessionId) || 0 }); if (role === 'presenter') socket.to(activeSessionId).emit('presenter-joined', { sessionId: activeSessionId, verse: state.liveVerse || null, theme: state.theme || null }); else if (state.presenterSocketId && io.sockets.sockets.get(state.presenterSocketId)) socket.emit('presenter-joined', { sessionId: activeSessionId, verse: state.liveVerse || null, theme: state.theme || null }); return { sessionId: activeSessionId, pinSet: !!state.pinHash, presenterToken: state.presenterToken, label: state.label || '' }; };
+    const leaveActiveSession = () => { if (!activeSessionId || activeSessionId === DEFAULT_SESSION_ID) return { sessionId: DEFAULT_SESSION_ID }; const previousSessionId = activeSessionId; if (activeRole === 'presenter') { socket.to(previousSessionId).emit('presenter-left', { sessionId: previousSessionId, voluntary: true }); releasePresenterLock(previousSessionId, socket.id, true); } else decrementViewerCount(previousSessionId); socket.leave(previousSessionId); activeSessionId = DEFAULT_SESSION_ID; activeRole = 'viewer'; socket.join(DEFAULT_SESSION_ID); scheduleCleanup(previousSessionId); socket.emit('session-left', { sessionId: previousSessionId }); return { sessionId: previousSessionId }; };
+    socket.on('create-session', (payload, callback) => { const sessionId = generateSessionId(); if (!sessionId) { const error = { message: 'Server session limit reached — please try again later' }; socket.emit('session-error', error); if (typeof callback === 'function') callback({ ok: false, ...error }); return; } const presenterToken = generateToken(); const joined = joinSession(sessionId, 'presenter', '', presenterToken); if (joined && joined.error) { const error = { message: joined.error }; socket.emit('session-error', error); if (typeof callback === 'function') callback({ ok: false, ...error }); return; } const label = String((payload && payload.label) || '').trim().slice(0, 40); if (label) getSessionState(joined.sessionId).label = label; socket.emit('session-created', { sessionId: joined.sessionId, presenterToken: joined.presenterToken, label }); if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, presenterToken: joined.presenterToken, label }); });
+    socket.on('create-client-session', (payload, callback) => { const preferred = normalizeSessionId(payload && payload.preferredSessionId); const incomingToken = payload && payload.mainClientToken ? String(payload.mainClientToken).trim() : ''; let sessionId; let isMainClient = false; if (preferred && sessionExists(preferred)) { sessionId = preferred; const state = getSessionState(sessionId); if (!state.mainClientToken) isMainClient = true; else if (incomingToken && incomingToken === state.mainClientToken) isMainClient = true; else isMainClient = false; } else { sessionId = generateSessionId(); if (!sessionId) { const error = { message: 'Server session limit reached' }; socket.emit('session-error', error); if (typeof callback === 'function') callback({ ok: false, ...error }); return; } isMainClient = true; } if (activeSessionId && activeSessionId !== DEFAULT_SESSION_ID && activeSessionId !== sessionId) { socket.leave(activeSessionId); decrementViewerCount(activeSessionId); scheduleCleanup(activeSessionId); } activeSessionId = sessionId; activeRole = 'viewer'; socket.join(sessionId); cancelCleanup(sessionId); const state = getSessionState(sessionId); state.hadViewer = true; incrementViewerCount(sessionId); let mainClientToken = state.mainClientToken || null; if (isMainClient) { if (!state.mainClientToken) { mainClientToken = generateToken(); state.mainClientToken = mainClientToken; } state.mainClientSocketId = socket.id; } socket.emit('client-session-created', { sessionId, mainClientToken: isMainClient ? mainClientToken : undefined, isMainClient }); if (typeof callback === 'function') callback({ ok: true, sessionId, mainClientToken: isMainClient ? mainClientToken : undefined, isMainClient }); });
+    socket.on('join-session', (payload, callback) => { const requested = normalizeSessionId(payload && payload.sessionId); const role = payload && payload.role === 'presenter' ? 'presenter' : 'viewer'; const pin = payload && payload.pin ? String(payload.pin).trim() : ''; const presenterToken = payload && payload.presenterToken ? String(payload.presenterToken).trim() : ''; if (!sessionExists(requested)) { const error = { message: 'Session not found' }; socket.emit('session-error', error); if (typeof callback === 'function') callback({ ok: false, ...error }); return; } const joined = joinSession(requested, role, pin, presenterToken); if (joined && joined.requiresPin) { if (typeof callback === 'function') callback({ ok: false, requiresPin: true }); return; } if (joined && joined.pinIncorrect) { if (typeof callback === 'function') callback({ ok: false, pinIncorrect: true, message: 'Incorrect PIN — try again' }); return; } if (!joined || joined.error) { const errCode = joined && joined.error; const message = errCode === 'presenter-locked-out' ? 'This session already has an active presenter. You can join once they end the service.' : (errCode || 'Valid session code is required'); socket.emit('session-error', { message }); if (typeof callback === 'function') callback({ ok: false, error: errCode, message }); return; } if (!joined.sessionId) { const error = { message: 'Valid session code is required' }; socket.emit('session-error', error); if (typeof callback === 'function') callback({ ok: false, ...error }); return; } if (role === 'presenter' && payload && payload.label) { const state = getSessionState(joined.sessionId); if (!state.label) state.label = String(payload.label).trim().slice(0, 40); joined.label = state.label; } if (typeof callback === 'function') callback({ ok: true, sessionId: joined.sessionId, pinSet: joined.pinSet, presenterToken: joined.presenterToken || null, label: joined.label || '' }); });
+    socket.on('leave-session', (payload, callback) => { const left = leaveActiveSession(); if (typeof callback === 'function') callback({ ok: true, sessionId: left.sessionId }); });
+    socket.on('set-session-pin', (payload, callback) => { if (!ensurePresenterAccess(activeSessionId, socket)) { if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' }); return; } const pin = payload && payload.pin ? String(payload.pin).trim() : ''; if (!/^\d{4,8}$/.test(pin)) { if (typeof callback === 'function') callback({ ok: false, message: 'PIN must be 4–8 digits' }); return; } const state = getSessionState(activeSessionId); state.pinHash = hashPin(pin); if (typeof callback === 'function') callback({ ok: true }); });
+    socket.on('clear-session-pin', (_payload, callback) => { if (!ensurePresenterAccess(activeSessionId, socket)) { if (typeof callback === 'function') callback({ ok: false, message: 'Not authorized' }); return; } const state = getSessionState(activeSessionId); state.pinHash = null; if (typeof callback === 'function') callback({ ok: true }); });
+    socket.on('search', async (payload) => { try { if (!socketRateLimit('search', 120)) { socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'rate-limited' }); return; } const query = typeof payload === 'string' ? payload : payload?.query; const pageSize = Math.min(50, Math.max(1, Number(payload?.pageSize) || 10)); const language = payload?.language ? String(payload.language).toLowerCase().trim() : 'en'; const contextVerseId = Number(payload?.contextVerseId) || null; const cursorStr = payload?.cursor || null; if (!query || !String(query).trim()) { socket.emit('search-results', { results: [], total: 0, nextCursor: null }); return; } const queryStr = String(query).trim(); if (queryStr.length > 500) { socket.emit('search-results', { results: [], total: 0, nextCursor: null, error: 'query-too-long' }); return; } fastify.log.info(`search: "${queryStr}" pageSize=${pageSize} lang=${language} cursor=${cursorStr ? 'yes' : 'no'}`); let offset = 0; let pipelineResults, total, cacheKey, pipelineMeta; if (cursorStr) { const decoded = decodeCursor(cursorStr); if (decoded) { const cached = searchCacheGet(decoded.k); if (cached) { offset = decoded.o; pipelineResults = cached.results; total = cached.total; pipelineMeta = cached.meta; cacheKey = decoded.k; } } if (!pipelineResults) { const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId); pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey; offset = 0; } } else { const fresh = await runSearchPipeline(query, language, contextVerseId, fastify.log, activeSessionId); pipelineResults = fresh.results; total = fresh.total; pipelineMeta = fresh.meta; cacheKey = fresh.cacheKey; offset = 0; } const pageResults = pipelineResults.slice(offset, offset + pageSize); const nextOffset = offset + pageResults.length; const hasMore = nextOffset < total; const nextCursor = hasMore ? encodeCursor(cacheKey, nextOffset, total) : null; socket.emit('search-results', { results: pageResults, total, nextCursor, meta: pipelineMeta, page: Math.floor(offset / pageSize), pageSize, query, language }); } catch (err) { fastify.log.error({ err }, 'search handler failed'); socket.emit('search-results', { results: [], total: 0, nextCursor: null }); socket.emit('session-error', 'Search failed for the selected language'); } });
+    socket.on('update-verse', (payload) => { if (!socketRateLimit('update-verse', 60)) return; const verse = payload && payload.verse ? payload.verse : payload; if (!verse || typeof verse !== 'object' || !verse.verse_id) return; const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; fastify.log.info({ verseId: verse?.verse_id }, 'updating verse'); const state = getSessionState(sessionId); state.liveVerse = verse; state.updatedAt = Date.now(); emitToSession(sessionId, 'update-verse', verse); });
+    socket.on('update-theme', (payload) => { const theme = payload && payload.theme ? payload.theme : payload; const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; fastify.log.info('updating theme'); const state = getSessionState(sessionId); state.theme = theme; state.updatedAt = Date.now(); emitToSession(sessionId, 'update-theme', theme); });
+    socket.on('highlight-text', (payload) => { if (!socketRateLimit('highlight-text', 60)) return; const text = payload && Object.prototype.hasOwnProperty.call(payload, 'text') ? payload.text : payload; const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; fastify.log.info('highlighting text'); const state = getSessionState(sessionId); state.highlightedText = text ? String(text).trim().slice(0, 5000) : ''; state.updatedAt = Date.now(); emitToSession(sessionId, 'highlight-text', state.highlightedText); });
+    socket.on('clear-screen', (payload, callback) => { const sessionId = activeSessionId || normalizeSessionId(payload && payload.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; const state = getSessionState(sessionId); state.liveVerse = null; state.highlightedText = ''; state.customMode = null; state.updatedAt = Date.now(); emitToSession(sessionId, 'clear-screen', {}); fastify.log.info(`clear-screen broadcast to session ${sessionId}`); if (typeof callback === 'function') callback({ ok: true }); });
+    socket.on('go-custom', (payload) => { if (!socketRateLimit('go-custom', 30)) return; const { text, subtext, theme } = payload || {}; const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; if (!text) return; const state = getSessionState(sessionId); state.customMode = { text: String(text), subtext: String(subtext || '') }; state.theme = theme || state.theme; state.liveVerse = null; state.updatedAt = Date.now(); emitToSession(sessionId, 'custom-text', { text: String(text), subtext: String(subtext || ''), theme }); if (theme) emitToSession(sessionId, 'update-theme', theme); fastify.log.info(`go-custom broadcast to session ${sessionId}`); });
+    socket.on('preload-background', (payload) => { if (!payload?.background_url) return; const sessionId = activeSessionId || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; emitToSession(sessionId, 'preload-background', { background_url: payload.background_url }); });
+    socket.on('now-reading', (payload) => { const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; emitToSession(sessionId, 'now-reading', { on: !!payload?.on, verse_id: payload?.verse_id || null }); });
+    socket.on('update-language', (payload) => { const lang = payload?.language ? String(payload.language).toLowerCase().trim() : 'en'; const sessionId = activeSessionId || normalizeSessionId(payload?.sessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; const state = getSessionState(sessionId); state.language = lang; state.updatedAt = Date.now(); if (state.liveVerse) { const targetDb = resolveDbAdapter(lang); try { const row = fetchVerseByCoords(targetDb, state.liveVerse, 'scripture_text, verse_title, book_title, volume_title, volume_short_title'); if (row) { const updated = { ...state.liveVerse, scripture_text: row.scripture_text || state.liveVerse.scripture_text, book_title: row.book_title || state.liveVerse.book_title, verse_title: row.verse_title || state.liveVerse.verse_title, volume_title: row.volume_title || state.liveVerse.volume_title || '', volume_short_title: row.volume_short_title || state.liveVerse.volume_short_title || '', segments: segmentVerseText(row.scripture_text || state.liveVerse.scripture_text), currentSegment: 0 }; updated.totalSegments = updated.segments.length; state.liveVerse = updated; emitToSession(sessionId, 'update-verse', updated); } } catch (err) { fastify.log.warn(`update-language: failed to fetch verse in ${lang}:`, err?.message); } } fastify.log.info(`update-language: session ${sessionId} → ${lang}`); });
+    socket.on('go-live', ({ verse, theme, language, sessionId: rawSessionId, secondaryLanguage }) => { const sessionId = activeSessionId || normalizeSessionId(rawSessionId) || DEFAULT_SESSION_ID; if (!ensurePresenterAccess(sessionId, socket)) return; fastify.log.info({ sessionId }, '[Socket.IO] go-live triggered'); let scriptureText = verse.scripture_text; let verseTitle = verse.book_title + ' ' + verse.chapter_number + ':' + verse.verse_number; let bookTitle = verse.book_title; const normalizedLanguage = language ? language.toLowerCase().trim() : null; let targetDb = dba; const isTranslation = normalizedLanguage && ['ceb', 'tl', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normalizedLanguage); if (isTranslation) targetDb = resolveDbAdapter(normalizedLanguage); if (targetDb) { try { const result = fetchVerseByCoords(targetDb, verse, 'scripture_text, verse_title, book_title, volume_title, volume_short_title'); if (result) { if (isTranslation) { if (result.scripture_text) scriptureText = result.scripture_text; if (result.verse_title) verseTitle = result.verse_title; if (result.book_title) bookTitle = result.book_title; } else { scriptureText = result.scripture_text; verseTitle = result.verse_title; bookTitle = result.book_title; } verse = { ...verse, volume_title: result.volume_title || verse.volume_title || '', volume_short_title: result.volume_short_title || verse.volume_short_title || '' }; } } catch (err) { fastify.log.error(isTranslation ? `Failed to fetch ${normalizedLanguage} translation` : 'Failed to fetch English text', err); } } const segments = segmentVerseText(scriptureText); const verseWithSegments = { ...verse, scripture_text: scriptureText, verse_title: verseTitle, book_title: bookTitle, segments, totalSegments: segments.length, currentSegment: 0, secondary_text: null, secondary_book_title: null, secondary_segments: null, secondaryLanguage: null, language: normalizedLanguage || 'en', version_citation: getVersionCitation(normalizedLanguage || 'en', verse.volume_id) }; const normSecLang = secondaryLanguage ? String(secondaryLanguage).toLowerCase().trim() : null; if (normSecLang && ['tl', 'ceb', 'en', 'es', 'el', 'ilo', 'ja', 'ylt', 'war'].includes(normSecLang) && normSecLang !== normalizedLanguage) { const secDb = resolveDbAdapter(normSecLang); try { const secRow = fetchVerseByCoords(secDb, verse, 'scripture_text, book_title'); if (secRow) { verseWithSegments.secondary_text = secRow.scripture_text; verseWithSegments.secondary_book_title = secRow.book_title; verseWithSegments.secondaryLanguage = normSecLang; } } catch (err) { fastify.log.warn('dual-lang fetch failed:', err?.message); } } if (verseWithSegments.secondaryLanguage) verseWithSegments.version_citation = getVersionCitation(normalizedLanguage || 'en', verse.volume_id, verseWithSegments.secondaryLanguage); if (verseWithSegments.secondaryLanguage && verseWithSegments.secondary_text) { const { primarySegments, secondarySegments } = segmentVerseTextDual(scriptureText, verseWithSegments.secondary_text); verseWithSegments.segments = primarySegments; verseWithSegments.totalSegments = primarySegments.length; verseWithSegments.secondary_segments = secondarySegments; } const state = getSessionState(sessionId); state.liveVerse = verseWithSegments; state.theme = theme; state.highlightedText = ''; state.updatedAt = Date.now(); if (verse.verse_id) state.liveHistory = [verse.verse_id, ...state.liveHistory.filter(id => id !== verse.verse_id)].slice(0, 5); emitToSession(sessionId, 'update-verse', verseWithSegments); emitToSession(sessionId, 'update-theme', theme); });
+    socket.on('disconnecting', () => { if (socket.rooms && typeof socket.rooms.forEach === 'function') { socket.rooms.forEach((roomId) => { if (roomId !== socket.id) { if (activeRole === 'presenter') { const state = getSessionState(roomId); if (state) { if (state.presenterSocketId === socket.id) state.presenterDisconnectedAt = Date.now(); if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer); const capturedRoomId = roomId; state._presenterLeftTimer = setTimeout(() => { state._presenterLeftTimer = null; io.to(capturedRoomId).emit('presenter-left', { sessionId: capturedRoomId, locked: true }); }, PRESENTER_LEFT_DEBOUNCE_MS); } } releasePresenterLock(roomId, socket.id); if (activeRole !== 'presenter') decrementViewerCount(roomId); scheduleCleanup(roomId, { disconnecting: true }); } }); } else { if (activeRole === 'presenter') { const state = getSessionState(activeSessionId); if (state) { if (state.presenterSocketId === socket.id) state.presenterDisconnectedAt = Date.now(); if (state._presenterLeftTimer) clearTimeout(state._presenterLeftTimer); const capturedSessionId = activeSessionId; state._presenterLeftTimer = setTimeout(() => { state._presenterLeftTimer = null; io.to(capturedSessionId).emit('presenter-left', { sessionId: capturedSessionId, locked: true }); }, PRESENTER_LEFT_DEBOUNCE_MS); } } releasePresenterLock(activeSessionId, socket.id); if (activeRole !== 'presenter') decrementViewerCount(activeSessionId); scheduleCleanup(activeSessionId, { disconnecting: true }); } });
+    socket.on('disconnect', () => { releasePresenterLock(activeSessionId, socket.id); scheduleCleanup(activeSessionId); fastify.log.info({ socketId: socket.id }, 'user disconnected'); });
   });
 }
 
-// Only register handlers in production runtime
-if (require.main === module) {
-  registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray });
-}
+if (require.main === module) { registerSocketHandlers(io, { segmentVerseText, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray }); }
 
-// ── HTTP route: get entities for a verse ─────────────────────────────────────
-fastify.get('/verse/:verse_id/entities', async (request, reply) => {
-  const verseId = parseInt(request.params.verse_id, 10);
-  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
-  const cached = verseEntityCache.get(verseId);
-  if (cached) return { verse_id: verseId, ...cached, ready: true };
-  return { verse_id: verseId, people: [], places: [], ready: entitiesReady };
-});
+fastify.get('/verse/:verse_id/entities', async (request, reply) => { const verseId = parseInt(request.params.verse_id, 10); if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; } const cached = verseEntityCache.get(verseId); if (cached) return { verse_id: verseId, ...cached, ready: true }; return { verse_id: verseId, people: [], places: [], ready: entitiesReady }; });
 
-// ── HTTP route: entity search — find all verses mentioning a person or place ──
-fastify.get('/entity/search', async (request, reply) => {
-  const { name, type = 'person', language = 'en', page: pg = '0', pageSize: ps = '10', entity_id, verse_id: vid } = request.query;
-  if (!name || !name.trim()) { reply.code(400); return { error: 'name is required' }; }
-  const page     = Math.max(0, parseInt(pg,  10) || 0);
-  const pageSize = Math.min(30, Math.max(1, parseInt(ps, 10) || 10));
-  const lang     = language.toLowerCase();
-  const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : dba;
-  if (!targetDb) return { results: [], total: 0, name, type, page, pageSize, groups: [] };
+fastify.get('/entity/search', async (request, reply) => { const { name, type = 'person', language = 'en', page: pg = '0', pageSize: ps = '10', entity_id, verse_id: vid } = request.query; if (!name || !name.trim()) { reply.code(400); return { error: 'name is required' }; } const page = Math.max(0, parseInt(pg, 10) || 0); const pageSize = Math.min(30, Math.max(1, parseInt(ps, 10) || 10)); const lang = language.toLowerCase(); const targetDb = lang !== 'en' ? resolveDbAdapter(lang) : dba; if (!targetDb) return { results: [], total: 0, name, type, page, pageSize, groups: [] }; if (db_tags) { let resolvedEid = entity_id || null; const searchName = name.trim().replace(/\s*\([^)]*\)\s*/g, '').toLowerCase(); const searchToken = searchName.replace(/\s+/g, '_'); if (!resolvedEid && vid) { const vInt = parseInt(vid, 10); const row = db_tags.prepare(`SELECT m.entity_id FROM ai_entity_verse_map m JOIN ai_entity_profiles p ON m.entity_id = p.entity_id WHERE m.verse_id = ? AND LOWER(p.name) = ? AND p.type = ? LIMIT 1`).get(vInt, searchName, type); if (row) resolvedEid = row.entity_id; else { const eidRows = db_tags.prepare(`SELECT m.entity_id, p.verse_count FROM ai_entity_verse_map m JOIN ai_entity_profiles p ON m.entity_id = p.entity_id WHERE m.verse_id = ? AND p.entity_id LIKE ? AND p.type = ?`).all(vInt, `${type}:${searchToken}%`, type); if (eidRows.length === 1) resolvedEid = eidRows[0].entity_id; else if (eidRows.length > 1) { const verseEmb = embeddingCache.get(vInt) || null; const scored = scoreEntityCandidates(eidRows, vInt, verseEmb); resolvedEid = scored[0].entity_id; } } } if (!resolvedEid) { const profiles = db_tags.prepare(`SELECT entity_id, verse_count FROM ai_entity_profiles WHERE (LOWER(name) = ? OR entity_id LIKE ?) AND type = ?`).all(searchName, `${type}:${searchToken}%`, type); const seen = new Set(); const uniq = []; for (const p of profiles) { if (!seen.has(p.entity_id)) { seen.add(p.entity_id); uniq.push(p); } } if (uniq.length === 1) resolvedEid = uniq[0].entity_id; else if (uniq.length > 1) { const vInt = vid ? parseInt(vid, 10) : null; const verseEmb = vInt ? (embeddingCache.get(vInt) || null) : null; const scored = scoreEntityCandidates(uniq, vInt, verseEmb); resolvedEid = scored[0].entity_id; } } if (resolvedEid) { const profile = db_tags.prepare('SELECT * FROM ai_entity_profiles WHERE entity_id = ?').get(resolvedEid); const allVids = db_tags.prepare('SELECT verse_id FROM ai_entity_verse_map WHERE entity_id = ? ORDER BY verse_id').all(resolvedEid).map(r => r.verse_id); const total = allVids.length; const offset = page * pageSize; const pageVids = allVids.slice(offset, offset + pageSize); const results = pageVids.length > 0 ? targetDb.prepare(`SELECT * FROM scriptures WHERE verse_id IN (${pageVids.map(() => '?').join(',')}) ORDER BY verse_id`).all(...pageVids) : []; const volumeMap = new Map(); for (const r of results) { const volId = r.volume_id || 0; if (!volumeMap.has(volId)) volumeMap.set(volId, { volume_id: volId, volume_title: r.volume_title || r.book_title, results: [] }); volumeMap.get(volId).results.push(r); } const siblings = profile ? db_tags.prepare(`SELECT entity_id, qualifier, verse_count FROM ai_entity_profiles WHERE (LOWER(name) = LOWER(?) OR entity_id LIKE ?) AND type = ? AND entity_id != ?`).all(profile.name, `${type}:${searchToken}%`, profile.type, resolvedEid) : []; return { results, total, name, type, page, pageSize, groups: [...volumeMap.values()], entity_id: resolvedEid, qualifier: profile?.qualifier || null, description: profile?.description || null, siblings }; } } const searchName = name.trim().replace(/\s*\([^)]*\)\s*/g, '').trim(); const { results: ftsResults, total } = phraseSearch(searchName, page, pageSize, targetDb, fastify.log); if (ftsResults.length === 0 && total === 0 && db_tags) { try { const col = type === 'place' ? 'places' : 'people'; const altCol = col === 'people' ? 'places' : 'people'; const key = searchName.toLowerCase(); let chapterRows = db_tags.prepare(`SELECT chapter_id FROM chapter_entities WHERE lower(${col}) LIKE ?`).all(`%${key}%`); if (chapterRows.length === 0) chapterRows = db_tags.prepare(`SELECT chapter_id FROM chapter_entities WHERE lower(${altCol}) LIKE ?`).all(`%${key}%`); if (chapterRows.length > 0) { const allVerseIds = []; for (const { chapter_id } of chapterRows) { const vs = targetDb.prepare('SELECT verse_id FROM scriptures WHERE chapter_id = ? ORDER BY verse_number').all(chapter_id); vs.forEach(v => allVerseIds.push(v.verse_id)); } const entTotal = allVerseIds.length; const offset = page * pageSize; const pageIds = allVerseIds.slice(offset, offset + pageSize); const entResults = pageIds.length > 0 ? targetDb.prepare(`SELECT * FROM scriptures WHERE verse_id IN (${pageIds.map(() => '?').join(',')}) ORDER BY verse_id`).all(...pageIds) : []; const volumeMap = new Map(); for (const r of entResults) { const vid = r.volume_id || 0; if (!volumeMap.has(vid)) volumeMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] }); volumeMap.get(vid).results.push(r); } return { results: entResults, total: entTotal, name, type, page, pageSize, groups: [...volumeMap.values()] }; } } catch {} } const volumeMap = new Map(); for (const r of ftsResults) { const vid = r.volume_id || 0; if (!volumeMap.has(vid)) volumeMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] }); volumeMap.get(vid).results.push(r); } const groups = [...volumeMap.values()]; return { results: ftsResults, total, name, type, page, pageSize, groups }; });
 
-  // ── Disambiguated entity search via AI entity index ──
-  if (db_tags) {
-    let resolvedEid = entity_id || null;
-    const searchName = name.trim().replace(/\s*\([^)]*\)\s*/g, '').toLowerCase();
+fastify.get('/verse/:verse_id/tags', async (request, reply) => { const verseId = parseInt(request.params.verse_id, 10); if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; } if (!db_tags) return { verse_id: verseId, pov: null, labels: [], ready: false }; try { const row = db_tags.prepare('SELECT pov, labels_json, speaker FROM verse_doctrine_tags WHERE verse_id = ?').get(verseId); if (!row) return { verse_id: verseId, pov: null, labels: [], speaker: null, ready: false }; return { verse_id: verseId, pov: row.pov, labels: JSON.parse(row.labels_json || '[]'), speaker: row.speaker || null, ready: true }; } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; } });
 
-    // Normalize search term into entity_id token (e.g. "Jesus Christ" → "jesus_christ")
-    const searchToken = searchName.replace(/\s+/g, '_');
+fastify.get('/chapter/:chapter_id/summary', async (request, reply) => { const chapterId = parseInt(request.params.chapter_id, 10); if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; } if (!db_chsummary) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false }; try { const row = db_chsummary.prepare('SELECT summary_text, summary_method, key_verses_json, top_topics_json FROM chapter_summaries WHERE chapter_id = ?').get(chapterId); if (!row) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false }; let nabre_footnotes = null; let net_footnotes = null; if (db_footnotes) { try { const fn = db_footnotes.prepare('SELECT bg_footnotes, net_notes FROM chapter_footnotes WHERE chapter_id = ?').get(chapterId); if (fn) { nabre_footnotes = fn.bg_footnotes || null; net_footnotes = fn.net_notes || null; } } catch (_) {} } return { chapter_id: chapterId, summary_text: row.summary_text, summary_method: row.summary_method || 'extractive', key_verses: JSON.parse(row.key_verses_json || '[]'), top_topics: JSON.parse(row.top_topics_json || '[]'), nabre_footnotes, net_footnotes, ready: true }; } catch { return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false }; } });
 
-    // If no entity_id but we have verse_id, resolve via ai_entity_verse_map
-    if (!resolvedEid && vid) {
-      const vInt = parseInt(vid, 10);
-      // Try matching by profile name first
-      const row = db_tags.prepare(`
-        SELECT m.entity_id FROM ai_entity_verse_map m
-        JOIN ai_entity_profiles p ON m.entity_id = p.entity_id
-        WHERE m.verse_id = ? AND LOWER(p.name) = ? AND p.type = ?
-        LIMIT 1
-      `).get(vInt, searchName, type);
-      if (row) {
-        resolvedEid = row.entity_id;
-      } else {
-        // Fallback: match entity_id starting with search token after type prefix
-        // (e.g. "jesus" matches person:jesus_christ but not person:bar_jesus)
-        const eidRows = db_tags.prepare(`
-          SELECT m.entity_id, p.verse_count FROM ai_entity_verse_map m
-          JOIN ai_entity_profiles p ON m.entity_id = p.entity_id
-          WHERE m.verse_id = ? AND p.entity_id LIKE ? AND p.type = ?
-        `).all(vInt, `${type}:${searchToken}%`, type);
-        if (eidRows.length === 1) {
-          resolvedEid = eidRows[0].entity_id;
-        } else if (eidRows.length > 1) {
-          // Multiple matches on same verse — use mathematical scoring
-          const verseEmb = embeddingCache.get(vInt) || null;
-          const scored = scoreEntityCandidates(eidRows, vInt, verseEmb);
-          resolvedEid = scored[0].entity_id;
-        }
-      }
-    }
+fastify.get('/verse/:verse_id/summary', async (request, reply) => { const verseId = parseInt(request.params.verse_id, 10); if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; } if (!db_vsummary) return { verse_id: verseId, summary: null, cross_references: [], ready: false }; try { const row = db_vsummary.prepare('SELECT summary FROM verse_summaries WHERE verse_id = ?').get(verseId); if (!row || !row.summary) return { verse_id: verseId, summary: null, cross_references: [], ready: false }; let xrefs = []; if (db_vxref) { try { const xr = db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?').get(verseId); if (xr) xrefs = JSON.parse(xr.cross_references || '[]'); } catch {} } return { verse_id: verseId, summary: row.summary, cross_references: xrefs, ready: true }; } catch { return { verse_id: verseId, summary: null, cross_references: [], ready: false }; } });
 
-    // Fallback: find candidate profiles by name+type OR entity_id prefix
-    if (!resolvedEid) {
-      const profiles = db_tags.prepare(
-        `SELECT entity_id, verse_count FROM ai_entity_profiles
-         WHERE (LOWER(name) = ? OR entity_id LIKE ?) AND type = ?`
-      ).all(searchName, `${type}:${searchToken}%`, type);
-      // Deduplicate (a profile could match both conditions)
-      const seen = new Set(); const uniq = [];
-      for (const p of profiles) { if (!seen.has(p.entity_id)) { seen.add(p.entity_id); uniq.push(p); } }
-      if (uniq.length === 1) {
-        resolvedEid = uniq[0].entity_id;
-      } else if (uniq.length > 1) {
-        const vInt = vid ? parseInt(vid, 10) : null;
-        const verseEmb = vInt ? (embeddingCache.get(vInt) || null) : null;
-        // Use mathematical scoring: cosine similarity + Bayesian prior + proximity
-        const scored = scoreEntityCandidates(uniq, vInt, verseEmb);
-        resolvedEid = scored[0].entity_id;
-      }
-    }
+fastify.get('/chapter/:chapter_id/entities', async (request, reply) => { const chapterId = parseInt(request.params.chapter_id, 10); if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; } if (!db_tags) return { chapter_id: chapterId, people: [], places: [], ready: false }; try { const row = db_tags.prepare('SELECT entities_json FROM chapter_entities WHERE chapter_id = ?').get(chapterId); if (!row || !row.entities_json) return { chapter_id: chapterId, people: [], places: [], ready: true }; const j = JSON.parse(row.entities_json); return { chapter_id: chapterId, people: j.people || [], places: j.places || [], ready: true }; } catch { return { chapter_id: chapterId, people: [], places: [], ready: false }; } });
 
-    if (resolvedEid) {
-      const profile = db_tags.prepare('SELECT * FROM ai_entity_profiles WHERE entity_id = ?').get(resolvedEid);
-      const allVids = db_tags.prepare('SELECT verse_id FROM ai_entity_verse_map WHERE entity_id = ? ORDER BY verse_id').all(resolvedEid).map(r => r.verse_id);
-      const total = allVids.length;
-      const offset = page * pageSize;
-      const pageVids = allVids.slice(offset, offset + pageSize);
+fastify.get('/sermon-search', async (request, reply) => { const { q, limit: lim = '12' } = request.query; if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; } if (!db_chsummary) return { results: [], total: 0, ready: false }; const limit = Math.min(30, Math.max(1, parseInt(lim, 10) || 12)); const term = q.trim().toLowerCase(); try { const rows = db_chsummary.prepare(`SELECT cs.chapter_id, cs.book_id, cs.chapter_num, cs.summary_text, cs.top_topics_json FROM chapter_summaries_fts fts JOIN chapter_summaries cs ON cs.chapter_id = fts.rowid WHERE chapter_summaries_fts MATCH ? ORDER BY fts.rank LIMIT ?`).all(term, limit); const stmtTitle = dba.prepare('SELECT book_title FROM scriptures WHERE book_id = ? LIMIT 1'); const results = rows.map(r => { const meta = stmtTitle.get(r.book_id); return { chapter_id: r.chapter_id, book_id: r.book_id, chapter_num: r.chapter_num, book_title: meta?.book_title || '', summary_text: r.summary_text || '', top_topics: JSON.parse(r.top_topics_json || '[]').slice(0, 5) }; }); return { results, total: results.length, query: q }; } catch (err) { fastify.log.error(err); return { results: [], total: 0, query: q }; } });
 
-      const results = pageVids.length > 0
-        ? targetDb.prepare(`SELECT * FROM scriptures WHERE verse_id IN (${pageVids.map(() => '?').join(',')}) ORDER BY verse_id`).all(...pageVids)
-        : [];
+const start = async () => { try { const port = process.env.PORT || 3000; await fastify.listen({ port, host: '0.0.0.0' }); fastify.log.info(`Server running on ${port}`); setImmediate(() => { ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed')); }); if (!SKIP_RECOMPUTE) { setImmediate(() => { try { const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true'; const ftsOpts = { forceRebuild, log: fastify.log }; initializeFts(dba, 'English', ftsOpts); initializeFts(dba_tagalog, 'Tagalog', ftsOpts); initializeFts(dba_cebuano, 'Cebuano', ftsOpts); initializeFts(dba_spanish, 'Spanish', ftsOpts); initializeFts(dba_greek, 'Greek', ftsOpts); initializeFts(dba_ilocano, 'Ilocano', ftsOpts); if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts); if (dba_ylt) initializeFts(dba_ylt, 'YLT', ftsOpts); if (dba_waray) initializeFts(dba_waray, 'Waray', ftsOpts); try { dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get(); } catch (ftsErr) { fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding'); dba.exec('DROP TABLE IF EXISTS scriptures_fts'); initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log }); } } catch (err) { fastify.log.error(err, '[FTS] initialization failed'); } }); } else { fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.'); } } catch (err) { fastify.log.error(err); process.exit(1); } };
 
-      const volumeMap = new Map();
-      for (const r of results) {
-        const volId = r.volume_id || 0;
-        if (!volumeMap.has(volId)) volumeMap.set(volId, { volume_id: volId, volume_title: r.volume_title || r.book_title, results: [] });
-        volumeMap.get(volId).results.push(r);
-      }
+if (require.main !== module) { setImmediate(() => { ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed')); }); }
 
-      // Sibling profiles (same name or entity_id prefix, different identity)
-      const siblings = profile ? db_tags.prepare(
-        `SELECT entity_id, qualifier, verse_count FROM ai_entity_profiles
-         WHERE (LOWER(name) = LOWER(?) OR entity_id LIKE ?) AND type = ? AND entity_id != ?`
-      ).all(profile.name, `${type}:${searchToken}%`, profile.type, resolvedEid) : [];
+if (require.main === module) { start(); }
 
-      return {
-        results, total, name, type, page, pageSize,
-        groups: [...volumeMap.values()],
-        entity_id: resolvedEid,
-        qualifier: profile?.qualifier || null,
-        description: profile?.description || null,
-        siblings,
-      };
-    }
-  }
+async function startElectron() { registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray }); return start(); }
 
-  // Strip parenthetical annotations like "(Elohim)" from entity names before FTS
-  const searchName = name.trim().replace(/\s*\([^)]*\)\s*/g, '').trim();
-  const { results: ftsResults, total } = phraseSearch(searchName, page, pageSize, targetDb, fastify.log);
-
-  // Fallback: if FTS found nothing, search chapter_entities table
-  if (ftsResults.length === 0 && total === 0 && db_tags) {
-    try {
-      const col = type === 'place' ? 'places' : 'people';
-      const altCol = col === 'people' ? 'places' : 'people';
-      const key = searchName.toLowerCase();
-      let chapterRows = db_tags.prepare(
-        `SELECT chapter_id FROM chapter_entities WHERE lower(${col}) LIKE ?`
-      ).all(`%${key}%`);
-      if (chapterRows.length === 0) {
-        chapterRows = db_tags.prepare(
-          `SELECT chapter_id FROM chapter_entities WHERE lower(${altCol}) LIKE ?`
-        ).all(`%${key}%`);
-      }
-      if (chapterRows.length > 0) {
-        const allVerseIds = [];
-        for (const { chapter_id } of chapterRows) {
-          const vs = targetDb.prepare('SELECT verse_id FROM scriptures WHERE chapter_id = ? ORDER BY verse_number').all(chapter_id);
-          vs.forEach(v => allVerseIds.push(v.verse_id));
-        }
-        const entTotal = allVerseIds.length;
-        const offset = page * pageSize;
-        const pageIds = allVerseIds.slice(offset, offset + pageSize);
-        const entResults = pageIds.length > 0
-          ? targetDb.prepare(`SELECT * FROM scriptures WHERE verse_id IN (${pageIds.map(() => '?').join(',')}) ORDER BY verse_id`).all(...pageIds)
-          : [];
-        const volumeMap = new Map();
-        for (const r of entResults) {
-          const vid = r.volume_id || 0;
-          if (!volumeMap.has(vid)) volumeMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] });
-          volumeMap.get(vid).results.push(r);
-        }
-        return { results: entResults, total: entTotal, name, type, page, pageSize, groups: [...volumeMap.values()] };
-      }
-    } catch { /* fall through */ }
-  }
-
-  // Group results by volume for organized display
-  const volumeMap = new Map();
-  for (const r of ftsResults) {
-    const vid = r.volume_id || 0;
-    if (!volumeMap.has(vid)) volumeMap.set(vid, { volume_id: vid, volume_title: r.volume_title || r.book_title, results: [] });
-    volumeMap.get(vid).results.push(r);
-  }
-  const groups = [...volumeMap.values()];
-  return { results: ftsResults, total, name, type, page, pageSize, groups };
-});
-
-// ── HTTP route: get doctrine tags for a verse ─────────────────────────────────
-fastify.get('/verse/:verse_id/tags', async (request, reply) => {
-  const verseId = parseInt(request.params.verse_id, 10);
-  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
-  if (!db_tags) return { verse_id: verseId, pov: null, labels: [], ready: false };
-  try {
-    const row = db_tags.prepare('SELECT pov, labels_json, speaker FROM verse_doctrine_tags WHERE verse_id = ?').get(verseId);
-    if (!row) return { verse_id: verseId, pov: null, labels: [], speaker: null, ready: false };
-    return { verse_id: verseId, pov: row.pov, labels: JSON.parse(row.labels_json || '[]'), speaker: row.speaker || null, ready: true };
-  } catch { return { verse_id: verseId, pov: null, labels: [], ready: false }; }
-});
-
-// ── HTTP route: get chapter summary + key verses + top topics ─────────────────
-fastify.get('/chapter/:chapter_id/summary', async (request, reply) => {
-  const chapterId = parseInt(request.params.chapter_id, 10);
-  if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; }
-  if (!db_chsummary) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], ready: false };
-  try {
-    const row = db_chsummary.prepare('SELECT summary_text, summary_method, key_verses_json, top_topics_json FROM chapter_summaries WHERE chapter_id = ?').get(chapterId);
-    if (!row) return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false };
-    let nabre_footnotes = null;
-    let net_footnotes = null;
-    if (db_footnotes) {
-      try {
-        const fn = db_footnotes.prepare('SELECT bg_footnotes, net_notes FROM chapter_footnotes WHERE chapter_id = ?').get(chapterId);
-        if (fn) { nabre_footnotes = fn.bg_footnotes || null; net_footnotes = fn.net_notes || null; }
-      } catch (_) {}
-    }
-    return {
-      chapter_id:      chapterId,
-      summary_text:    row.summary_text,
-      summary_method:  row.summary_method || 'extractive',
-      key_verses:      JSON.parse(row.key_verses_json  || '[]'),
-      top_topics:      JSON.parse(row.top_topics_json  || '[]'),
-      nabre_footnotes,
-      net_footnotes,
-      ready: true
-    };
-  } catch { return { chapter_id: chapterId, summary_text: null, summary_method: null, key_verses: [], top_topics: [], nabre_footnotes: null, net_footnotes: null, ready: false }; }
-});
-
-// ── HTTP route: get verse context summary ────────────────────────────────────
-fastify.get('/verse/:verse_id/summary', async (request, reply) => {
-  const verseId = parseInt(request.params.verse_id, 10);
-  if (isNaN(verseId)) { reply.code(400); return { error: 'Invalid verse_id' }; }
-  if (!db_vsummary) return { verse_id: verseId, summary: null, cross_references: [], ready: false };
-  try {
-    const row = db_vsummary.prepare('SELECT summary FROM verse_summaries WHERE verse_id = ?').get(verseId);
-    if (!row || !row.summary) return { verse_id: verseId, summary: null, cross_references: [], ready: false };
-    let xrefs = [];
-    if (db_vxref) {
-      try {
-        const xr = db_vxref.prepare('SELECT cross_references FROM verse_cross_references WHERE verse_id = ?').get(verseId);
-        if (xr) xrefs = JSON.parse(xr.cross_references || '[]');
-      } catch {}
-    }
-    return {
-      verse_id:         verseId,
-      summary:          row.summary,
-      cross_references: xrefs,
-      ready:            true
-    };
-  } catch { return { verse_id: verseId, summary: null, cross_references: [], ready: false }; }
-});
-
-// ── HTTP route: get people & places for a chapter ──────────────────────────────
-fastify.get('/chapter/:chapter_id/entities', async (request, reply) => {
-  const chapterId = parseInt(request.params.chapter_id, 10);
-  if (isNaN(chapterId)) { reply.code(400); return { error: 'Invalid chapter_id' }; }
-  if (!db_tags) return { chapter_id: chapterId, people: [], places: [], ready: false };
-  try {
-    const row = db_tags.prepare('SELECT entities_json FROM chapter_entities WHERE chapter_id = ?').get(chapterId);
-    if (!row || !row.entities_json) return { chapter_id: chapterId, people: [], places: [], ready: true };
-    const j = JSON.parse(row.entities_json);
-    return { chapter_id: chapterId, people: j.people || [], places: j.places || [], ready: true };
-  } catch { return { chapter_id: chapterId, people: [], places: [], ready: false }; }
-});
-
-// ── HTTP route: sermon topic search (chapter-level) ──────────────────────────
-fastify.get('/sermon-search', async (request, reply) => {
-  const { q, limit: lim = '12' } = request.query;
-  if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; }
-  if (!db_chsummary) return { results: [], total: 0, ready: false };
-  const limit = Math.min(30, Math.max(1, parseInt(lim, 10) || 12));
-  const term = q.trim().toLowerCase();
-  try {
-    const rows = db_chsummary.prepare(`
-      SELECT cs.chapter_id, cs.book_id, cs.chapter_num, cs.summary_text, cs.top_topics_json
-      FROM chapter_summaries_fts fts
-      JOIN chapter_summaries cs ON cs.chapter_id = fts.rowid
-      WHERE chapter_summaries_fts MATCH ?
-      ORDER BY fts.rank
-      LIMIT ?
-    `).all(term, limit);
-    const stmtTitle = dba.prepare('SELECT book_title FROM scriptures WHERE book_id = ? LIMIT 1');
-    const results = rows.map(r => {
-      const meta = stmtTitle.get(r.book_id);
-      return {
-        chapter_id:   r.chapter_id,
-        book_id:      r.book_id,
-        chapter_num:  r.chapter_num,
-        book_title:   meta?.book_title || '',
-        summary_text: r.summary_text || '',
-        top_topics:   JSON.parse(r.top_topics_json || '[]').slice(0, 5),
-      };
-    });
-    return { results, total: results.length, query: q };
-  } catch (err) {
-    fastify.log.error(err);
-    return { results: [], total: 0, query: q };
-  }
-});
-
-const start = async () => {
-  try {
-    const port = process.env.PORT || 3000 // default to 3095 if PORT is not set;
-    await fastify.listen({ port, host: '0.0.0.0' })
-    fastify.log.info(`Server running on ${port}`)
-    // Warm up search caches in background — deferred so /health responds immediately.
-    // FTS search is available at once; entity/topical/semantic features enable as
-    // caches finish loading (usually within a few seconds on Electron).
-    setImmediate(() => {
-      ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed'));
-    });
-    // Initialize FTS in background so health checks can pass immediately.
-    // Skip in production/Electron — DBs are pre-built with FTS tables.
-    if (!SKIP_RECOMPUTE) {
-      setImmediate(() => {
-        try {
-          const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true';
-          const ftsOpts = { forceRebuild, log: fastify.log };
-          initializeFts(dba, 'English', ftsOpts);
-          initializeFts(dba_tagalog, 'Tagalog', ftsOpts);
-          initializeFts(dba_cebuano, 'Cebuano', ftsOpts);
-          initializeFts(dba_spanish, 'Spanish', ftsOpts);
-          initializeFts(dba_greek,   'Greek', ftsOpts);
-          initializeFts(dba_ilocano, 'Ilocano', ftsOpts);
-          if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts);
-          if (dba_ylt)      initializeFts(dba_ylt,       'YLT', ftsOpts);
-          if (dba_waray)    initializeFts(dba_waray,    'Waray', ftsOpts);
-          try {
-            dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get();
-          } catch (ftsErr) {
-            fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding');
-            dba.exec('DROP TABLE IF EXISTS scriptures_fts');
-            initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log });
-          }
-        } catch (err) {
-          fastify.log.error(err, '[FTS] initialization failed');
-        }
-      });
-    } else {
-      fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.');
-    }
-  } catch (err) {
-    fastify.log.error(err)
-    process.exit(1)
-  }
-}
-
-if (require.main !== module) {
-  setImmediate(() => {
-    ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed'));
-  });
-}
-
-
-// only start the server if the file is run directly; this makes the module importable for tests
-if (require.main === module) {
-  start();
-}
-
-// Entry point for Electron: registers socket handlers and starts the Fastify server.
-// Call this AFTER setting process.env.DB_DIR / FRONTEND_DIST_DIR if needed.
-async function startElectron() {
-  registerSocketHandlers(io, { segmentVerseText, segmentVerseTextDual, db, db_cebuano, db_tagalog, db_spanish, db_greek, db_ilocano, db_japanese, db_ylt, db_waray });
-  return start();
-}
-
-// ── Backward-compatible wrappers (bind default English DB for tests/exports) ─
 const searchScriptureDefault = (input, page, pageSize) => searchScripture(input, page, pageSize, dba, fastify.log);
 const searchScriptureInDbDefault = (input, page, pageSize, targetDb) => searchScriptureInDb(input, page, pageSize, targetDb, fastify.log);
 
-module.exports = {
-  parseScriptureReference,
-  searchScripture: searchScriptureDefault,
-  segmentVerseText,
-  segmentVerseTextDual,
-  computeAdaptiveResultCutoff,
-  computeRelevanceProbability,
-  normalizeKJVSpellings,
-  normalizeQueryTokens,
-  fastify,
-  registerSocketHandlers,
-  startElectron,
-};
+module.exports = { parseScriptureReference, searchScripture: searchScriptureDefault, segmentVerseText, segmentVerseTextDual, computeAdaptiveResultCutoff, computeRelevanceProbability, normalizeKJVSpellings, normalizeQueryTokens, fastify, registerSocketHandlers, startElectron };
