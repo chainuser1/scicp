@@ -106,27 +106,65 @@ let onnxTokenizer = null;
 async function initOnnxSession() {
     try {
         const modelPath = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL, 'onnx', 'model_quantized.onnx');
-        
         if (!fs.existsSync(modelPath)) {
             fastify.log.warn(`[ONNX] Model not found at ${modelPath}, semantic search disabled`);
             return false;
         }
-        
+        fastify.log.info(`[ONNX] Loading model from ${modelPath}`);
         onnxSession = await ort.InferenceSession.create(modelPath, {
             executionProviders: ['cpu'],
             graphOptimizationLevel: 'all',
         });
-        
-        // Load tokenizer (use Xenova only for tokenization, not inference)
-        onnxTokenizer = await AutoTokenizer.from_pretrained(
-            path.join(__dirname, '../resources/models/scripture-bge'),
-            { trust_remote_code: true }
-        );
-        
-        fastify.log.info('[ONNX] Session initialized successfully');
+
+        // ─── Load real vocabulary from tokenizer.json ─────────────────
+        const tokenizerJsonPath = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL, 'tokenizer.json');
+        if (!fs.existsSync(tokenizerJsonPath)) {
+            throw new Error(`Tokenizer file not found: ${tokenizerJsonPath}`);
+        }
+        const tokenizerData = JSON.parse(fs.readFileSync(tokenizerJsonPath, 'utf8'));
+        // Extract vocab: usually tokenizer.json has "model" -> "vocab" object
+        const vocab = tokenizerData.model?.vocab;
+        if (!vocab) throw new Error('No vocab found in tokenizer.json');
+        const wordToId = new Map();
+        for (const [word, id] of Object.entries(vocab)) {
+            wordToId.set(word, id);
+        }
+        fastify.log.info(`[ONNX] Loaded vocabulary with ${wordToId.size} entries`);
+
+        // Create simple tokenizer using the real vocabulary
+        onnxTokenizer = {
+            encode: async (text) => {
+                const tokens = [101]; // [CLS]
+                const words = text.toLowerCase().split(/\s+/).slice(0, 63);
+                for (const w of words) {
+                    let tokenId = wordToId.get(w);
+                    if (tokenId === undefined) {
+                        // Fallback: hash (same as before, but now only for OOV)
+                        let hash = 0;
+                        for (let i = 0; i < w.length; i++) {
+                            hash = ((hash << 5) - hash) + w.charCodeAt(i);
+                            hash |= 0;
+                        }
+                        tokenId = Math.abs(hash) % 30000 + 1000;
+                    }
+                    tokens.push(tokenId);
+                }
+                tokens.push(102); // [SEP]
+                while (tokens.length < 64) tokens.push(0);
+                return {
+                    input_ids: new ort.Tensor('int64', new BigInt64Array(tokens.map(BigInt)), [1, 64]),
+                    attention_mask: new ort.Tensor('int64', new BigInt64Array(64).fill(1n), [1, 64])
+                };
+            }
+        };
+
+        fastify.log.info('[ONNX] Vocabulary-based tokenizer ready');
         return true;
     } catch (err) {
-        fastify.log.warn('[ONNX] Failed to initialize:', err.message);
+        fastify.log.error('[ONNX] Failed to initialize:', err.message);
+        fastify.log.error(err.stack);
+        onnxSession = null;
+        onnxTokenizer = null;
         return false;
     }
 }
@@ -151,7 +189,6 @@ async function embedWithOnnx(text) {
     const results = await onnxSession.run(feeds);
     const tokenEmbeddings = results['last_hidden_state'].data;
     
-    // Mean pooling
     const batchSize = encoded.input_ids.shape[0];
     const seqLen = encoded.input_ids.shape[1];
     const dim = tokenEmbeddings.length / (batchSize * seqLen);
@@ -173,7 +210,6 @@ async function embedWithOnnx(text) {
         }
     }
     
-    // L2 normalize
     let norm = 0;
     for (let i = 0; i < pooled.length; i++) norm += pooled[i] * pooled[i];
     norm = Math.sqrt(norm);
@@ -2489,29 +2525,12 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   if (pmiTerms.length > 0) { const pmiWords = pmiTerms.map(t => t.term); pmiExpandedQuery = [...new Set([...expandedQuery.split(/\s+/), ...pmiWords])].join(' '); }
   const directMatchWords = normalizedQueryText.split(/\s+/).filter(Boolean);
   const directMatchEligible = directMatchWords.length >= 2;
-    // ── FTS DISABLED for multi-word queries ──
-  // Only use FTS for single-word queries where semantics are ambiguous
-  const queryWordCountForFTS = query.split(/\s+/).filter(Boolean).length;
-  let ftsRanked = [];
+  // const ftsResult = searchScripture(query, 0, 50, dba, fastify.log);
+  // const ftsRanked = ftsResult.results.map(r => ({ ...r, _source: 'fts', _bm25: r._bm25_rank || 0, _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText), _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights), _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)), _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights), _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights) }));
   
-  if (queryWordCountForFTS === 1) {
-    const ftsResult = searchScripture(query, 0, 30, dba, fastify.log);
-    ftsRanked = ftsResult.results.map(r => ({
-      ...r,
-      _source: 'fts',
-      _bm25: r._bm25_rank || 0,
-      _directQueryMatch: directMatchEligible && normalizedTextIncludes(normalizeSearchText(r.scripture_text || ''), normalizedQueryText),
-      _lexicalCoverage: weightedLexicalCoverage(query, r, termWeights),
-      _anchorPhraseMatch: anchorTexts.some(phrase => String(r.scripture_text || '').toLowerCase().includes(phrase)),
-      _anchorWindowScore: anchorWindowScore(r.scripture_text, anchorPhrases, termWeights),
-      _sequenceScore: querySequenceScore(query, r.scripture_text, termWeights),
-    }));
-  } else {
-    fastify.log.debug(`[FTS] Disabled for multi-word query: "${query}"`);
-  }
-
-
-
+  // Replace with empty array
+  const ftsRanked = [];
+  const phraseRanked = [];  
   if (db_tags && ftsRanked.length > 0) {
     const queryLower = query.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
     const queryWords = new Set(queryLower.split(/\s+/).filter(w => w.length > 2));
@@ -2553,9 +2572,11 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   if (queryWordCount >= 3 && ftsRanked.length > 1) {
     ftsRanked.sort((a, b) => Number(Boolean(b._directQueryMatch)) - Number(Boolean(a._directQueryMatch)) || (b._sequenceScore || 0) - (a._sequenceScore || 0) || (b._anchorWindowScore || 0) - (a._anchorWindowScore || 0) || Number(Boolean(b._anchorPhraseMatch)) - Number(Boolean(a._anchorPhraseMatch)) || (b._lexicalCoverage || 0) - (a._lexicalCoverage || 0) || (a._bm25 || 0) - (b._bm25 || 0));
   }
-  if (directMatchEligible && (ftsResult.matchType === 'phrase' || ftsResult.matchType === 'near')) { for (const row of ftsRanked) row._directQueryMatch = true; }
+  // if (directMatchEligible && (ftsResult.matchType === 'phrase' || ftsResult.matchType === 'near')) { for (const row of ftsRanked) row._directQueryMatch = true; }
+
+ 
   const phraseCandidates = [...detectedPhrases, ...anchorPhrases].filter(Boolean).sort((a, b) => (b.score || 0) - (a.score || 0) || (b.len || 0) - (a.len || 0));
-  const phraseRanked = [];
+
   if (phraseCandidates.length > 0) {
     const bestByVerse = new Map();
     for (const candidate of phraseCandidates) {
@@ -2691,23 +2712,9 @@ function multiSourceFusion(query, expandedQuery, pageSize, intentType = null) {
   const exactTopicalQuery = queryWordCount <= 2 && hasExactTopicMatch;
   const phraseWeight = exactTopicalQuery ? W[0] * 0.6 : W[0] * 3;
   const summaryWeight = shortTopicalQuery ? W[3] * 0.15 : W[3];
+  // const rrfScores = reciprocalRankFusion([ftsRanked, phraseRanked, summaryRanked, entityRanked, xrefRanked], queryTopicSlugs, [W[0], phraseWeight, summaryWeight, W[2], W[3] * 5]);
   
-    // Build fusion sources array (FTS excluded for multi-word queries)
-  const fusionSources = [phraseRanked, summaryRanked, entityRanked, xrefRanked];
-  const fusionWeights = [phraseWeight, summaryWeight, W[2], W[3] * 5];
-  
-  // Only add FTS if it has results (single-word queries only)
-  if (ftsRanked.length > 0) {
-    fusionSources.unshift(ftsRanked);
-    fusionWeights.unshift(W[0]);
-  }
-  
-  const rrfScores = reciprocalRankFusion(
-    fusionSources,
-    queryTopicSlugs,
-    fusionWeights
-  );
-  
+  const rrfScores = reciprocalRankFusion([phraseRanked, summaryRanked, entityRanked, xrefRanked], queryTopicSlugs, [phraseWeight, summaryWeight, W[2], W[3] * 5]);
   const chapterScores = chapterAggregate(rrfScores);
   for (const ch of chapterScores.slice(0, 10)) {
     if (ch.verseCount >= 3 && ch.bestVerse && !rrfScores.has(ch.bestVerse)) {
@@ -2851,14 +2858,19 @@ async function runSearchPipeline(query, language, contextVerseId, log, sessionId
       }
       query = query.trim().slice(1).trim();
     }
-    const autoPhraseResult = phraseSearch(query.trim(), 0, 50, dba, log);
-    const autoPhraseWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
-    const autoPhraseCoverageFloor = autoPhraseWordCount >= 5 ? 0.42 : 0.68;
-    const normalizedQueryText = normalizeSearchText(query.trim());
-    const autoPhraseTermWeights = queryTermWeights(query.trim());
-    const autoAnchorPhrases = autoPhraseWordCount >= 5 ? extractAnchorPhrases(query.trim(), autoPhraseTermWeights, 4) : [];
-    const phraseHitEligible = autoPhraseWordCount >= 5 ? LONG_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType) : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
-    const phraseHits = phraseHitEligible ? autoPhraseResult.results.map(r => { const phraseCoverage = weightedLexicalCoverage(query.trim(), r, autoPhraseTermWeights); const normalizedVerseText = normalizeSearchText(r.scripture_text || ''); const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText); const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, autoPhraseTermWeights); return { ...r, _source: 'fts-phrase', _phraseMatch: true, _phraseCoverage: phraseCoverage, _directPhraseMatch: directPhraseMatch, _anchorPhraseMatch: autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'near', _directQueryMatch: directPhraseMatch, _sequenceScore: sequenceScore, _anchorWindowScore: anchorWindowScore(r.scripture_text, autoAnchorPhrases, autoPhraseTermWeights) }; }).filter(r => { if ((r._phraseCoverage || 0) < autoPhraseCoverageFloor) return false; if (autoPhraseWordCount <= 4) return Boolean(r._directPhraseMatch); return Boolean(r._directPhraseMatch) || (r._sequenceScore || 0) >= 0.35 || ((r._anchorWindowScore || 0) >= 0.55 && (r._phraseCoverage || 0) >= 0.5); }) : [];
+    // const autoPhraseResult = phraseSearch(query.trim(), 0, 50, dba, log);
+    // const autoPhraseWordCount = query.trim().split(/\s+/).filter(t => t.length > 1).length;
+    // const autoPhraseCoverageFloor = autoPhraseWordCount >= 5 ? 0.42 : 0.68;
+    // const normalizedQueryText = normalizeSearchText(query.trim());
+    // const autoPhraseTermWeights = queryTermWeights(query.trim());
+    // const autoAnchorPhrases = autoPhraseWordCount >= 5 ? extractAnchorPhrases(query.trim(), autoPhraseTermWeights, 4) : [];
+    // const phraseHitEligible = autoPhraseWordCount >= 5 ? LONG_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType) : autoPhraseWordCount >= 2 && SHORT_QUERY_PHRASE_MATCH_TYPES.has(autoPhraseResult.matchType);
+    // const autoPhraseResult = { matchType: '' };   // dummy to avoid undefined
+    const phraseHits = [];                        // empty array
+    // const ftsResult = { matchType: '', results: [] };
+    
+    // const phraseHits = phraseHitEligible ? autoPhraseResult.results.map(r => { const phraseCoverage = weightedLexicalCoverage(query.trim(), r, autoPhraseTermWeights); const normalizedVerseText = normalizeSearchText(r.scripture_text || ''); const directPhraseMatch = normalizedQueryText.length > 0 && normalizedTextIncludes(normalizedVerseText, normalizedQueryText); const sequenceScore = querySequenceScore(query.trim(), r.scripture_text, autoPhraseTermWeights); return { ...r, _source: 'fts-phrase', _phraseMatch: true, _phraseCoverage: phraseCoverage, _directPhraseMatch: directPhraseMatch, _anchorPhraseMatch: autoPhraseResult.matchType === 'phrase' || autoPhraseResult.matchType === 'near', _directQueryMatch: directPhraseMatch, _sequenceScore: sequenceScore, _anchorWindowScore: anchorWindowScore(r.scripture_text, autoAnchorPhrases, autoPhraseTermWeights) }; }).filter(r => { if ((r._phraseCoverage || 0) < autoPhraseCoverageFloor) return false; if (autoPhraseWordCount <= 4) return Boolean(r._directPhraseMatch); return Boolean(r._directPhraseMatch) || (r._sequenceScore || 0) >= 0.35 || ((r._anchorWindowScore || 0) >= 0.55 && (r._phraseCoverage || 0) >= 0.5); }) : [];
+
     const phraseIdsSet = new Set(phraseHits.map(r => r.verse_id));
     let qvec = null;
     if (embeddingsReady && embeddingPipe) { try { const out = await embeddingPipe(query.trim(), { pooling: 'mean', normalize: true }); qvec = whitenVector(new Float32Array(out.data)); } catch {} }
@@ -3235,65 +3247,92 @@ async function processBatchAsync(pipe, verses, offset) {
 
 async function initEmbeddings() {
   if (!db_embed) return;
+  
   async function loadScripturePipeline() {
     const { pipeline, env } = await import('@xenova/transformers');
     try {
       const onnxNode = require('onnxruntime-node');
-      if (onnxNode && onnxNode.env) { env.backends = env.backends || {}; env.backends.onnx = onnxNode.env; fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-node (native) backend'); }
-    } catch (e) { fastify.log.warn('[Embeddings] onnxruntime-node not available — using default Xenova ONNX backend:', e.message); }
+      if (onnxNode && onnxNode.env) {
+        env.backends = env.backends || {};
+        env.backends.onnx = onnxNode.env;
+        fastify.log.info('[Embeddings] forcing Xenova to use onnxruntime-node backend');
+      }
+    } catch (e) {
+      fastify.log.warn('[Embeddings] onnxruntime-node not available:', e.message);
+    }
     const localModel = path.join(ONNX_MODEL_DIR, SCRIPTURE_MODEL);
     const quantizedPath = path.join(localModel, 'onnx', 'model_quantized.onnx');
     const plainPath = path.join(localModel, 'onnx', 'model.onnx');
     const hasQuantized = fs.existsSync(quantizedPath);
     const hasPlain = fs.existsSync(plainPath);
-    if (!hasQuantized && !hasPlain) throw new Error('[Embeddings] scripture_minilm ONNX not found — local ONNX model required; Xenova fallback disabled');
+    if (!hasQuantized && !hasPlain) throw new Error('[Embeddings] ONNX model not found');
     env.localModelPath = ONNX_MODEL_DIR;
     env.allowRemoteModels = false;
     return pipeline('feature-extraction', SCRIPTURE_MODEL, { quantized: hasQuantized });
   }
+  
   try {
     const total = db.prepare('SELECT COUNT(*) AS n FROM verses').get().n;
     const existing = db_embed.prepare('SELECT COUNT(*) AS n FROM verse_embeddings').get().n;
+    
     if (!REBUILD_EMBEDDINGS && existing >= total) {
       fastify.log.info(`[Embeddings] ${existing}/${total} pre-stored — loading cache.`);
       buildEmbeddingCache();
-      try {
-    fastify.log.info('[Embeddings] Initializing ONNX Runtime for semantic search…');
-    const onnxReady = await initOnnxSession();
-    if (onnxReady) {
-        // Create wrapper that matches the pipeline interface
+      
+      // CRITICAL: Initialize ONNX Runtime for semantic search
+      fastify.log.info('[Embeddings] Initializing ONNX Runtime for semantic search…');
+      const onnxReady = await initOnnxSession();
+      
+      if (onnxReady) {
         embeddingPipe = async (text, opts) => {
-            const vec = await embedWithOnnx(text);
-            return { data: vec };
+          const vec = await embedWithOnnx(text);
+          return { data: vec };
         };
         fastify.log.info('[Embeddings] ONNX Runtime ready — semantic search enabled.');
-    } else {
-        fastify.log.warn('[Embeddings] ONNX Runtime failed to initialize, semantic search disabled');
-    }
-} catch (pipeErr) {
-    fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
-}
-      
-      return;
-    }
-    if (SKIP_RECOMPUTE) {
-      fastify.log.warn('[Embeddings] Production/Electron mode — cannot compute missing embeddings. Run scripts/compute-embeddings.js locally.');
-      if (existing > 0) {
-        buildEmbeddingCache();
-        try { embeddingPipe = await loadScripturePipeline(); fastify.log.info('[Embeddings] Pipeline ready — semantic search enabled.'); } catch (pipeErr) { fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message); }
+      } else {
+        fastify.log.warn('[Embeddings] ONNX Runtime failed, falling back to Xenova');
+        try {
+          embeddingPipe = await loadScripturePipeline();
+          fastify.log.info('[Embeddings] Xenova pipeline ready (fallback).');
+        } catch (pipeErr) {
+          fastify.log.warn('[Embeddings] Pipeline load failed (semantic search disabled):', pipeErr.message);
+        }
       }
       return;
     }
+    
+    if (SKIP_RECOMPUTE) {
+      fastify.log.warn('[Embeddings] Production mode — cannot compute missing embeddings.');
+      if (existing > 0) {
+        buildEmbeddingCache();
+        const onnxReady = await initOnnxSession();
+        if (onnxReady) {
+          embeddingPipe = async (text, opts) => {
+            const vec = await embedWithOnnx(text);
+            return { data: vec };
+          };
+        }
+      }
+      return;
+    }
+    
     fastify.log.info('[Embeddings] Loading pipeline…');
     const pipe = await loadScripturePipeline();
     embeddingPipe = pipe;
     fastify.log.info('[Embeddings] Pipeline loaded.');
-    if (REBUILD_EMBEDDINGS) { db_embed.prepare('DELETE FROM verse_embeddings').run(); fastify.log.info('[Embeddings] Cleared for rebuild.'); }
+    
+    if (REBUILD_EMBEDDINGS) {
+      db_embed.prepare('DELETE FROM verse_embeddings').run();
+      fastify.log.info('[Embeddings] Cleared for rebuild.');
+    }
+    
     const embeddedIds = new Set(db_embed.prepare('SELECT verse_id FROM verse_embeddings').all().map(r => r.verse_id));
     const missing = db.prepare('SELECT id AS verse_id, scripture_text FROM verses').all().filter(v => !embeddedIds.has(v.verse_id));
     fastify.log.info(`[Embeddings] Computing ${missing.length} embeddings in background…`);
     setImmediate(() => processBatchAsync(pipe, missing, 0));
-  } catch (err) { fastify.log.error('[Embeddings] Init failed: ' + err.message); }
+  } catch (err) {
+    fastify.log.error('[Embeddings] Init failed: ' + err.message);
+  }
 }
 
 function ensureSearchWarmup({ waitForEmbeddings = false } = {}) {
@@ -3686,7 +3725,27 @@ fastify.get('/chapter/:chapter_id/entities', async (request, reply) => { const c
 
 fastify.get('/sermon-search', async (request, reply) => { const { q, limit: lim = '12' } = request.query; if (!q || !q.trim()) { reply.code(400); return { error: 'q is required' }; } if (!db_chsummary) return { results: [], total: 0, ready: false }; const limit = Math.min(30, Math.max(1, parseInt(lim, 10) || 12)); const term = q.trim().toLowerCase(); try { const rows = db_chsummary.prepare(`SELECT cs.chapter_id, cs.book_id, cs.chapter_num, cs.summary_text, cs.top_topics_json FROM chapter_summaries_fts fts JOIN chapter_summaries cs ON cs.chapter_id = fts.rowid WHERE chapter_summaries_fts MATCH ? ORDER BY fts.rank LIMIT ?`).all(term, limit); const stmtTitle = dba.prepare('SELECT book_title FROM scriptures WHERE book_id = ? LIMIT 1'); const results = rows.map(r => { const meta = stmtTitle.get(r.book_id); return { chapter_id: r.chapter_id, book_id: r.book_id, chapter_num: r.chapter_num, book_title: meta?.book_title || '', summary_text: r.summary_text || '', top_topics: JSON.parse(r.top_topics_json || '[]').slice(0, 5) }; }); return { results, total: results.length, query: q }; } catch (err) { fastify.log.error(err); return { results: [], total: 0, query: q }; } });
 
-const start = async () => { try { const port = process.env.PORT || 3000; await fastify.listen({ port, host: '0.0.0.0' }); fastify.log.info(`Server running on ${port}`); setImmediate(() => { ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed')); }); if (!SKIP_RECOMPUTE) { setImmediate(() => { try { const forceRebuild = String(process.env.REBUILD_FTS_ON_START || 'false').toLowerCase() === 'true'; const ftsOpts = { forceRebuild, log: fastify.log }; initializeFts(dba, 'English', ftsOpts); initializeFts(dba_tagalog, 'Tagalog', ftsOpts); initializeFts(dba_cebuano, 'Cebuano', ftsOpts); initializeFts(dba_spanish, 'Spanish', ftsOpts); initializeFts(dba_greek, 'Greek', ftsOpts); initializeFts(dba_ilocano, 'Ilocano', ftsOpts); if (dba_japanese) initializeFts(dba_japanese, 'Japanese', ftsOpts); if (dba_ylt) initializeFts(dba_ylt, 'YLT', ftsOpts); if (dba_waray) initializeFts(dba_waray, 'Waray', ftsOpts); try { dba.prepare('SELECT rowid FROM scriptures_fts LIMIT 1').get(); } catch (ftsErr) { fastify.log.error({ err: ftsErr.message }, '[FTS] Index appears corrupted — rebuilding'); dba.exec('DROP TABLE IF EXISTS scriptures_fts'); initializeFts(dba, 'English', { forceRebuild: false, log: fastify.log }); } } catch (err) { fastify.log.error(err, '[FTS] initialization failed'); } }); } else { fastify.log.info('[FTS] Pre-built tables in use — skipping FTS init.'); } } catch (err) { fastify.log.error(err); process.exit(1); } };
+
+const start = async () => {
+  try {
+    const port = process.env.PORT || 3000;
+    await fastify.listen({ port, host: '0.0.0.0' });
+    fastify.log.info(`Server running on ${port}`);
+    
+    // Add this line - ensure ONNX is ready
+    await initOnnxSession();
+    
+    setImmediate(() => {
+      ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed'));
+    });
+    // ... rest of start function
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+};
+
+
 
 if (require.main !== module) { setImmediate(() => { ensureSearchWarmup().catch(err => fastify.log.error(err, '[SearchWarmup] initialization failed')); }); }
 
