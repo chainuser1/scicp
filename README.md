@@ -140,7 +140,7 @@ In plain terms: the system is already strong and mathematically serious, and the
 ### Install
 
 ```bash
-git clone https://github.com/your-org/scicp.git
+git clone https://github.com/chainuser1/scicp.git
 cd scicp
 npm install
 ```
