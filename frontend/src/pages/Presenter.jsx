@@ -1044,6 +1044,7 @@ const Presenter = () => {
         await window.electronAPI.switchConnectionMode(newMode);
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
