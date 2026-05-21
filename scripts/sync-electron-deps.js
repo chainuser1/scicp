@@ -10,8 +10,8 @@
  *
  * Packages intentionally skipped (handled separately in electron-builder.yml):
  *   - better-sqlite3        → electron/node_modules (Electron ABI rebuild)
+ *   - onnxruntime-node      → electron/node_modules (Electron ABI rebuild)
  *   - @xenova/transformers  → from: "node_modules/@xenova"
- *   - onnxruntime-node      → from: "node_modules/onnxruntime-node"
  */
 
 const fs   = require('fs');
@@ -24,8 +24,8 @@ const DST       = path.join(ROOT, 'electron', 'backend-deps');
 // Packages handled separately — do not copy
 const SKIP = new Set([
   'better-sqlite3',
-  '@xenova',
   'onnxruntime-node',
+  '@xenova',
 ]);
 
 const visited = new Set();

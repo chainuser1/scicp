@@ -1,21 +1,21 @@
-// ─── Redirect require('better-sqlite3') to electron/node_modules ────────────
-// backend/index.js resolves better-sqlite3 from root/node_modules (hoisted from
+// ─── Redirect require('better-sqlite3') and 'onnxruntime-node' to electron/node_modules ────────────
+// backend/index.js resolves these from root/node_modules (hoisted from
 // the backend workspace, compiled for system Node ABI). This override ensures the
 // Electron-ABI build in electron/node_modules is used instead — in both dev mode
 // (electron/ dir) and the packaged app (app.asar root where node_modules lives).
-;(function patchBetterSqlite3() {
+;(function patchElectronNativeModules() {
   const Module = require('module');
   const path   = require('path');
   const fs     = require('fs');
   const orig   = Module._resolveFilename.bind(Module);
   Module._resolveFilename = (req, ...rest) => {
-    if (req !== 'better-sqlite3') return orig(req, ...rest);
+    if (req !== 'better-sqlite3' && req !== 'onnxruntime-node') return orig(req, ...rest);
 
     const candidates = [
-      path.join(__dirname, 'node_modules/better-sqlite3'),
-      path.join(__dirname, '../node_modules/better-sqlite3'),
-      path.join(process.resourcesPath || '', 'app.asar.unpacked/electron/node_modules/better-sqlite3'),
-      path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules/better-sqlite3'),
+      path.join(__dirname, 'node_modules', req),
+      path.join(__dirname, '../node_modules', req),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked/electron/node_modules', req),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules', req),
     ];
 
     for (const candidate of candidates) {
