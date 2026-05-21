@@ -85,7 +85,8 @@ function injectSeoMeta(html, routePath) {
 }
 
 const USER_DATA_DIR = process.env.USER_DATA_DIR || DB_DIR;
-const ONNX_MODEL_DIR = path.resolve(__dirname, '../resources/onnx');
+// In Electron packaged app, ONNX models are in app.asar.unpacked/resources/onnx
+const ONNX_MODEL_DIR = process.env.ONNX_MODEL_DIR || path.resolve(__dirname, '../resources/onnx');
 const SCRIPTURE_MODEL = 'scripture-bge';
 const IS_ELECTRON_PKG = !!process.versions?.electron;
 const DB_OPTS = { fileMustExist: true };
@@ -174,25 +175,20 @@ async function embedWithOnnx(text) {
         throw new Error('ONNX session not ready');
     }
     
-    const encoded = await onnxTokenizer(text, {
-        padding: true,
-        truncation: true,
-        max_length: 64,
-        return_tensors: 'np'
-    });
+    const encoded = await onnxTokenizer(text);
     
     const feeds = {
-        'input_ids': new ort.Tensor('int64', encoded.input_ids.reshape(-1), encoded.input_ids.shape),
-        'attention_mask': new ort.Tensor('int64', encoded.attention_mask.reshape(-1), encoded.attention_mask.shape)
+        'input_ids': encoded.input_ids,
+        'attention_mask': encoded.attention_mask
     };
     
     const results = await onnxSession.run(feeds);
     const tokenEmbeddings = results['last_hidden_state'].data;
     
-    const batchSize = encoded.input_ids.shape[0];
-    const seqLen = encoded.input_ids.shape[1];
+    const batchSize = encoded.input_ids.dims[0];
+    const seqLen = encoded.input_ids.dims[1];
     const dim = tokenEmbeddings.length / (batchSize * seqLen);
-    const mask = encoded.attention_mask.reshape(-1);
+    const mask = encoded.attention_mask.data;
     const pooled = new Float32Array(batchSize * dim);
     
     for (let i = 0; i < batchSize; i++) {

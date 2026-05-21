@@ -50,17 +50,21 @@ extraResources:
     to: "db"
     filter:
       - "**/*.db"
+  - from: "resources/onnx"
+    to: "onnx"
+    filter:
+      - "**/*"
   - from: "frontend/dist"
     to: "frontend-dist"
   - from: "frontend/public/emblem.ico"
     to: "emblem.ico"
 
 # ── Unpack native addons from ASAR ────────────────────────────────────────────
+# Use specific patterns matching the ASAR internal paths (electron/ prefix)
 asarUnpack:
-  - "**/*.node"
-  - "**/better-sqlite3/**"
-  - "**/onnxruntime-node/**"
-  - "**/better-sqlite3/**"
+  - "electron/node_modules/better-sqlite3/**"
+  - "electron/node_modules/onnxruntime-node/**"
+  - "electron/node_modules/onnxruntime-node/bin/**/*.node"
 
 # electron/node_modules/better-sqlite3 is pre-compiled for Electron ABI.
 npmRebuild: false

@@ -11,15 +11,21 @@
   Module._resolveFilename = (req, ...rest) => {
     if (req !== 'better-sqlite3' && req !== 'onnxruntime-node') return orig(req, ...rest);
 
+    // In packaged app, __dirname points inside ASAR - need to look in app.asar.unpacked
+    // The unpacked node_modules are at: resources/app.asar.unpacked/electron/node_modules/
+    const unpackedPath = process.resourcesPath
+      ? path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'node_modules', req)
+      : null;
+
     const candidates = [
       path.join(__dirname, 'node_modules', req),
       path.join(__dirname, '../node_modules', req),
-      path.join(process.resourcesPath || '', 'app.asar.unpacked/electron/node_modules', req),
-      path.join(process.resourcesPath || '', 'app.asar.unpacked/node_modules', req),
-    ];
+      unpackedPath,
+      unpackedPath ? unpackedPath.replace('electron/node_modules', 'node_modules') : null,
+    ].filter(Boolean);
 
     for (const candidate of candidates) {
-      if (candidate && fs.existsSync(candidate)) {
+      if (fs.existsSync(candidate)) {
         return orig(candidate, ...rest);
       }
     }
@@ -126,7 +132,8 @@ if (isDev) {
   process.env.DB_DIR             = destDbDir;
   process.env.FRONTEND_DIST_DIR  = path.join(process.resourcesPath, 'frontend-dist');
   process.env.USER_DATA_DIR      = app.getPath('userData');
-}
+  process.env.ONNX_MODEL_DIR     = path.join(process.resourcesPath, 'onnx');
+  }
 // Find an available port (default 3000, try up to 3010)
 function findAvailablePort(start, max) {
   const net = require('net');
