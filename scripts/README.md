@@ -13,6 +13,46 @@ npm install  # from project root
 | Script | Purpose | Input DB | Output |
 |--------|---------|----------|--------|
 | `compute-embeddings.js` | Generate baseline MiniLM-L6 verse embeddings | `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
+| `rebake-embeddings.py` | Re-encode verses using fine-tuned model | `resources/models/scripture-bge` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
+| `prebake-knn.js` | Build k-nearest-neighbor verse graph | `verse-embeddings.db` | `verse-graph.db` | ✅ Active |
+| `prebake-svd.js` | Truncated SVD for dimensionality reduction | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
+| `prebake-whitening.js` | **DEPRECATED** (ZCA whitening disabled v2.0) | — | — | ❌ Disabled |
+| `prebake-spectral.js` | Spectral graph features (Lanczos) | `verse-graph.db` | `verse-graph.db` | ✅ Active |
+| `prebake-clusters.js` | Build k-means verse clusters | `verse-embeddings.db` | `verse-graph.db` | ✅ Active |
+| `prebake-cluster-labels.js` | Generate representative labels per cluster | `verse-embeddings.db` + `verse-graph.db` | `verse-graph.db` | ✅ Active |
+| `prebake-entity-centroids.js` | Build entity centroid embeddings | `verse-embeddings.db` + `verse-tags.db` | `verse-tags.db` | ✅ Active |
+| `prebake-hnsw.js` | Build ANN index from raw embeddings (v2.0+) | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |
+| `prebake-search-graph.js` | Bundle graph/search tables for runtime | `verse-graph.db` + other DBs | `search-graph.db` | ✅ Active |
+| `export-training-pairs.js` | Export training data for fine-tuning | `verse-graph.db` + other DBs | stdout/file | ✅ Active |
+| `export-onnx.py` | Export model to ONNX for backend runtime | `resources/models/scripture-bge` | `resources/onnx/scripture-bge` | ✅ Active |
+| `mine-hard-negatives.js` | Mine hard negatives for retraining | `training-pairs.json` + `verse-graph.db` | `training-pairs-hard-neg.json` | ✅ Active |
+| `calibrate-rrf-k.js` | Calibrate RRF k parameter | training pairs | stdout | ✅ Active |
+| `post-train-rebuild.sh` | One-command post-training rebuild | model zip + project DBs | refreshed semantic artifacts | ✅ Active |
+
+Total: 18 active scripts, 1 deprecated, 42 empty placeholders for future work.
+
+## Execution Order
+
+For a fresh baseline setup, run in this order (note: whitening disabled v2.0):
+
+```bash
+node scripts/compute-embeddings.js     # ~15 min (downloads model on first run)
+node scripts/prebake-knn.js            # ~5 min
+node scripts/prebake-svd.js            # ~2 min
+# prebake-whitening.js is DISABLED — ZCA whitening was inverting similarity rankings
+node scripts/prebake-spectral.js       # ~3 min
+node scripts/prebake-clusters.js       # ~3 min
+node scripts/prebake-cluster-labels.js   # ~2 min
+node scripts/prebake-entity-centroids.js # ~2 min
+node scripts/prebake-hnsw.js           # ~2 min
+node scripts/prebake-search-graph.js     # ~1 min
+```
+
+## Scripts
+
+| Script | Purpose | Input DB | Output |
+|--------|---------|----------|--------|
+| `compute-embeddings.js` | Generate baseline MiniLM-L6 verse embeddings | `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
 | `rebake-embeddings.py` | Re-encode verses using fine-tuned model (default path or custom `--model-dir`) | `resources/models/scripture-bge` + `lds-scriptures-sqlite.db` | `verse-embeddings.db` | ✅ Active |
 | `prebake-knn.js` | Build k-nearest-neighbor verse graph | `verse-embeddings.db` | `verse-graph.db` | ✅ Active |
 | `prebake-svd.js` | Truncated SVD for dimensionality reduction | `verse-embeddings.db` | `verse-embeddings.db` | ✅ Active |

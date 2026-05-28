@@ -40,11 +40,11 @@ electron/
 
 **Startup sequence:**
 1. `createSplashWindow()` — splash shown immediately
-2. `setSplashStatus(‘Opening databases…’)` → `require(‘../backend/index.js’)` (synchronous DB open)
-3. `setSplashStatus(‘Starting local server…’)` → `startElectron()` (Fastify listen)
-4. `setSplashStatus(‘Loading search index…’)` → `waitForServer()`
-5. `setSplashStatus(‘Ready!’)` → 400 ms pause → `selectConnectionMode()` dialog
-6. `createWindows(mode)` + `setupTray()` + `setupAutoUpdater()`
+2. `setSplashStatus('Opening databases…')` → `require('../backend/index.js')` (synchronous DB open)
+3. `setSplashStatus('Starting local server…')` → `startElectron()` (Fastify listen)
+4. `setSplashStatus('Loading search index…')` → `waitForServer()`
+5. `setSplashStatus('Ready!')` → 400 ms pause → defaults to offline mode
+6. `createWindows(selectedMode)` + `setupTray()` + `setupAutoUpdater()`
 
 **Mode system:**
 - `selectConnectionMode()` — offline/online dialog at startup
@@ -101,7 +101,7 @@ Passive display that receives verses from the Presenter. Auto-formats text, supp
 
 ## Search Pipeline (v2.0 – Apr 2026)
 
-The backend implements a 41-component mathematical search pipeline in `backend/index.js` (~2500 lines). Focus on correct mathematical semantics without empirical hacks.
+The backend implements a 41-component mathematical search pipeline in `backend/index.js` (~3775 lines).
 
 ### Query Flow: 8 Sequential Steps
 
@@ -137,43 +137,34 @@ The current search stack avoids handwritten topical steering inside retrieval an
 **Step 3: Unified Pipeline (Auto-Detect)**
 If no early return, automatically run phrase + semantic + keyword in parallel:
 
-- **FTS5 (Full-Text Search)**
-  - BM25 ranking on pre-indexed `scriptures_fts` (FTS5 virtual table, porter ascii tokenizer)
-  - Phrase detection: multi-word queries checked against verse word sequences
-  - Fallback OR query if AND finds no results
-  - Assigns Tier 2 (phrase match) or Tier 3 (keyword match)
-
+- **Phrase Search** - Multi-word query phrase detection via FTS5, coverage scoring, anchor window analysis, sequence matching
 - **Semantic Retrieval**
-  - Query embedded via the active fine-tuned sentence encoder (dimension depends on the current model, e.g. 768D for BGE-base)
+  - Query embedded via the active fine-tuned sentence encoder (dimension depends on the current model, e.g. 768D for BGE-base or nomic-768D )
   - HNSW approximate nearest neighbors (200 candidates, ef=150)
   - Filters score ≤ 0 (anti-correlated / irrelevant)
-  - Assigns Tier 3–4 based on cosine similarity thresholds
-
+  - Assigns Tier 3–4 based on cosine similarity thresholds with sigmoid gating
 - **Entity Resolution**
-  - Named entity recognition (people: apostles, prophets, etc.; places: Jerusalem, Egypt, etc.)
-  - Cross-matches verses mentioning queried entities
-  - Polynomial feature scoring: entity frequency, proximity boost, topical clustering
-
+  - Named entity recognition via pre-baked entity indices (people, places)
+  - Entity centroid embedding similarity
+  - Speaker detection from verse_doctrine_tags
 - **Graph Propagation**
-  - kNN verse similarity graph: finds semantically similar verses to top FTS/semantic results
-  - Spectral embeddings (50D) for topic clustering and diversity re-ranking
-  - Cross-reference graph: LDS cross-ref relationships ("See also...") for related verses
-  - Topical guide integration (3512 topics, 21,991 linked verses)
-  - Query-personalized propagation with intent-aware depth and capped influence
-  - Weak structure prior for broad conceptual/situational reranking only
+  - Query-personalized PageRank (PPR) with intent-aware depth and capped influence
+  - kNN verse similarity graph for semantic neighbors
+  - Spectral embeddings (50D) for topic-based diversity reranking
+  - Cross-reference graph: LDS cross-ref relationships ("See also...")
+  - Topical guide integration (3,512 topics, 21,991 linked verses)
+  - Random Walk with Restart (RWR) for graph-based expansion
+  - Weak structure prior for broad conceptual/situational reranking only (max 0.07)
 
-**Step 4: Proactive Semantic Injection**
-- For multi-word queries (N ≥ 2), inject high-similarity non-keyword-matching verses
-- Weight increases with query length: N=2→0.48, N=5→0.72, N=8→0.95
-- Prevents keyword-only results (e.g., "anger management" finds semantic anger/wrath matches even without word overlap)
-- Threshold: SEM_THRESHOLD_BASE=0.28 (raw cosine), SIM_FLOOR=0.15
+**Step 4: Semantic Expansion & Injection**
+- For low-confidence or short queries, inject semantic neighbors via PMI/concept expansion
+- Co-occurrence penalty: verses missing queried term pairs receive score reduction
+- Embedding phrase matching via Chamfer/Sinkhorn WMD distance for multi-word alignment
 
-**Step 5: Reciprocal Rank Fusion (RRF)**
-Combine FTS + semantic + graph scores via weighted RRF and late reranking:
-- Global weights (optimized via Adam): ~[3.0, 1.15, 0.05, 1.1, 0.3, 0.15]
-- Per-intent weights: entity, keyword, reference, phrase
-- Global PageRank is no longer used as a dominant early-fusion bonus
-- Produces unified ranking and combined score
+**Step 5: RRF Fusion & Propagation**
+- Weighted Reciprocal Rank Fusion combining phrase, summary, entity, cross-ref, RWR sources
+- Query-personalized PageRank (PPR) with intent-specific alpha (0.72-0.84), hops (1-2), and seed limits
+- Random Walk with Restart (RWR) for graph-based neighbor scoring
 
 **Step 6: Session Context & Diversity**
 - Session filtering (exclude just-shown verses in live mode)
@@ -195,30 +186,34 @@ Combine FTS + semantic + graph scores via weighted RRF and late reranking:
 ### Multi-Language Support
 
 All search conducted in English first (fastest, most accurate). After retrieving verse IDs:
-- Fetch translations by `verse_id` from language-specific DBs (Tagalog, Cebuano, YLT)
+- Fetch translations by `verse_id` from language-specific DBs (Tagalog, Cebuano, YLT, Rotherham, Spanish, Greek, Ilocano, Japanese, NRSVUE, Waray)
 - Display both English + selected translation side-by-side
 
 ### Embedding Model
 
-- **Base**: Configurable sentence encoder; current rebuilds may use models such as BGE-base-en-v1.5 (768D)
-- **Fine-tuning**: retrieval-pair fine-tuning for scripture semantic search
-- **Storage**: Raw embeddings (L2-normalized, NO ZCA whitening; dimensionality depends on the active model)
-- **Index**: HNSW (hierarchical navigable small world, M=16, ef=200; ~600K edges, built from raw)
+- **Base**: Nomic-BERT (768D embedding dimension) - directory named `scripture-bge` but uses Nomic-BERT architecture
+- **Fine-tuning**: Retrieval-pair fine-tuning for scripture semantic search
+- **Storage**: Raw embeddings (L2-normalized, NO ZCA whitening)
+- **Index**: HNSW (hierarchical navigable small world, M=16, ef=200; ~64K nodes, built from raw vectors)
 
 ## Database Schema
 
 | Database | Purpose |
 |----------|---------|
 | `lds-scriptures-sqlite.db` | Primary: 41,995 English verses, themes, FTS5 index |
-| `ylt-scriptures-sqlite.db` | Young's Literal Translation (alignment pairs) |
-| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible (alignment pairs) |
+| `ylt-scriptures-sqlite.db` | Young's Literal Translation |
+| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible |
 | `tagalog-scriptures-sqlite.db` | Tagalog translations |
 | `cebuano-scriptures-sqlite.db` | Cebuano translations |
 | `spanish-scriptures-sqlite.db` | Spanish translations |
 | `greek-scriptures-sqlite.db` | Greek translations |
 | `ilocano-scriptures-sqlite.db` | Ilocano translations |
+| `japanese-scriptures-sqlite.db` | Japanese translations |
+| `nrsvue-scriptures-sqlite.db` | NRSVUE translations |
+| `waray-scriptures-sqlite.db` | Waray translations |
 | `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA whitening), plus HNSW index |
 | `verse-graph.db` | kNN similarity graph, spectral embeddings (50D), cluster labels, cross-ref edges |
+| `user-data.db` | Runtime user data (bookmarks, highlights, reading analytics) |
 | `search-graph.db` | Lightweight runtime copy for packaged/runtime support |
 | `verse-tags.db` | Entity tags and topic annotations |
 | `verse-summaries.db` | AI-generated verse summaries |
@@ -227,6 +222,7 @@ All search conducted in English first (fastest, most accurate). After retrieving
 | `chapter-summaries-fts.db` | FTS5 index over chapter summaries |
 | `concept-embeddings.db` | Concept-level embeddings for PMI/co-occurrence index |
 | `triple-index.db` | Prebake intermediate (not opened at runtime) |
+| `footnotes-lds-summaries.db` | LDS footnote summaries |
 
 Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_knn`, `verse_spectral`
 
@@ -253,7 +249,9 @@ This is the preferred pre-promotion workflow for evaluating a newly trained mode
 
 ## Current Audit State (Apr 2026)
 
-- backend tests: 159 / 159 passing
+- backend tests: 157 / 157 passing
+- shared tests: 23 / 23 passing
+- frontend tests: 37 / 37 passing
 - judged benchmark top1 accuracy: 100.0%
 - exact-reference top1: 100.0%
 - phrase-fragment top3: 100.0%
@@ -288,9 +286,9 @@ Interpretation:
 
 | Suite | Framework | Tests | Location |
 |-------|-----------|-------|----------|
-| Backend | Jest 29 | 159 | `backend/__tests__/index.test.js` |
-| Shared | Jest 29 | — | `shared/__tests__/` |
-| Frontend | Vitest + ESLint | UI tests + lint | `frontend/src/__tests__/`, `frontend/eslint.config.js` |
+| Backend | Jest 29 | 157 | `backend/__tests__/index.test.js` |
+| Shared | Jest 29 | 23 | `shared/__tests__/` |
+| Frontend | Vitest + ESLint | 37 | `frontend/src/__tests__/`, `frontend/eslint.config.js` |
 
 ## Deployment
 
