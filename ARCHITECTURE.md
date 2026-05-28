@@ -108,20 +108,10 @@ The backend implements a 41-component mathematical search pipeline in `backend/i
 Current ranking priority is specificity-first rather than topic-first:
 
 1. direct reference
-2. structured multi-word phrase or totality match
-3. cluster or semantic neighborhood match
-4. topical relation
-5. plain keyword fallback
-
-### Bias-Free Retrieval Rules
-
-The current search stack avoids handwritten topical steering inside retrieval and ranking.
-
-- No manual theological synonym injection in the live search pipeline. Query expansion is limited to corpus-derived statistics such as PMI and embedding-space concept neighbors.
-- Long-query fallback no longer depends on a static low-information word list. Distinctive terms are selected from corpus frequency and learned term-weight tables.
-- Long-query recovery uses mathematical structure signals instead of keyword vocabularies: weighted lexical coverage, salient anchor windows, and ordered sequence compactness.
-- Phrase promotion for long queries is restricted to rows that preserve statistically salient anchor structure. Generic scriptural scaffolding should not outrank denser lexical evidence.
-- Normalization-only resources are still allowed where they preserve user intent rather than steer retrieval, such as scripture reference abbreviations and KJV spelling normalization.
+2. structured multi-word phrase (fts-phrase) or totality match
+3. cluster or semantic neighborhood match (HNSW retrieval)
+4. topical relation (topical-guide, cross-ref)
+5. plain keyword fallback (FTS5 AND/OR)
 
 **Step 1: Input Normalization**
 - KJV spelling variants (neighbor↔neighbour, savior↔saviour, honor↔honour, etc.) — 18 regex rules applied at query parse
@@ -135,36 +125,33 @@ The current search stack avoids handwritten topical steering inside retrieval an
 - Explicit semantic mode (~query) → Tier 1–2, intent=`semantic-explicit` (embedding-only search)
 
 **Step 3: Unified Pipeline (Auto-Detect)**
-If no early return, automatically run phrase + semantic + keyword in parallel:
-
+Phased execution:
 - **Phrase Search** - Multi-word query phrase detection via FTS5, coverage scoring, anchor window analysis, sequence matching
 - **Semantic Retrieval**
-  - Query embedded via the active fine-tuned sentence encoder (dimension depends on the current model, e.g. 768D for BGE-base or nomic-768D )
+  - Query embedded via ONNX Runtime (768D)
   - HNSW approximate nearest neighbors (200 candidates, ef=150)
   - Filters score ≤ 0 (anti-correlated / irrelevant)
-  - Assigns Tier 3–4 based on cosine similarity thresholds with sigmoid gating
+  - Assigns Tier 3–4 based on cosine similarity thresholds
 - **Entity Resolution**
-  - Named entity recognition via pre-baked entity indices (people, places)
-  - Entity centroid embedding similarity
-  - Speaker detection from verse_doctrine_tags
+  - Named entity recognition via pre-baked entity indices (people, places) in `verse-entity-cache`
+  - Speaker detection from `verse_doctrine_tags`
 - **Graph Propagation**
-  - Query-personalized PageRank (PPR) with intent-aware depth and capped influence
-  - kNN verse similarity graph for semantic neighbors
-  - Spectral embeddings (50D) for topic-based diversity reranking
-  - Cross-reference graph: LDS cross-ref relationships ("See also...")
-  - Topical guide integration (3,512 topics, 21,991 linked verses)
-  - Random Walk with Restart (RWR) for graph-based expansion
-  - Weak structure prior for broad conceptual/situational reranking only (max 0.07)
+  - Query-personalized PageRank (PPR) via `queryPPR()` function
+  - kNN verse similarity graph for semantic neighbors via `verse_knn` table
+  - Spectral embeddings (50D) for topic-based diversity reranking via `verse_spectral`
+  - Cross-reference graph via `verse_cross_references`
+  - Topical guide integration (3,512 topics, 21,991 linked verses) via `topical_guide` table
+  - Random Walk with Restart (RWR) via `verse_rwr` table
+  - **Weak structure prior** for broad conceptual/situational reranking only (max 0.07)
 
 **Step 4: Semantic Expansion & Injection**
-- For low-confidence or short queries, inject semantic neighbors via PMI/concept expansion
-- Co-occurrence penalty: verses missing queried term pairs receive score reduction
-- Embedding phrase matching via Chamfer/Sinkhorn WMD distance for multi-word alignment
+- For low-confidence or short queries: injection via PMI/concept expansion
+- Co-occurrence penalty: verses missing queried term pairs receive score reduction (lines 1605-1630, 2553-2566, 2606-2614)
+- Embedding phrase matching via Chamfer/Sinkhorn WMD distance for multi-word alignment (lines 1340-1390, 2933-2947)
 
 **Step 5: RRF Fusion & Propagation**
 - Weighted Reciprocal Rank Fusion combining phrase, summary, entity, cross-ref, RWR sources
-- Query-personalized PageRank (PPR) with intent-specific alpha (0.72-0.84), hops (1-2), and seed limits
-- Random Walk with Restart (RWR) for graph-based neighbor scoring
+- Query-personalized PPR (intent-specific alpha 0.72-0.84, hops 1-2, seed limits)
 
 **Step 6: Session Context & Diversity**
 - Session filtering (exclude just-shown verses in live mode)
@@ -174,8 +161,8 @@ If no early return, automatically run phrase + semantic + keyword in parallel:
 **Step 7: Specificity Scoring**
 - Assign each result to exactly one Tier (1–5) based on match type
 - Compute specificity score (Tier base + bonuses for phrase, FTS rank, entity confidence)
-- T1 (reference): ~6.0, T2 (phrase): ~4.8, T3 (keyword): ~3.8, T4 (semantic): ~2.0, T5 (graph): ~0.5
-- Apply isotonic regression deadzone gates to prevent score collapse
+- T1 (reference): ~4.0, T2 (phrase): ~3.5, T3 (keyword): ~2.8, T4 (semantic): ~2.4, T5 (graph): ~1.1
+- Apply calibration curves via PAV (Pool-Adjacent-Violators) algorithm
 
 **Step 8: Final Ranking & Limits**
 - Sort by specificity score (descending) + RRF score (tiebreaker)
@@ -198,33 +185,22 @@ All search conducted in English first (fastest, most accurate). After retrieving
 
 ## Database Schema
 
-| Database | Purpose |
-|----------|---------|
-| `lds-scriptures-sqlite.db` | Primary: 41,995 English verses, themes, FTS5 index |
-| `ylt-scriptures-sqlite.db` | Young's Literal Translation |
-| `rotherham-scriptures-sqlite.db` | Rotherham's Emphasized Bible |
-| `tagalog-scriptures-sqlite.db` | Tagalog translations |
-| `cebuano-scriptures-sqlite.db` | Cebuano translations |
-| `spanish-scriptures-sqlite.db` | Spanish translations |
-| `greek-scriptures-sqlite.db` | Greek translations |
-| `ilocano-scriptures-sqlite.db` | Ilocano translations |
-| `japanese-scriptures-sqlite.db` | Japanese translations |
-| `nrsvue-scriptures-sqlite.db` | NRSVUE translations |
-| `waray-scriptures-sqlite.db` | Waray translations |
-| `verse-embeddings.db` | Raw sentence embeddings (L2-normalized, no ZCA whitening), plus HNSW index |
-| `verse-graph.db` | kNN similarity graph, spectral embeddings (50D), cluster labels, cross-ref edges |
-| `user-data.db` | Runtime user data (bookmarks, highlights, reading analytics) |
-| `search-graph.db` | Lightweight runtime copy for packaged/runtime support |
-| `verse-tags.db` | Entity tags and topic annotations |
-| `verse-summaries.db` | AI-generated verse summaries |
-| `topical-guide.db` | LDS topical guide (3,512 topics, 21,991 verse links) |
-| `verse-cross-refs.db` | Cross-reference pairs |
-| `chapter-summaries-fts.db` | FTS5 index over chapter summaries |
-| `concept-embeddings.db` | Concept-level embeddings for PMI/co-occurrence index |
-| `triple-index.db` | Prebake intermediate (not opened at runtime) |
-| `footnotes-lds-summaries.db` | LDS footnote summaries |
+| Database | Purpose | Key Tables/Indices |
+|----------|---------|-----------------|
+| `lds-scriptures-sqlite.db` | Primary: 41,995 English verses | `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `scriptures_fts_vocab` |
+| `verse-embeddings.db` | Raw sentence embeddings (768D L2-normalized) + HNSW index | `verse_embeddings`, `hnsw_index` (serialized) |
+| `verse-graph.db` | kNN graph, spectral embeddings (50D), clusters, cross-refs | `verse_knn`, `verse_spectral`, `verse_clusters`, `cluster_labels`, `verse_cross_references`, `verse_rwr`, `verse_pagerank` |
+| `verse-tags.db` | Entity tags, topic annotations, doctrine tags | `verse_doctrine_tags`, `entity_person_index`, `entity_place_index`, `ai_entity_centroids`, `verse_entity_cache` |
+| `topical-guide.db` | LDS topical guide (3,512 topics, 21,991 verse links) | `topics`, `topical_guide`, `verse_topics`, `topic_verse_index`, `topic_ppr` (query-personalized) |
+| `chapter-summaries-fts.db` | FTS5 index over chapter summaries | `chapter_summaries`, `chapter_summaries_fts`, `chapter_footnotes` |
+| `verse-summaries.db` | AI-generated verse summaries + cross-refs | `verse_summaries`, `verse_cross_references` |
+| `concept-embeddings.db` | Concept-level embeddings for PMI/co-occurrence | `concepts` (phrase, vec) |
+| `user-data.db` | Runtime user data | `search_feedback`, `learned_weights`, `intent_weights`, `spaced_reviews`, `reading_events` |
+| Translation DBs | Multi-language scriptures | `tagalog-scriptures-sqlite.db`, `cebuano-scriptures-sqlite.db`, `spanish-scriptures-sqlite.db`, `greek-scriptures-sqlite.db`, `ilocano-scriptures-sqlite.db`, `japanese-scriptures-sqlite.db`, `ylt-scriptures-sqlite.db`, `rotherham-scriptures-sqlite.db`, `nrsvue-scriptures-sqlite.db`, `waray-scriptures-sqlite.db` |
 
-Key tables: `verses`, `chapters`, `books`, `scriptures` (view), `scriptures_fts` (FTS5), `themes`, `verse_knn`, `verse_spectral`
+**Pre-baked statistical tables:**
+- `term_idf` / `term_llr` - corpus statistics in lds-scriptures-sqlite.db
+- `topic_ppr` - query-personalized PageRank scores in topical-guide.db
 
 ## Post-Training Operations
 
@@ -276,11 +252,11 @@ Interpretation:
 
 ## Socket.IO Events
 
-**Presenter → Server:** `create-session`, `join-session`, `leave-session`, `search`, `update-verse`, `update-theme`, `highlight-text`, `clear-screen`, `update-language`, `go-live`
+**Presenter → Server:** `create-session`, `join-session`, `leave-session`, `search`, `update-verse`, `update-theme`, `highlight-text`, `clear-screen`, `update-language`, `go-live`, `go-custom`, `preload-background`, `now-reading`, `set-session-pin`, `clear-session-pin`
 
 **Client → Server:** `create-client-session`, `join-session`, `leave-session`
 
-**Server → Room:** `update-verse`, `update-theme`, `highlight-text`, `clear-screen`, `viewer-count`, `presenter-joined`, `presenter-takeover-attempt`, `session-joined`, `session-left`, `session-created`, `client-session-created`, `session-error`, `search-results`
+**Server → Room:** `update-verse`, `update-theme`, `highlight-text`, `clear-screen`, `viewer-count`, `presenter-joined`, `presenter-takeover-attempt`, `session-joined`, `session-left`, `session-created`, `client-session-created`, `session-error`, `search-results`, `presenter-left`, `custom-text`, `preload-background`
 
 ## Test Coverage
 

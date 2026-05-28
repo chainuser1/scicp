@@ -1,6 +1,6 @@
 # Future Search Enhancement Roadmap
 
-This document outlines planned improvements to the Scriptures in View search pipeline, ranked by effort and expected impact.
+This document outlines planned improvements to the Scriptures in View search pipeline. Items marked (✅ Implemented) already exist in the codebase.
 
 ## Current Status (v2.1-audit)
 
@@ -11,50 +11,92 @@ This document outlines planned improvements to the Scriptures in View search pip
 
 ---
 
-## Tier 1: Immediate Implementation (Days)
+## Implemented Features (Confirmed in `backend/index.js`)
 
-### 1. Presenter Selection as LTR Signal
+### ✅ Presenter Selection Ready for LTR Signal
 
-**Change:** Use presenter verse selections as explicit relevance judgments instead of dwell time regression.
+The `/search-feedback` endpoint exists and collects:
+- `query`, `verse_id`, `rank_shown`, `source`, `intent` (lines 558-580)
+- Adam optimizer updates `learnedWeights` and `intentWeights` (lines 1028-1034)
+- **Missing**: `source='presenter'` marker for explicit relevance judgments
 
-**Implementation:**
-- Add `source: 'presenter'` to search_feedback when presenter selects a verse
-- Convert to pairwise preference training: (selected > alternatives shown)
-- Keep existing Adam infrastructure - no architectural changes needed
+### ✅ Co-occurrence Penalty
 
-**Expected gain:** Measurable improvement on ambiguous/situational queries. Zero regression on exact-reference/phrase queries.
+Implemented in `getCooccurrenceWeight()` (lines 1605-1630):
+- Pure statistical signal: observed term co-occurrence / total combinations
+- Applied to `ftsRanked` (lines 2553-2566) and `phraseRanked` (lines 2603-2614)
+- No assumptions about theological meaning
+
+### ✅ Chamfer Distance / Sinkhorn WMD
+
+Token-level phrase matching in `backend/index.js` (lines 1340-1390) and `backend/phrase-matcher.js`:
+- Chamfer distance for set similarity without order
+- Ordered Earth Mover's Distance for order-preserving alignment
+- Called inside `runSearchPipeline` for embedding-based phrase matches (lines 2933-2947)
+
+### ✅ Query-Personalized PPR
+
+`queryPPR()` function (lines 2187-2279):
+- Intent-specific alpha (0.72-0.84), hops (1-2), seed limits
+- PPR table available via `pprStmt` (lines 1498-1518)
+- Uses `topic_ppr` table for query-topic semantic expansion
+
+### ✅ Weak Structure Prior
+
+`computeWeakStructurePrior()` (lines 2058-2069):
+- Max 0.07 for conceptual queries, 0.05 for situational
+- Blends PageRank (0.45), graph consensus (0.2), topical (0.15), PPR (0.12), spectral (0.08)
+- Activated only when `shouldUseWeakStructurePrior()` returns true (lines 2052-2056)
+
+### ✅ MMR Diversity Reranking
+
+`mmrRerank()` function (lines 2110-2164):
+- Lambda derived from entropy of similarity scores
+- Balances relevance vs. redundancy
+
+### ✅ Specificity Scoring
+
+Tier assignment (lines 3135-3156):
+- T1 (reference): early return, no tier computed
+- T2 (phrase: 4.0 max), T3 (keyword: 3.0 max), T4 (semantic: 2.0 max), T5 (graph: 1.0 max)
+- Calibration via PAV curves (`calibrateScore()`, lines 1065-1079)
 
 ---
 
-## Tier 2: Significant Upgrades (Weeks each)
+## Needed Improvements
+
+### 1. Presenter Selection as Explicit LTR Signal
+
+**Change:** Add `source: 'presenter'` to search_feedback when presenter selects a verse via socket.
+
+**Location:** `socket.on('update-verse')` (line 3715) should emit feedback with source='presenter'.
 
 ### 2. Cross-Encoder Reranking
 
-**Current limitation:** Bi-encoder scores query and verse independently via cosine similarity. Misses subtle interactions.
+**Current limitation:** Bi-encoder scores query and verse independently via cosine similarity.
 
 **Solution:** Retrieval-then-rerank pattern
 - HNSW retrieves top-50 candidates (fast, ~10ms)
 - Cross-encoder rescoring (50 pairs, ~50ms additional)
 - Return top-10 reranked results
 
-**Implementation location:** `backend/index.js` after MMR reranking (~line 3043)
+**Implementation location:** After MMR reranking (~line 3043)
 
 ```javascript
-// Pseudo-code for integration point
+// Integration point after MMR
 if (crossEncoderSession && results.length >= 10) {
   const topCandidates = results.slice(0, 50);
   const ceWeight = confidence < 0.7 ? 0.4 : 0.25;
-  // Score each pair jointly, blend with specificity score
-  results = results.map(r => blendScores(r, ceScore, ceWeight))
-    .sort((a, b) => (b._specificity_score || 0) - (a._specificity_score || 0));
+  results = results.map(r => ({
+    ...r,
+    _specificity_score: blendScores(r._specificity_score, ceScore(r), ceWeight)
+  })).sort((a, b) => b._specificity_score - a._specificity_score);
 }
 ```
 
-**Model requirements:** BGE-M3 cross-encoder variant or dedicated cross-encoder ONNX model
-
 ### 3. HyDE (Hypothetical Document Embeddings)
 
-**Use case:** Short, ambiguous queries ("faith", "hope", "comfort") lack semantic anchor in embedding space.
+**Use case:** Short, ambiguous queries ("faith", "hope") lack semantic anchor.
 
 **Solution:** Generate synthetic "ideal verse" then embed.
 
@@ -63,12 +105,7 @@ if (crossEncoderSession && results.length >= 10) {
 - Query length ≤ 3 tokens
 - HNSW top-1 confidence < SEM_THRESHOLD_BASE (0.28)
 
-**Implementation:**
-- Leverage existing Claude API access via NexaraOS infrastructure
-- Constrained prompt: "A verse about {query} with theological depth"
-- Embed generated text → HNSW search
-
-**Latency management:** Only run on low-confidence queries
+**Implementation:** Add HyDE branch before phrase search expansion.
 
 ### 4. BGE-M3 Multi-Vector Activation
 
@@ -81,64 +118,44 @@ if (crossEncoderSession && results.length >= 10) {
 
 **Work required:**
 - Prebake: generate token vectors for all 41,995 verses
-- Storage: Extend verse-embeddings.db schema for token vectors
-- Index: ColBERT MaxSim index (or PLAID approximation)
+- Storage: Extend `verse-embeddings.db` schema
+- Index: ColBERT MaxSim or PLAID approximation
 - Activate: A/B test against current Nomic-BERT 768D model
 
 ---
 
-## Tier 3: Advanced Features (Months)
+## Advanced Features (Months Out)
 
 ### 5. Sinkhorn → Full Optimal Transport Reranking
 
-**Extension:** Current Sinkhorn WMD for phrase alignment → full Earth Mover's Distance.
+Current Sinkhorn WMD (lines 1340-1390) → full Earth Mover's Distance.
 
-**Benefits:** Beyond commercial search engines - fine-grained token distribution matching.
+Benefits: Beyond commercial search - fine-grained token distribution matching.
 
-**Dependency:** BGE-M3 activation (Tier 4)
+### 6. Dynamic Concept Graph
 
-### 6. Emergent Theological Concept Graph
+Current: Static curated topical guide (3,512 topics) in `topical_guide` table.
 
-**Current:** Curated topical guide (3,512 topics)
-
-**Next-level:** Dynamic concept graph from co-occurrence + embedding geometry.
-
-**Implementation:**
-- Cluster verses by learned similarity landscape
-- Update cluster memberships as Adam weights shift
-- Independent of curated theological assumptions
+Next-level: Update cluster memberships as Adam weights shift.
 
 ---
 
 ## Bias-Controlled LTR Design (Setup B)
 
-### Features (pipeline-intrinsic only):
+### Features (pipeline-intrinsic):
 - Tier confidence score
-- RRF fusion score  
+- RRF fusion score
 - Phrase coverage ratio
 - HNSW cosine similarity
 - Specificity score
 - Semantic gap distance
 
 ### Labels:
-- **Primary:** Presenter selections → pairwise preferences (A > shown but not selected)
+- **Primary:** Presenter selections → pairwise preferences (selected > shown but not selected)
 - **Secondary:** Z-score normalized dwell time (minimum 5 observations per query)
 
 ### Debiasing:
-- **Inverse propensity scoring** for popularity:
-  `weight(verse) = 1 / P(verse selected | position, popularity)`
-- Preserve signal from popular verses while correcting for exposure bias
+- **Inverse propensity scoring** for popularity via `search_feedback` frequency data
 
 ### Model choice:
-- LambdaMART (50-100 trees) for small data volumes
-- Neural ranker only after collecting 10K+ judgment pairs
-
----
-
-## Decision Points
-
-1. **Cross-encoder scope:** All queries vs. confidence-threshold triggered?
-2. **Model architecture:** Use BGE-M3 cross-encoder mode or dedicated cross-encoder?
-3. **Vector strategy:** Replace Nomic-BERT or run both in parallel (ensemble)?
-
-Priority recommendation: Tier 1 (presenter signal) → Tier 2 #2 (cross-encoder) for maximum immediate quality impact.
+- LambdaMART or neural ranker after collecting 10K+ judgment pairs
